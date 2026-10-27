@@ -23,6 +23,10 @@ services:
       # Set to true (or toggle "Clear watch folder after process" in the Web UI)
       # to delete source clips from /watch/in once compression succeeds:
       - WATCH_CLEAR=false
+      # Checks GitHub for a new version at start and every 12 hours (an anonymous request,
+      # nothing else is sent) and shows a banner in the Web UI. The container never updates
+      # itself. Set to false to turn the check off:
+      - UPDATE_CHECK=true
     volumes:
       # Replace the left side of each mapping with existing folders on your NAS or host
       # (for example /volume1/video:/media on Synology). Create the host folders first,

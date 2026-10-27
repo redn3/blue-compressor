@@ -45,6 +45,27 @@ thumbnails sideways so the image shows in its intended shape. It is display only
 data and the compressed clips are never changed. The choice is remembered with the other
 settings.
 
+### Updates
+
+The desktop app checks for a new version a few seconds after it starts and once a day while
+it is open. When there is one it asks **Blue Compressor 0.1.8 is available. Update now?**
+with a few lines on what is new: **Update** downloads it, checks its signature, installs it
+and reopens the app; **Later** asks again next time; **Skip this version** waits for the
+one after. It never updates in the middle of a batch: while the queue is compressing it
+offers to update when the queue has finished. Turn **Check for updates** off in the
+sidebar to stop the daily check, or use **Check Now** at any time. The Linux `.deb` and
+`.rpm` packages cannot replace themselves, so there (and if an install fails) the prompt
+opens the release page instead. Versions before 0.1.8 have no updater: install 0.1.8 once
+by hand and later versions can update themselves.
+
+The Docker image and the Web UI never replace themselves. The server checks GitHub every 12
+hours and the Web UI shows a banner with the steps to update the container (see
+[Docker and Synology NAS](#updating-the-container)).
+
+**Privacy:** the only request is an anonymous read of the newest release from GitHub
+(`github.com/redn3/blue-compressor/releases/latest`). Nothing about you, your computer or
+your clips is sent, and when you are offline the check simply does nothing.
+
 ![Blue Compressor desktop app](docs/screenshot.png)
 
 > **Status: early and experimental.** It has been tested on one Z8 clip and one ZR clip,
@@ -288,6 +309,7 @@ services:
       - WATCH_RESOLUTION=original
       - WATCH_POLL_SECONDS=5
       - WATCH_CLEAR=false
+      - UPDATE_CHECK=true
     volumes:
       # Replace the left side of each mapping with existing folders on your NAS or host
       # (for example /volume1/video:/media on Synology):
@@ -317,6 +339,24 @@ services:
 | `WATCH_RESOLUTION` | `original` | Output resolution for watch-folder jobs (`original`, `6k`, `4k`), also adjustable live in the Web UI. |
 | `WATCH_POLL_SECONDS` | `5` | Seconds between watch-folder scans and file-copy stability checks. |
 | `WATCH_CLEAR` | `false` | Set to `true` (or toggle **Clear watch folder after process** in the Web UI) to delete source clips from `WATCH_INPUT` once compression succeeds. |
+| `UPDATE_CHECK` | `true` | Set to `false` to stop the update check (an anonymous request to the GitHub releases API at start and every 12 hours; the Web UI then shows no update banner). |
+
+### Updating the container
+
+A container never updates itself. When a new version is out, the Web UI shows a banner
+(you can hide it until the next version) and the server log has one line about it. To
+update:
+
+1. **Synology Container Manager:** open **Project**, select the Blue Compressor project and
+   click **Stop**. Under **Image**, delete the old `ghcr.io/redn3/blue-compressor` image (or
+   change the image tag in `docker-compose.yml` to the new version, for example
+   `ghcr.io/redn3/blue-compressor:0.1.8`). Then build or start the project again; it
+   downloads the new version.
+2. **Docker Compose:** `docker compose pull`, then `docker compose up -d`.
+3. **Docker:** `docker pull ghcr.io/redn3/blue-compressor:latest`, then remove and recreate
+   the container with the same settings.
+
+Your settings, watch folders and compressed clips are kept.
 
 ### One-off CLI runs with Docker
 
