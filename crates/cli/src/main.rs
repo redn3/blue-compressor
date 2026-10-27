@@ -66,6 +66,27 @@ fn parse_quality(s: &str) -> Option<u8> {
     }
 }
 
+/// A quick pick as a legacy step: lossless 1, light 2, medium 3, strong 4.
+pub(crate) fn parse_preset(s: &str) -> Option<u8> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "lossless" => Some(1),
+        "light" => Some(2),
+        "medium" => Some(3),
+        "strong" => Some(4),
+        _ => None,
+    }
+}
+
+/// The quick pick name of a legacy step.
+pub(crate) fn preset_name(quality: u8) -> &'static str {
+    match quality {
+        0 | 1 => "lossless",
+        2 => "light",
+        3 => "medium",
+        _ => "strong",
+    }
+}
+
 /// A bits per pixel target: a number from 0.5 to 8 (an optional "bpp" suffix is allowed),
 /// rounded to 0.1.
 pub(crate) fn parse_bpp(s: &str) -> Option<f64> {
@@ -74,12 +95,16 @@ pub(crate) fn parse_bpp(s: &str) -> Option<f64> {
     (v.is_finite() && (bluecompress::BPP_MIN..=bluecompress::BPP_MAX).contains(&v)).then(|| (v * 10.0).round() / 10.0)
 }
 
-/// "1.2bpp", "lossless" or for a legacy step "0.8x source bpp", for log lines.
+/// "1.2bpp", "lossless" or for a preset "light (0.8x source bpp)", for log lines.
 pub(crate) fn setting_label(quality: u8, bpp: Option<f64>) -> String {
     match bpp {
         Some(b) => bluecompress::bpp_tag(b),
         None if quality <= 1 => "lossless".into(),
-        None => format!("{}x source bpp", bluecompress::LEGACY_FRACTIONS[(quality.min(4) - 2) as usize]),
+        None => format!(
+            "{} ({}x source bpp)",
+            preset_name(quality),
+            bluecompress::LEGACY_FRACTIONS[(quality.min(4) - 2) as usize]
+        ),
     }
 }
 
@@ -88,8 +113,9 @@ fn quality_note(quality: u8) -> String {
     match quality {
         0 | 1 => "note: -q 1 is now --lossless; -q/--quality is kept for existing scripts".into(),
         q => format!(
-            "note: -q/--quality is deprecated; -q {q} now means {} x each clip's own bits per pixel. \
-             Use --bpp B or --lossless",
+            "note: -q/--quality is deprecated; -q {q} is now --preset {} ({} x each clip's own bits \
+             per pixel). Use --preset, --bpp B or --lossless",
+            preset_name(q),
             bluecompress::LEGACY_FRACTIONS[(q.min(4) - 2) as usize]
         ),
     }
@@ -178,10 +204,11 @@ options:
                           stills are about 3, HE* about 5; probe shows a clip's own). Each
                           frame is rate controlled to fit; a target at or above the clip's
                           own gives the lossless repack
+      --preset P          light, medium or strong: 0.8, 0.6 or 0.4 x each clip's own bits
+                          per pixel (rounded to 0.1, at least 0.5); default: light
       --lossless          repack the camera's coded data without loss (pixel-identical)
-                          default when neither is given: 0.8 x each clip's own bits per pixel
   -q, --quality 1..4      legacy alias kept for existing scripts: 1 = --lossless, 2, 3 and
-                          4 = 0.8, 0.6 and 0.4 x each clip's own bits per pixel
+                          4 = --preset light, medium and strong
   -r, --resolution R      original (default), 6k or 4k
   -b, --backend B         auto (default), cpu, metal, cuda or opencl; --cpu / --gpu also work
   -j, --threads N         worker threads (default: all cores)
@@ -202,8 +229,9 @@ serve and watch options:
       --poll-seconds N    watch poll interval in seconds (default: WATCH_POLL_SECONDS or 5)
       --clear-watch       delete source clip in watch input folder after compression succeeds
       --once              watch: run one scan pass on stable files and exit
-                          watch and serve also read WATCH_BPP (or BPP), or the legacy
-                          WATCH_QUALITY (or QUALITY) with the meaning of -q
+                          watch and serve also read WATCH_BPP (or BPP), WATCH_PRESET (or
+                          PRESET), or the legacy WATCH_QUALITY (or QUALITY) with the
+                          meaning of -q; the watch folder defaults to light
 
 Folders are searched recursively for .nev and .r3d files. Originals are never modified;
 outputs are written to <name>.partial and renamed when complete.
@@ -571,11 +599,20 @@ fn compress_cmd(o: &Cli) -> u8 {
     }
 }
 
+/// A preset from PRESET-style or legacy QUALITY-style variables, the first one set wins.
+fn env_preset(preset_key: &str, quality_key: &str) -> Option<u8> {
+    env_nonempty(preset_key)
+        .and_then(|v| parse_preset(&v))
+        .or_else(|| env_nonempty(quality_key).and_then(|v| parse_quality(&v)))
+}
+
+/// Watch preset: the command line, else WATCH_PRESET / WATCH_QUALITY, else PRESET /
+/// QUALITY, else light.
 fn env_watch_quality(cli_q: Option<u8>) -> u8 {
     cli_q
-        .or_else(|| env_nonempty("WATCH_QUALITY").and_then(|v| parse_quality(&v)))
-        .or_else(|| env_nonempty("QUALITY").and_then(|v| parse_quality(&v)))
-        .unwrap_or(3)
+        .or_else(|| env_preset("WATCH_PRESET", "WATCH_QUALITY"))
+        .or_else(|| env_preset("PRESET", "QUALITY"))
+        .unwrap_or(2)
 }
 
 /// Watch bpp target: --bpp, else WATCH_BPP or BPP unless -q was given on the command line.
@@ -727,7 +764,7 @@ fn serve_cmd(o: &Cli) -> u8 {
         None
     };
 
-    let default_quality = o.quality.or_else(|| env_nonempty("QUALITY").and_then(|v| parse_quality(&v))).unwrap_or(2);
+    let default_quality = o.quality.or_else(|| env_preset("PRESET", "QUALITY")).unwrap_or(2);
     let default_bpp =
         if o.quality.is_some() { None } else { o.bpp.or_else(|| env_nonempty("BPP").and_then(|v| parse_bpp(&v))) };
     let default_resolution = o
@@ -801,12 +838,17 @@ fn main() -> ExitCode {
                     o.quality = Some(v);
                     o.legacy_q = true;
                 }
-                Some(_) => return bad("use only one of --bpp, --lossless or -q/--quality"),
+                Some(_) => return bad("use only one of --bpp, --preset, --lossless or -q/--quality"),
                 None => return bad("quality must be 1 to 4 (or lossless, archival, high, compact)"),
+            },
+            "--preset" => match it.next().and_then(|v| parse_preset(&v)) {
+                Some(v) if o.quality.is_none() => o.quality = Some(v),
+                Some(_) => return bad("use only one of --bpp, --preset, --lossless or -q/--quality"),
+                None => return bad("preset must be light, medium or strong (or lossless)"),
             },
             "--lossless" => {
                 if o.quality.is_some() {
-                    return bad("use only one of --bpp, --lossless or -q/--quality");
+                    return bad("use only one of --bpp, --preset, --lossless or -q/--quality");
                 }
                 o.quality = Some(1);
             }
@@ -882,7 +924,7 @@ fn main() -> ExitCode {
         }
     }
     if o.quality.is_some() && o.bpp.is_some() {
-        return bad("use only one of --bpp, --lossless or -q/--quality");
+        return bad("use only one of --bpp, --preset, --lossless or -q/--quality");
     }
     if o.legacy_q && !matches!(cmd.as_str(), "probe" | "backends" | "version") {
         eprintln!("{}", quality_note(o.quality.unwrap_or(2)));
@@ -939,9 +981,20 @@ mod tests {
         assert_eq!(parse_bpp("NaN"), None);
         assert_eq!(parse_bpp("high"), None);
         assert_eq!(setting_label(1, None), "lossless");
-        assert_eq!(setting_label(2, None), "0.8x source bpp");
-        assert_eq!(setting_label(4, None), "0.4x source bpp");
-        assert!(quality_note(3).contains("0.6 x each clip's own bits per pixel"));
+        assert_eq!(setting_label(2, None), "light (0.8x source bpp)");
+        assert_eq!(setting_label(4, None), "strong (0.4x source bpp)");
+        assert!(quality_note(3).contains("-q 3 is now --preset medium (0.6 x each clip's own bits"));
+        // --preset and the legacy -q steps are the same targets.
+        assert_eq!(parse_preset("Light"), Some(2));
+        assert_eq!(parse_preset("medium"), parse_quality("3"));
+        assert_eq!(parse_preset("strong"), parse_quality("q4"));
+        assert_eq!(parse_preset("lossless"), parse_quality("1"));
+        assert_eq!(parse_preset("high"), None);
+        assert_eq!(preset_name(3), "medium");
+        if ["WATCH_PRESET", "WATCH_QUALITY", "PRESET", "QUALITY"].iter().all(|k| std::env::var_os(k).is_none()) {
+            assert_eq!(env_watch_quality(None), 2, "the watch folder defaults to light");
+        }
+        assert_eq!(env_watch_quality(Some(4)), 4);
         assert!(quality_note(1).contains("--lossless"));
         assert_eq!(setting_label(2, Some(1.2)), "1.2bpp");
         assert_eq!(setting_label(2, Some(3.0)), "3bpp");

@@ -61,15 +61,18 @@ the credit below). Four quick picks set it for you:
 | Pick | What happens | Size |
 | --- | --- | --- |
 | **Lossless** | Repacks the coded data without the camera's padding. Every decoded pixel is identical. | Z8 8K N-RAW 2.60 GB to 2.36 GB (−9%), ZR 6K R3D NE 2.14 GB to 2.05 GB (−4%) |
-| **Light** (default) | 0.8 × the clips' own bits per pixel. Good for archive copies. | about 20% smaller |
-| **Medium** | 0.6 × the clips' own bits per pixel, for everyday storage. | about 40% smaller |
-| **Strong** | 0.4 × the clips' own bits per pixel, for offline edits and reference copies. | about 60% smaller |
+| **Light** (default) | 0.8 × each clip's own bits per pixel. Good for archive copies. | about 20% smaller |
+| **Medium** | 0.6 × each clip's own bits per pixel, for everyday storage. | about 40% smaller |
+| **Strong** | 0.4 × each clip's own bits per pixel, for offline edits and reference copies. | about 60% smaller |
 
-The picks only move the bpp slider (to 0.1, at least 0.5); the setting itself is always
-a bpp value or Lossless, and any value from 0.5 to 8 can be typed in. The lossless sizes
+Light, Medium and Strong work out a value for each clip from its own rate (rounded to
+0.1, at least 0.5), so a batch of clips recorded at different settings each shrinks by
+the same share; the slider marks the value for each clip. Dragging the slider or typing
+a number from 0.5 to 8 sets one bpp for every clip instead. The lossless sizes
 were measured on one sample clip from each camera. The other sizes follow from the target
 because every frame is rate controlled to fit it (see below), so they hold on any footage
-(unless the 0.5 floor or the lossless repack comes first); how the picture holds up at a given bpp depends on content and ISO, so check the
+(unless the 0.5 floor or the lossless repack comes first); how the picture holds up at a
+given bpp depends on content and ISO, so check the
 previewer on your own clips. Lossless outputs decode to exactly the same coefficients as
 the originals.
 
@@ -184,9 +187,12 @@ which current Windows versions already have. The UI is plain HTML, CSS and JavaS
 ## Command line
 
 ```bash
-# Compress a folder (recursively) into another folder at the default
-# (0.8 x each clip's own bits per pixel, the app's Light)
+# Compress a folder (recursively) into another folder at the default, light
+# (0.8 x each clip's own bits per pixel)
 bluecompress compress /Volumes/CARD -o /Volumes/Archive/compressed
+
+# Medium: 0.6 x each clip's own bits per pixel
+bluecompress compress --preset medium /Volumes/CARD -o /Volumes/Archive/compressed
 
 # One clip, explicit output, 6K at 1.5 bits per pixel on the GPU
 bluecompress compress --bpp 1.5 -r 6k clip.NEV --output clip_6k.NEV
@@ -207,14 +213,13 @@ bluecompress probe --json clip.R3D
 bluecompress backends
 ```
 
-Options: `--bpp 0.5..8` or `--lossless` (one of them; without either the default is 0.8 ×
-each clip's own bits per pixel), `-r original|6k|4k`, `-b auto|cpu|metal|cuda|opencl`, `-j threads`,
+Options: one of `--bpp 0.5..8`, `--preset light|medium|strong` (0.8, 0.6 or 0.4 × each
+clip's own bits per pixel; the default is light) or `--lossless`, `-r original|6k|4k`, `-b auto|cpu|metal|cuda|opencl`, `-j threads`,
 `--suffix`, `--overwrite`, `--skip-existing`, `--json`, `--quiet`.
 
 * **Legacy `-q` / `--quality`**: kept so existing scripts keep working, with one note on
-  stderr. `-q 1` is `--lossless`; `-q 2`, `-q 3` and `-q 4` are 0.8, 0.6 and 0.4 × each
-  clip's own bits per pixel, rounded to 0.1 and at least 0.5 (the app's Light, Medium and
-  Strong). It cannot be combined with `--bpp` or `--lossless`.
+  stderr. `-q 1` is `--lossless`; `-q 2`, `-q 3` and `-q 4` are `--preset light`,
+  `medium` and `strong`. It cannot be combined with `--bpp`, `--preset` or `--lossless`.
 * **Writing outputs**: each output goes to `<name>.partial` and is renamed when
   complete. Originals are never modified. Ctrl+C cancels cleanly.
 * **Exit codes**: 0 success, 1 a clip failed, 2 usage error, 3 cancelled.
@@ -268,12 +273,13 @@ services:
       - WATCH_ENABLED=true
       - WATCH_INPUT=/watch/in
       - WATCH_OUTPUT=/watch/out
-      # Compression: QUALITY and WATCH_QUALITY pick 1 Lossless, 2 Light, 3 Medium or
-      # 4 Strong (0.8, 0.6 or 0.4 x each clip's own bits per pixel). Set BPP or WATCH_BPP
-      # instead for a fixed size in bits per pixel, for example 1.8.
-      - QUALITY=2
+      # Compression: PRESET and WATCH_PRESET are lossless, light, medium or strong
+      # (light, medium and strong are 0.8, 0.6 and 0.4 x each clip's own bits per pixel).
+      # Set BPP or WATCH_BPP instead for a fixed size in bits per pixel, for example 1.8.
+      # The older QUALITY and WATCH_QUALITY (1 to 4) still work.
+      - PRESET=light
       - RESOLUTION=original
-      - WATCH_QUALITY=3
+      - WATCH_PRESET=light
       - WATCH_RESOLUTION=original
       - WATCH_POLL_SECONDS=5
       - WATCH_CLEAR=false
@@ -296,11 +302,13 @@ services:
 | `WATCH_ENABLED` | `true` | Set to `false` or `0` to disable the background watch-folder loop. |
 | `WATCH_INPUT` | `/watch/in` | Folder watched recursively for incoming `.NEV` and `.R3D` clips. |
 | `WATCH_OUTPUT` | `/watch/out` | Destination folder for watch-folder outputs (relative paths kept). |
-| `BPP` | unset | Default size in bits per pixel (`0.5`..`8`) for the Web UI, instead of `QUALITY` (and fallback for `WATCH_BPP`). |
-| `QUALITY` | `2` | Compatibility alias, the Web UI's starting pick: `1` Lossless, `2` Light, `3` Medium, `4` Strong (0.8, 0.6 and 0.4 × each clip's own bits per pixel). Fallback for `WATCH_QUALITY`. |
+| `BPP` | unset | Default size in bits per pixel (`0.5`..`8`) for the Web UI, instead of the preset (and fallback for `WATCH_BPP`). |
+| `PRESET` | `light` | The Web UI's starting pick: `lossless`, `light`, `medium` or `strong` (0.8, 0.6 and 0.4 × each clip's own bits per pixel). Fallback for `WATCH_PRESET`. |
+| `QUALITY` | unset | Older form of `PRESET`: `1` lossless, `2` light, `3` medium, `4` strong. `PRESET` wins when both are set. |
 | `RESOLUTION` | `original` | Default resolution (`original`, `6k`, `4k`) for the Web UI (and fallback for `WATCH_RESOLUTION`). |
-| `WATCH_BPP` | unset | Size in bits per pixel (`0.5`..`8`) for every watch-folder clip, instead of `WATCH_QUALITY`. Also adjustable live in the Web UI. |
-| `WATCH_QUALITY` | `3` | Compatibility alias for watch-folder jobs, relative to each clip: `1` Lossless, `2` Light, `3` Medium, `4` Strong. Choosing a pick in the Web UI switches to it. |
+| `WATCH_BPP` | unset | Size in bits per pixel (`0.5`..`8`) for every watch-folder clip, instead of the preset. Also adjustable live in the Web UI. |
+| `WATCH_PRESET` | `light` | Pick for watch-folder jobs, relative to each clip: `lossless`, `light`, `medium` or `strong`. Choosing a pick in the Web UI switches to it. |
+| `WATCH_QUALITY` | unset | Older form of `WATCH_PRESET` (`1` to `4`). `WATCH_PRESET` wins when both are set. |
 | `WATCH_RESOLUTION` | `original` | Output resolution for watch-folder jobs (`original`, `6k`, `4k`), also adjustable live in the Web UI. |
 | `WATCH_POLL_SECONDS` | `5` | Seconds between watch-folder scans and file-copy stability checks. |
 | `WATCH_CLEAR` | `false` | Set to `true` (or toggle **Clear watch folder after process** in the Web UI) to delete source clips from `WATCH_INPUT` once compression succeeds. |

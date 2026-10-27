@@ -8,15 +8,16 @@ services:
     environment:
       - PORT=9847
       - BROWSE_ROOT=/
-      # Compression: QUALITY and WATCH_QUALITY pick 1 Lossless, 2 Light, 3 Medium or
-      # 4 Strong (0.8, 0.6 or 0.4 x each clip's own bits per pixel). Set BPP or WATCH_BPP
-      # instead for a fixed size in bits per pixel, for example 1.8.
-      - QUALITY=2
+      # Compression: PRESET and WATCH_PRESET are lossless, light, medium or strong
+      # (light, medium and strong are 0.8, 0.6 and 0.4 x each clip's own bits per pixel).
+      # Set BPP or WATCH_BPP instead for a fixed size in bits per pixel, for example 1.8.
+      # The older QUALITY and WATCH_QUALITY (1 to 4) still work.
+      - PRESET=light
       - RESOLUTION=original
       - WATCH_ENABLED=true
       - WATCH_INPUT=/watch/in
       - WATCH_OUTPUT=/watch/out
-      - WATCH_QUALITY=3
+      - WATCH_PRESET=light
       - WATCH_RESOLUTION=original
       - WATCH_POLL_SECONDS=5
       # Set to true (or toggle "Clear watch folder after process" in the Web UI)

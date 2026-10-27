@@ -16,8 +16,10 @@ const api = T ? {
 
 // Compression is set in bits per pixel (bpp): a frame's coded size times 8 over its width
 // times height, the measure RdWing uses for Nikon's HE (about 3) and HE* (about 5) stills.
-// Quick picks set a value from the clips' own rate. What is stored is always a bpp value
-// or "lossless"; a pick made before any clip is there waits for the first clips' rate.
+// What is stored is a quick pick ("lossless", "light", "medium", "strong") or a bpp value.
+// Light, Medium and Strong go by each clip's own rate (0.8, 0.6 and 0.4 times it), like
+// the watch folder and the legacy -q steps; a bpp value from the slider or the number
+// field applies to every clip as it is.
 const BPP_MIN = 0.5, BPP_MAX = 8;
 const BPP_MARKS = { 3: "HE", 5: "HE*" };
 const LOSSLESS = "lossless";
@@ -47,13 +49,20 @@ function pickValue(id, ref) {
   return Math.min(BPP_MAX, Math.max(BPP_MIN, Math.round(PICK[id].f * ref * 10) / 10));
 }
 const resolveComp = (c, ref) => (resolved(c) ? c : pickValue(c, ref) ?? c);
-// The quick pick a setting equals on clips of `ref` bpp, if any.
-const pickOf = (c, ref) => (resolved(c) ? PICKS.find((x) => pickValue(x.id, ref) === c) : PICK[c]) || null;
+// The quick pick a setting is, if any.
+const pickOf = (c) => (typeof c === "string" && PICK[c]) || null;
+const relative = (c) => !resolved(c) && !!PICK[c];
 // A target at or above the clip's own rate gains nothing: it is the lossless repack.
 const repacks = (j, c) => typeof c === "number" && j.bpp > 0 && c >= j.bpp;
 const compText = (c) => (isLossless(c) ? "Lossless" : typeof c === "number" ? `${bppText(c)} bpp` : PICK[c] ? PICK[c].label : "");
 // Request fields of a setting.
-const compFields = (c) => (isLossless(c) || !resolved(c) ? { lossless: true, bpp: null } : { lossless: false, bpp: c });
+// A pick not yet resolved (a clip whose rate is unknown) goes as its legacy step, which the
+// engine resolves from the clip's own rate.
+const PICK_STEP = { light: 2, medium: 3, strong: 4 };
+const compFields = (c) =>
+  isLossless(c) ? { lossless: true, bpp: null }
+  : typeof c === "number" ? { lossless: false, bpp: c }
+  : { lossless: false, bpp: null, quality: PICK_STEP[c] || 2 };
 
 const RESOLUTION_NOTES = {
   original: "Keeps the recorded raw resolution. Only the coded data changes.",
@@ -117,8 +126,8 @@ settings.squeeze = clampSqueeze(settings.squeeze);
 const squeeze = () => settings.squeeze;
 const squeezeLabel = (v) => `${Number(v.toFixed(2))}x`;
 
-// The queue's median source bpp, which the quick picks go by: of the clips still to
-// compress, or of all of them when none are left.
+// The queue's median source bpp, where the slider shows a relative pick: of the clips
+// still to compress, or of all of them when none are left.
 function queueRef() {
   const live = jobs.filter((j) => j.ok && j.bpp > 0 && (j.state === "waiting" || j.state === "running"));
   const list = (live.length ? live : jobs.filter((j) => j.ok && j.bpp > 0)).map((j) => j.bpp).sort((a, b) => a - b);
@@ -126,18 +135,17 @@ function queueRef() {
   const m = list.length >> 1;
   return list.length % 2 ? list[m] : (list[m - 1] + list[m]) / 2;
 }
-// A pick made before any clip was there becomes its value once there are clips.
-function settleCompression() {
-  if (!resolved(settings.compression)) {
-    const v = pickValue(settings.compression, queueRef());
-    if (v != null) { settings.compression = v; saveSettings(); }
-  }
-  for (const j of jobs) if (j.compression != null && !resolved(j.compression)) j.compression = resolveComp(j.compression, j.bpp);
-}
-
 // Effective settings of a job: its own when settings are per clip, else the global ones.
 const resolutionOf = (j) => (settings.sameForAll ? settings.resolution : j.resolution);
-const compOf = (j) => resolveComp(settings.sameForAll || j.compression == null ? settings.compression : j.compression, j.bpp);
+// A job's setting as stored (a pick or a bpp value), and what it is on this clip.
+const rawCompOf = (j) => (settings.sameForAll || j.compression == null ? settings.compression : j.compression);
+const compOf = (j) => resolveComp(rawCompOf(j), j.bpp);
+// The range of bpp values a setting resolves to over `list`: [lo, hi], or null.
+function resolvedSpan(list, c = settings.compression) {
+  const v = list.filter((j) => j.bpp > 0).map((j) => resolveComp(c, j.bpp)).filter((x) => typeof x === "number");
+  return v.length ? [Math.min(...v), Math.max(...v)] : null;
+}
+const spanText = (sp) => (!sp ? "" : sp[0] === sp[1] ? `${bppText(sp[0])} bpp` : `${bppText(sp[0])} to ${bppText(sp[1])} bpp`);
 const settingOf = (j) => ({ compression: compOf(j), resolution: resolutionOf(j) });
 const ranComp = (j) => (j.ran ? j.ran.compression : compOf(j));
 // Key of a setting for measured size ratios.
@@ -270,9 +278,16 @@ function renderSettings() {
     change.addEventListener("click", chooseOutput);
     hint.append(path, change);
   } else {
+    const names = settings.sameForAll
+      ? [...new Set(jobs.filter((j) => j.ok && j.bpp > 0).map((j) => variantName(compOf(j), settings.resolution)))]
+      : [];
     hint.textContent = settings.sameForAll && resolved(settings.compression)
       ? `In a “Compressed ${variantName(settings.compression, settings.resolution)}” folder beside each clip.`
-      : "In a “Compressed …” folder beside each clip, named after its setting.";
+      : settings.sameForAll && names.length === 1
+        ? `In a “Compressed ${names[0]}” folder beside each clip.`
+        : settings.sameForAll && names.length
+          ? `In a “Compressed …” folder beside each clip, named after its bpp (${names.slice(0, 3).join(", ")}${names.length > 3 ? ", …" : ""}).`
+          : "In a “Compressed …” folder beside each clip, named after its setting.";
   }
   const chip = $("engine-chip");
   chip.classList.toggle("cpu", settings.backend === "cpu");
@@ -335,22 +350,28 @@ function batchSizes() {
 }
 function renderCompression() {
   const c = settings.compression, ref = queueRef();
-  const pick = pickOf(c, ref);
+  const pick = pickOf(c);
+  const live = jobs.filter((j) => toCompress(j) && j.bpp > 0);
+  const span = relative(c) && !isLossless(c) ? resolvedSpan(live.length ? live : jobs) : null;
   setSeg("seg-picks", pick ? pick.id : "", running);
   $("label-compression").textContent = settings.sameForAll ? "Compression" : "Default compression";
   const top = sliderTop(c);
   const range = $("bpp-range"), num = $("bpp-num");
   range.max = String(Math.round((top + STOP_GAP) * 10) / 10);
-  const v = isLossless(c) ? top + STOP_GAP : typeof c === "number" ? c : null;
+  // A pick sits at what it is for the median clip; the markers show each clip's value.
+  const v = isLossless(c) ? top + STOP_GAP : typeof c === "number" ? c : pickValue(c, ref);
   if (v != null) range.value = String(v);
   range.style.setProperty("--p", v != null ? sliderPos(v, top) : "0%");
   range.classList.toggle("lossless", isLossless(c));
   if (!num.matches(":focus")) num.value = typeof c === "number" ? bppText(c) : "";
-  num.placeholder = isLossless(c) ? "Lossless" : "";
+  num.placeholder = isLossless(c) ? "Lossless" : relative(c) ? "per clip" : "";
+  num.title = span ? `${pick.label}: ${spanText(span)}, by each clip's own rate` : "Bits per pixel";
   range.disabled = num.disabled = running;
   renderTicks($("bpp-ticks"), top);
+  $("bpp-target-key").hidden = !span;
   $("bpp-sources").innerHTML = sourceMarks().map((m) =>
-    `<span class="bpp-source" style="left:${sliderPos(m.bpp, top)}" title="${esc(`Source ${bppText(m.bpp)} bpp: ${m.names.slice(0, 4).join(", ")}${m.names.length > 4 ? ` and ${m.names.length - 4} more` : ""}`)}"></span>`).join("");
+    `<span class="bpp-source" style="left:${sliderPos(m.bpp, top)}" title="${esc(`Source ${bppText(m.bpp)} bpp: ${m.names.slice(0, 4).join(", ")}${m.names.length > 4 ? ` and ${m.names.length - 4} more` : ""}`)}"></span>`).join("") +
+    (span ? targetMarks(c).map((t) => `<span class="bpp-target" style="left:${sliderPos(t, top)}" title="${esc(`${pick.label} on a ${bppText(t / pick.f)} bpp clip: ${bppText(t)} bpp`)}"></span>`).join("") : "");
 
   const sizes = batchSizes();
   const pct = sizes.before > 0 ? Math.round((1 - sizes.after / sizes.before) * 100) : null;
@@ -358,7 +379,7 @@ function renderCompression() {
     : pct != null ? `Files about ${Math.max(0, pct)}% smaller than the originals.`
     : "Your own size, in bits per pixel.";
   const readout = $("comp-readout");
-  if (sizes.count && resolved(c)) {
+  if (sizes.count && (resolved(c) || span)) {
     readout.innerHTML = `${gb(sizes.before)} → about ${gb(sizes.after)} <span class="good">${pct > 0 ? `${pct}% smaller` : "about the same"}</span>`;
   } else {
     readout.textContent = jobs.length ? "" : "Add clips to see the sizes.";
@@ -367,21 +388,25 @@ function renderCompression() {
   const pending = viewer.open && viewer.job ? [viewer.job] : jobs.filter((j) => toCompress(j) && j.bpp > 0);
   const over = pending.filter((j) => repacks(j, compOf(j)));
   const rates = pending.map((j) => j.bpp);
-  const span = rates.length
-    ? (Math.min(...rates) === Math.max(...rates) ? `${bppText(rates[0])} bpp` : `${bppText(Math.min(...rates))} to ${bppText(Math.max(...rates))} bpp`)
-    : "";
+  const srcSpan = rates.length ? spanText([Math.min(...rates), Math.max(...rates)]) : "";
+  const pickSpan = span && !(viewer.open && viewer.job) ? ` ${pick.label} gives ${spanText(span)}, ${pick.f} × each clip's own.` : "";
   if (over.length && over.length === pending.length) {
     note.textContent = pending.length === 1
       ? `At or above this clip's ${bppText(pending[0].bpp)} bpp: no gain, lossless repack.`
       : "At or above the source of every clip: no gain, lossless repack.";
     note.classList.add("warn");
   } else if (over.length) {
-    note.textContent = `Your clips: ${span}. ${over.length} ${over.length === 1 ? "is" : "are"} already at or below this: no gain, lossless repack.`;
+    note.textContent = `Your clips: ${srcSpan}. ${over.length} ${over.length === 1 ? "is" : "are"} already at or below this: no gain, lossless repack.`;
     note.classList.add("warn");
   } else {
-    note.textContent = span ? `Your clips: ${span}.` : "";
+    note.textContent = srcSpan ? `Your clips: ${srcSpan}.${pickSpan}` : "";
     note.classList.remove("warn");
   }
+}
+// Distinct values a relative pick takes over the clips (16 at most).
+function targetMarks(c) {
+  const list = viewer.open && viewer.job ? [viewer.job] : jobs.filter((j) => j.ok && j.bpp > 0);
+  return [...new Set(list.map((j) => pickValue(c, j.bpp)).filter((x) => typeof x === "number"))].slice(0, 16);
 }
 function renderTicks(el, top) {
   let html = "";
@@ -425,7 +450,6 @@ async function addPaths(paths) {
     fresh.push(j);
   }
   if (fresh.length) {
-    settleCompression();
     await planTargets();
     await checkExisting();
     if (running && WEB) await enqueue(fresh.filter(toCompress), fresh.filter(isAlready));
@@ -539,11 +563,11 @@ function jobCard(j) {
     if (v != null) x.compression = v;
     changed(x);
   });
-  // A pick on a card goes by that clip's own rate.
+  // A pick on a card goes by that clip's own rate, and is kept as a pick.
   cSel.addEventListener("change", () => {
     const x = job();
     if (cSel.value === "custom") { bIn.focus(); bIn.select(); return; }
-    x.compression = resolveComp(cSel.value, x.bpp);
+    x.compression = cSel.value;
     changed(x);
   });
   rSel.addEventListener("change", async () => {
@@ -615,7 +639,7 @@ function updateCard(j) {
   }
 
   const cSel = el.querySelector(".job-c"), rSel = el.querySelector(".job-r"), bIn = el.querySelector(".job-b");
-  const jc = compOf(j), jp = pickOf(jc, j.bpp);
+  const jc = compOf(j), jp = pickOf(rawCompOf(j));
   cSel.value = jp ? jp.id : "custom";
   if (!bIn.matches(":focus")) bIn.value = typeof jc === "number" ? bppText(jc) : "";
   bIn.placeholder = isLossless(jc) ? "Lossless" : "";
@@ -864,10 +888,11 @@ function renderFooter() {
       const lo = Math.min(...rates), hi = Math.max(...rates);
       return lo === hi ? `${bppText(lo)} bpp` : `${bppText(lo)} to ${bppText(hi)} bpp`;
     })();
-    const c = settings.compression, pick = pickOf(c, queueRef());
+    const c = settings.compression, pick = pickOf(c);
+    const to = isLossless(c) ? "lossless" : relative(c) ? spanText(resolvedSpan(waiting)) || compText(c) : compText(c);
     sub.textContent = !settings.sameForAll
       ? "Estimated with each clip's own settings"
-      : `Estimated for ${srcBpp ? `source ${srcBpp} → ` : ""}${isLossless(c) ? "lossless" : compText(c)}` +
+      : `Estimated for ${srcBpp ? `source ${srcBpp} → ` : ""}${to}` +
         (pick && !isLossless(c) ? ` (${pick.label})` : "") +
         (settings.resolution !== "original" ? ` at ${RES_LABEL[settings.resolution]}` : "");
     fill.style.width = "0";
@@ -1072,7 +1097,7 @@ function renderWatch(w) {
   chip.hidden = false;
   sec.hidden = false;
   const dot = $("watch-dot"), pill = $("watch-pill"), meter = $("watch-meter"), fill = $("watch-meter-fill");
-  const q = LEGACY_PICK[w.quality] ? w.quality : 3;
+  const q = LEGACY_PICK[w.quality] ? w.quality : 2;
   const res = w.resolution || "original";
   const wb = w.bpp != null ? w.bpp : null;
   // Watched clips arrive one by one, so a pick there goes by each clip's own rate.
@@ -1138,7 +1163,7 @@ Output: ${w.outputDir}`;
 // region renders for the same frame and settings cheap; a new frame or setting decodes.
 
 const viewer = {
-  open: false, job: null, frame: 0, comp: LOSSLESS, resolution: "original",
+  open: false, job: null, frame: 0, setting: LOSSLESS, comp: LOSSLESS, resolution: "original",
   split: 0.5, scale: 1, fit: true, cx: 0.5, cy: 0.5,
   base: null, region: null,
 };
@@ -1175,6 +1200,7 @@ function openViewer(j) {
   viewer.open = true;
   viewer.job = j;
   viewer.frame = Math.floor((j.frames - 1) / 2);
+  viewer.setting = rawCompOf(j);
   viewer.comp = compOf(j);
   viewer.resolution = resolutionOf(j);
   viewer.split = 0.5;
@@ -1214,7 +1240,7 @@ function closeViewer() {
 function renderViewerControls() {
   const j = viewer.job;
   if (!j) return;
-  const vp = pickOf(viewer.comp, j.bpp);
+  const vp = pickOf(viewer.setting);
   setSeg("v-quality", vp ? vp.id : "", null);
   const vb = $("v-bpp");
   if (!vb.matches(":focus")) vb.value = typeof viewer.comp === "number" ? bppText(viewer.comp) : "";
@@ -1229,11 +1255,11 @@ function renderViewerControls() {
   renderFrameLabel();
   const shown = viewer.region || viewer.base;
   const sc = shown ? shown.comp : viewer.comp, r = shown ? shown.resolution : viewer.resolution;
-  const sp = pickOf(sc, j.bpp);
+  const sp = sc === viewer.comp ? pickOf(viewer.setting) : null;
   const what = `<b>${esc(compText(sc))}</b>` +
     (repacks(j, sc) ? " · lossless repack" : sp && !isLossless(sc) ? ` ${esc(sp.label)}` : "");
   $("v-tag-after").innerHTML = `${what}${r !== "original" ? " · " + esc(RES_LABEL[r]) : ""}`;
-  const same = compOf(j) === viewer.comp && resolutionOf(j) === viewer.resolution;
+  const same = rawCompOf(j) === viewer.setting && resolutionOf(j) === viewer.resolution;
   const apply = $("v-apply");
   apply.textContent = settings.sameForAll ? "Use for all clips" : "Apply to this clip";
   apply.disabled = same || running || j.state !== "waiting";
@@ -1647,9 +1673,11 @@ function bindStage() {
 
 function bindViewer() {
   $("v-close").addEventListener("click", closeViewer);
+  // `c` is a pick (resolved for the previewed clip) or a bpp value.
   const choose = (c, r) => {
     if (c == null) return;
-    viewer.comp = c;
+    viewer.setting = c;
+    viewer.comp = resolveComp(c, viewer.job.bpp);
     viewer.resolution = r;
     $("v-hint").classList.add("hide");
     syncLayers();
@@ -1658,12 +1686,12 @@ function bindViewer() {
     pump();
   };
   // Picks in the previewer go by the previewed clip's own rate.
-  const choosePick = (id) => choose(resolveComp(id, viewer.job.bpp), viewer.resolution);
+  const choosePick = (id) => choose(id, viewer.resolution);
   $("v-quality").addEventListener("click", (e) => {
     const b = e.target.closest("button"); if (b) choosePick(b.dataset.value);
   });
   const vb = $("v-bpp");
-  const applyVb = () => { const v = clampBpp(vb.value); if (v != null && v !== viewer.comp) choose(v, viewer.resolution); };
+  const applyVb = () => { const v = clampBpp(vb.value); if (v != null && v !== viewer.setting) choose(v, viewer.resolution); };
   vb.addEventListener("change", applyVb);
   vb.addEventListener("blur", () => { applyVb(); renderViewerControls(); });
   vb.addEventListener("keydown", (e) => {
@@ -1671,7 +1699,7 @@ function bindViewer() {
     if (e.key === "Enter" || e.key === "Escape") vb.blur();
   });
   $("v-res").addEventListener("click", (e) => {
-    const b = e.target.closest("button"); if (b && !b.disabled) choose(viewer.comp, b.dataset.value);
+    const b = e.target.closest("button"); if (b && !b.disabled) choose(viewer.setting, b.dataset.value);
   });
   $("v-zoom").addEventListener("click", (e) => {
     const b = e.target.closest("button"); if (!b) return;
@@ -1724,12 +1752,12 @@ function bindViewer() {
   $("v-apply").addEventListener("click", async () => {
     const j = viewer.job;
     if (settings.sameForAll) {
-      settings.compression = viewer.comp;
+      settings.compression = viewer.setting;
       settings.resolution = viewer.resolution;
       saveSettings();
       await planTargets();
     } else {
-      j.compression = viewer.comp;
+      j.compression = viewer.setting;
       j.resolution = viewer.resolution;
       j.target = await targetFor(j, j.resolution);
     }
@@ -1826,7 +1854,7 @@ async function init() {
   $("seg-picks").addEventListener("click", (e) => {
     const b = e.target.closest("button");
     if (!b || running) return;
-    settings.compression = resolveComp(b.dataset.value, queueRef());
+    settings.compression = b.dataset.value;
     saveSettings();
     renderAll();
   });
@@ -1844,7 +1872,7 @@ async function init() {
     settings.sameForAll = e.target.checked;
     // Each clip starts from the settings it was getting until now.
     if (!settings.sameForAll) {
-      for (const j of jobs) { j.compression = compOf(j); j.resolution = settings.resolution; }
+      for (const j of jobs) { j.compression = rawCompOf(j); j.resolution = settings.resolution; }
     }
     saveSettings();
     await planTargets();

@@ -1152,3 +1152,16 @@ body.per-clip .job-settings { display: flex; }
 .watch-controls #watch-resolution { grid-column: 1 / -1; }
 .bpp-card[hidden], .field[hidden], .v-group[hidden] { display: none; }
 .watch-controls > * { min-width: 0; }
+.bpp-target {
+  position: absolute;
+  top: 3px;
+  width: 9px;
+  height: 9px;
+  margin-left: -4.5px;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  background: var(--surface);
+  pointer-events: auto;
+}
+.bpp-target-dot { display: inline-block; width: 7px; height: 7px; margin-right: 5px; border-radius: 50%; border: 2px solid var(--accent); vertical-align: -1px; }
+.bpp-legend span[hidden] { display: none; }
