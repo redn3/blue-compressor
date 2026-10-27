@@ -95,7 +95,7 @@ pub(crate) fn parse_bpp(s: &str) -> Option<f64> {
     (v.is_finite() && (bluecompress::BPP_MIN..=bluecompress::BPP_MAX).contains(&v)).then(|| (v * 10.0).round() / 10.0)
 }
 
-/// "1.2bpp", "lossless" or for a preset "light (0.8x source bpp)", for log lines.
+/// "1.2bpp", "lossless" or for a preset "light (0.42x source bpp)", for log lines.
 pub(crate) fn setting_label(quality: u8, bpp: Option<f64>) -> String {
     match bpp {
         Some(b) => bluecompress::bpp_tag(b),
@@ -204,7 +204,7 @@ options:
                           stills are about 3, HE* about 5; probe shows a clip's own). Each
                           frame is rate controlled to fit; a target at or above the clip's
                           own gives the lossless repack
-      --preset P          light, medium or strong: 0.8, 0.6 or 0.4 x each clip's own bits
+      --preset P          light, medium or strong: 0.42, 0.36 or 0.24 x each clip's own bits
                           per pixel (rounded to 0.1, at least 0.5); default: light
       --lossless          repack the camera's coded data without loss (pixel-identical)
   -q, --quality 1..4      legacy alias kept for existing scripts: 1 = --lossless, 2, 3 and
@@ -1125,9 +1125,9 @@ mod tests {
         assert_eq!(parse_bpp("NaN"), None);
         assert_eq!(parse_bpp("high"), None);
         assert_eq!(setting_label(1, None), "lossless");
-        assert_eq!(setting_label(2, None), "light (0.8x source bpp)");
-        assert_eq!(setting_label(4, None), "strong (0.4x source bpp)");
-        assert!(quality_note(3).contains("-q 3 is now --preset medium (0.6 x each clip's own bits"));
+        assert_eq!(setting_label(2, None), "light (0.42x source bpp)");
+        assert_eq!(setting_label(4, None), "strong (0.24x source bpp)");
+        assert!(quality_note(3).contains("-q 3 is now --preset medium (0.36 x each clip's own bits"));
         // --preset and the legacy -q steps are the same targets.
         assert_eq!(parse_preset("Light"), Some(2));
         assert_eq!(parse_preset("medium"), parse_quality("3"));

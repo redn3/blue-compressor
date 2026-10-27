@@ -30,9 +30,9 @@ enum bc_resolution {
  * callers of bc_transcode: */
 enum bc_quality {
     BC_Q1 = 1, /* lossless: camera's coded data repacked, pixel-identical (4 to 10% smaller) */
-    BC_Q2 = 2, /* legacy: 0.8 x the clip's own bits per pixel */
-    BC_Q3 = 3, /* legacy: 0.6 x the clip's own bits per pixel */
-    BC_Q4 = 4  /* legacy: 0.4 x the clip's own bits per pixel */
+    BC_Q2 = 2, /* legacy: 0.42 x the clip's own bits per pixel */
+    BC_Q3 = 3, /* legacy: 0.36 x the clip's own bits per pixel */
+    BC_Q4 = 4  /* legacy: 0.24 x the clip's own bits per pixel */
 };
 
 enum bc_backend {

@@ -67,7 +67,7 @@ struct Settings {
 struct JobRequest {
     id: u64,
     path: String,
-    /// Legacy quality step (1 lossless, 2 to 4: 0.8, 0.6, 0.4 x the clip's own bpp), used
+    /// Legacy quality step (1 lossless, 2 to 4: 0.42, 0.36, 0.24 x the clip's own bpp), used
     /// when neither `bpp` nor `lossless` is given.
     #[serde(default)]
     quality: Option<u8>,

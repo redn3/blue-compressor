@@ -64,9 +64,9 @@ the credit below). Four quick picks set it for you:
 | Pick | What happens | Size |
 | --- | --- | --- |
 | **Lossless** | Repacks the coded data without the camera's padding. Every decoded pixel is identical. | Z8 8K N-RAW 2.60 GB to 2.36 GB (−9%), ZR 6K R3D NE 2.14 GB to 2.05 GB (−4%) |
-| **Light** (default) | 0.8 × each clip's own bits per pixel. Good for archive copies. | about 20% smaller |
-| **Medium** | 0.6 × each clip's own bits per pixel, for everyday storage. | about 40% smaller |
-| **Strong** | 0.4 × each clip's own bits per pixel, for offline edits and reference copies. | about 60% smaller |
+| **Light** (default) | 0.42 × each clip's own bits per pixel. Good for archive copies. | about 58% smaller |
+| **Medium** | 0.36 × each clip's own bits per pixel, for everyday storage. | about 64% smaller |
+| **Strong** | 0.24 × each clip's own bits per pixel, for offline edits and reference copies. | about 76% smaller |
 
 Light, Medium and Strong work out a value for each clip from its own rate (rounded to
 0.1, at least 0.5), so a batch of clips recorded at different settings each shrinks by
@@ -193,10 +193,10 @@ which current Windows versions already have. The UI is plain HTML, CSS and JavaS
 
 ```bash
 # Compress a folder (recursively) into another folder at the default, light
-# (0.8 x each clip's own bits per pixel)
+# (0.42 x each clip's own bits per pixel)
 bluecompress compress /Volumes/CARD -o /Volumes/Archive/compressed
 
-# Medium: 0.6 x each clip's own bits per pixel
+# Medium: 0.36 x each clip's own bits per pixel
 bluecompress compress --preset medium /Volumes/CARD -o /Volumes/Archive/compressed
 
 # One clip, explicit output, 6K at 1.5 bits per pixel on the GPU
@@ -218,7 +218,7 @@ bluecompress probe --json clip.R3D
 bluecompress backends
 ```
 
-Options: one of `--bpp 0.5..8`, `--preset light|medium|strong` (0.8, 0.6 or 0.4 × each
+Options: one of `--bpp 0.5..8`, `--preset light|medium|strong` (0.42, 0.36 or 0.24 × each
 clip's own bits per pixel; the default is light) or `--lossless`, `-r original|6k|4k`, `-b auto|cpu|metal|cuda|opencl`, `-j threads`,
 `--suffix`, `--overwrite`, `--skip-existing`, `--json`, `--quiet`.
 
@@ -279,7 +279,7 @@ services:
       - WATCH_INPUT=/watch/in
       - WATCH_OUTPUT=/watch/out
       # Compression: PRESET and WATCH_PRESET are lossless, light, medium or strong
-      # (light, medium and strong are 0.8, 0.6 and 0.4 x each clip's own bits per pixel).
+      # (light, medium and strong are 0.42, 0.36 and 0.24 x each clip's own bits per pixel).
       # Set BPP or WATCH_BPP instead for a fixed size in bits per pixel, for example 1.8.
       # The older QUALITY and WATCH_QUALITY (1 to 4) still work.
       - PRESET=light
@@ -308,7 +308,7 @@ services:
 | `WATCH_INPUT` | `/watch/in` | Folder watched recursively for incoming `.NEV` and `.R3D` clips. |
 | `WATCH_OUTPUT` | `/watch/out` | Destination folder for watch-folder outputs (relative paths kept). |
 | `BPP` | unset | Default size in bits per pixel (`0.5`..`8`) for the Web UI, instead of the preset (and fallback for `WATCH_BPP`). |
-| `PRESET` | `light` | The Web UI's starting pick: `lossless`, `light`, `medium` or `strong` (0.8, 0.6 and 0.4 × each clip's own bits per pixel). Fallback for `WATCH_PRESET`. |
+| `PRESET` | `light` | The Web UI's starting pick: `lossless`, `light`, `medium` or `strong` (0.42, 0.36 and 0.24 × each clip's own bits per pixel). Fallback for `WATCH_PRESET`. |
 | `QUALITY` | unset | Older form of `PRESET`: `1` lossless, `2` light, `3` medium, `4` strong. `PRESET` wins when both are set. |
 | `RESOLUTION` | `original` | Default resolution (`original`, `6k`, `4k`) for the Web UI (and fallback for `WATCH_RESOLUTION`). |
 | `WATCH_BPP` | unset | Size in bits per pixel (`0.5`..`8`) for every watch-folder clip, instead of the preset. Also adjustable live in the Web UI. |
@@ -337,7 +337,7 @@ docker run --rm -v "$PWD":/data ghcr.io/redn3/blue-compressor:latest \
 * `bc_probe`
 * `bc_output_size`
 * `bc_transcode` (synchronous, with a progress and cancel callback; its `quality` field is
-  the legacy step: 1 lossless, 2 to 4 are 0.8, 0.6 and 0.4 × the clip's own bits per pixel)
+  the legacy step: 1 lossless, 2 to 4 are 0.42, 0.36 and 0.24 × the clip's own bits per pixel)
 * `bc_transcode_bpp` (the same with a size in bits per pixel; 0 or less means lossless)
 * `bc_clip_bpp` (a probed clip's own bits per pixel, from `codestream_bytes`, which
   `bc_clip_info` carries next to `video_bytes`)
