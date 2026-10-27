@@ -13,6 +13,8 @@ use std::sync::atomic::AtomicBool;
 
 mod bitio;
 pub mod bmff;
+#[doc(hidden)]
+pub mod calibrate;
 pub mod ffi;
 pub mod frame;
 mod gpu;

@@ -792,6 +792,146 @@ fn bad(what: &str) -> ExitCode {
     ExitCode::from(2)
 }
 
+/// Hidden developer command: `bluecompress calibrate [--frames N] [--spread] [--json]
+/// [-j threads] <clip|folder>...` codes sample frames of each clip with the old fixed
+/// quality ranks (Q2 135, Q3 140, Q4 160) and with the Light, Medium and Strong picks and
+/// prints the sizes, to match the picks to the old steps on real footage. Reads only the
+/// container index, a few frame headers and the sampled frames.
+fn calibrate_cmd(args: Vec<String>) -> ExitCode {
+    let (mut n, mut spread, mut json, mut threads) = (24usize, false, false, 0usize);
+    let mut inputs = Vec::new();
+    let mut it = args.into_iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "-n" | "--frames" => match it.next().and_then(|v| v.parse::<usize>().ok()).filter(|v| *v > 0) {
+                Some(v) => n = v,
+                None => return bad("--frames needs a number of frames"),
+            },
+            "--spread" => spread = true,
+            "--json" => json = true,
+            "-j" | "--threads" => match it.next().and_then(|v| v.parse::<usize>().ok()).filter(|v| *v <= 1024) {
+                Some(v) => threads = v,
+                None => return bad("threads must be a number"),
+            },
+            "-h" | "--help" => {
+                println!(
+                    "bluecompress calibrate [--frames N] [--spread] [--json] [-j threads] <clip|folder>...\n\n\
+                     Codes N sample frames (default 24; --spread takes runs of 4 spread over the clip)\n\
+                     with the old Q2/Q3/Q4 fixed ranks and the Light/Medium/Strong picks, and prints\n\
+                     the sizes. Nothing is written; only the sampled frames are read."
+                );
+                return ExitCode::SUCCESS;
+            }
+            s if s.len() > 1 && s.starts_with('-') => return bad(&format!("unknown option {s}")),
+            _ => inputs.push(a),
+        }
+    }
+    let mut missing = Vec::new();
+    let clips = expand(&inputs, &mut missing);
+    for m in &missing {
+        eprintln!("bluecompress: {m}: not found");
+    }
+    if clips.is_empty() {
+        return bad("calibrate needs at least one clip or folder");
+    }
+    // Per variant label (without the bpp value): sum of output/source fractions, count.
+    let mut sums: Vec<(String, f64, usize)> = Vec::new();
+    let mut failed = false;
+    for path in &clips {
+        if CANCEL.load(Ordering::Relaxed) {
+            return ExitCode::from(3);
+        }
+        let c = match bluecompress::calibrate::calibrate(path, n, spread, threads) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("bluecompress: {}: {e}", path.display());
+                failed = true;
+                continue;
+            }
+        };
+        let src = c.source_bpp();
+        if json {
+            let vs: Vec<String> = c
+                .variants
+                .iter()
+                .map(|v| {
+                    format!(
+                        "{{\"label\":{},\"rank\":{},\"target_bpp\":{},\"bpp\":{:.4},\"fraction\":{:.4}}}",
+                        q(&v.label),
+                        v.rank.map_or("null".into(), |r| r.to_string()),
+                        v.bpp_target.map_or("null".into(), |b| format!("{b:.1}")),
+                        c.bpp(v.bytes),
+                        v.bytes as f64 / c.source_bytes.max(1) as f64
+                    )
+                })
+                .collect();
+            println!(
+                "{{\"event\":\"calibration\",\"path\":{},\"codec\":{},\"width\":{},\"height\":{},\"fps\":{:.3},\"frames\":{},\"sampled\":{},\"clip_bpp\":{:.4},\"sample_bpp\":{:.4},\"camera_rank\":{:.2},\"variants\":[{}]}}",
+                q(&path.display().to_string()),
+                q(codec_name(&c.info)),
+                c.info.width,
+                c.info.height,
+                c.info.fps,
+                c.info.frames,
+                c.frames.len(),
+                c.info.bpp,
+                src,
+                c.camera_rank,
+                vs.join(",")
+            );
+        } else {
+            println!(
+                "{}\n  {} {}x{} {:.3} fps, {} of {} frames, clip {:.2} bpp, sample {:.2} bpp, camera rank {:.1}",
+                path.display(),
+                codec_name(&c.info),
+                c.info.width,
+                c.info.height,
+                c.info.fps,
+                c.frames.len(),
+                c.info.frames,
+                c.info.bpp,
+                src,
+                c.camera_rank
+            );
+            println!("  {:<22} {:>6} {:>9} {:>8}", "setting", "bpp", "x source", "smaller");
+            for v in &c.variants {
+                let f = v.bytes as f64 / c.source_bytes.max(1) as f64;
+                println!("  {:<22} {:>6.2} {:>9.3} {:>7.1}%", v.label, c.bpp(v.bytes), f, (1.0 - f) * 100.0);
+            }
+        }
+        for v in &c.variants {
+            let key = v.label.split(' ').next().unwrap_or("").to_string();
+            let f = v.bytes as f64 / c.source_bytes.max(1) as f64;
+            match sums.iter_mut().find(|s| s.0 == key) {
+                Some(s) => {
+                    s.1 += f;
+                    s.2 += 1;
+                }
+                None => sums.push((key, f, 1)),
+            }
+        }
+    }
+    if !sums.is_empty() {
+        let mean = |k: &str| sums.iter().find(|s| s.0 == k).map_or(0.0, |s| s.1 / s.2.max(1) as f64);
+        if json {
+            let ms: Vec<String> = sums.iter().map(|s| format!("{}:{:.4}", q(&s.0), s.1 / s.2.max(1) as f64)).collect();
+            println!("{{\"event\":\"summary\",\"clips\":{},\"mean_fraction\":{{{}}}}}", sums[0].2, ms.join(","));
+        } else {
+            println!("\nMean output / source over {} clip(s):", sums[0].2);
+            for s in &sums {
+                println!("  {:<10} {:.3}", s.0, s.1 / s.2.max(1) as f64);
+            }
+            println!(
+                "Fractions that would match the old steps: Light {:.2} (Q2), Medium {:.2} (Q3), Strong {:.2} (Q4)",
+                mean("Q2"),
+                mean("Q3"),
+                mean("Q4")
+            );
+        }
+    }
+    ExitCode::from(if failed { 1 } else { 0 })
+}
+
 fn main() -> ExitCode {
     let _ = ctrlc::set_handler(|| CANCEL.store(true, Ordering::Relaxed));
     let mut o = Cli {
@@ -819,6 +959,9 @@ fn main() -> ExitCode {
         once: false,
     };
     let args: Vec<String> = std::env::args_os().skip(1).map(|a| a.to_string_lossy().into_owned()).collect();
+    if args.first().map(String::as_str) == Some("calibrate") {
+        return calibrate_cmd(args[1..].to_vec());
+    }
     let mut it = args.into_iter().peekable();
     let cmd = match it.peek().map(String::as_str) {
         Some(c @ ("compress" | "probe" | "backends" | "version" | "serve" | "watch")) => {

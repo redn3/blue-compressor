@@ -260,3 +260,34 @@ fn seeded_frames_are_accurate_and_deterministic() {
         assert!(!seed.is_empty());
     }
 }
+
+#[test]
+fn calibration_codes_the_old_ranks_and_the_picks() {
+    use bluecompress::calibrate::calibrate_codestreams;
+    let frames: Vec<_> = (30..34).map(source).collect();
+    let src_bpp = frames.iter().map(|f| f.1).sum::<f64>() / frames.len() as f64;
+    let pad = |n: usize| n.div_ceil(1024) as u64 * 1024;
+    let items = frames.iter().enumerate().map(|(i, (cs, _))| Ok((cs.clone(), i == 0)));
+    let (source, camera_rank, v) = calibrate_codestreams(items, W as u32, H as u32, src_bpp, 0).unwrap();
+    assert_eq!(source, frames.iter().map(|f| f.0.len() as u64).sum::<u64>());
+    assert!((camera_rank - 120.0).abs() < 1e-9, "camera rank {camera_rank}");
+    let fixed = |r: Option<i32>| -> u64 {
+        frames
+            .iter()
+            .map(|(cs, _)| {
+                pad(requant_codestream(cs, &RequantParams { target_rank: r, ..Default::default() }, 0).unwrap().0.len())
+            })
+            .sum()
+    };
+    assert_eq!(v[0].bytes, fixed(None));
+    assert_eq!(v[1].bytes, fixed(Some(135)));
+    assert_eq!(v[2].bytes, fixed(Some(140)));
+    assert_eq!(v[3].bytes, fixed(Some(160)));
+    assert!(v[1].bytes > v[2].bytes && v[2].bytes > v[3].bytes);
+    for p in &v[4..] {
+        let t = p.bpp_target.expect("a pick below the source is a bpp target");
+        let got = bpp_of(p.bytes as f64 / frames.len() as f64, W as u32, H as u32);
+        assert!(got <= t * 1.001, "{}: {got} over {t}", p.label);
+    }
+    assert!(v[4].bytes > v[5].bytes && v[5].bytes > v[6].bytes);
+}
