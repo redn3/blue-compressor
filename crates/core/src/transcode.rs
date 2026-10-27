@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use crate::bmff::{chunk_order, fourcc, fourcc_str, InputFile, Movie, OutputWriter, WriteOptions};
 use crate::nraw::NrawFrame;
-use crate::quality::{rank_for_quality, source_geometry, target_geometry};
+use crate::quality::{bpp_of, rank_for_quality, source_geometry, target_geometry, Target};
 use crate::requant::{requant_codestream, RequantParams};
 use crate::resize::{self, Resizer};
 use crate::{Error, Options, Outcome, Result};
@@ -57,7 +57,16 @@ pub fn transcode(opt: &Options, cancel: &AtomicBool, progress: &mut dyn FnMut(f6
     if !is_supported_codec(video.codec) {
         return Err(Error(format!("not a Nikon N-RAW or R3D NE clip (codec {})", fourcc_str(video.codec))));
     }
-    let quality = opt.quality.clamp(1, 4);
+    // A bpp target at or above the source's cannot add quality: lossless repack instead.
+    let mut target = Target::new(opt.quality, opt.bpp);
+    if let Some(b) = target.bpp_value() {
+        let video_bytes: u64 = video.samples.iter().map(|s| s.size as u64).sum();
+        let src_bpp = bpp_of(video_bytes as f64 / video.samples.len().max(1) as f64, video.width, video.height);
+        if b >= src_bpp {
+            target = Target::quality(1);
+        }
+    }
+    let quality = target.preset();
     let src = source_geometry(&movie);
     let dst = target_geometry(src, opt.resolution);
     let resizing = dst.width != video.width || dst.height != video.height;
@@ -83,6 +92,7 @@ pub fn transcode(opt: &Options, cancel: &AtomicBool, progress: &mut dyn FnMut(f6
     let workers = if resizing { threads.clamp(2, 4) } else { threads.clamp(1, 16) };
     let max_in_flight = workers * 2;
     let target_rank = rank_for_quality(quality);
+    let budget = target.budget(video.width, video.height);
 
     let shared = Mutex::new(Shared { done: vec![None; nframes], next: 0, written: 0, stop: false, error: None });
     let cv = Condvar::new();
@@ -93,9 +103,9 @@ pub fn transcode(opt: &Options, cancel: &AtomicBool, progress: &mut dyn FnMut(f6
         let frame = NrawFrame::parse(&sample)?;
         let cs = &sample[frame.codestream_offset..];
         if let Some(r) = &resizer {
-            frame.build(&r.process(cs, quality)?, Some((dst.width, dst.height)))
+            frame.build(&r.process(cs, target)?, Some((dst.width, dst.height)))
         } else {
-            let p = RequantParams { target_rank, ..Default::default() };
+            let p = RequantParams { target_rank, budget, ..Default::default() };
             frame.build(&requant_codestream(cs, &p, 1)?.0, None)
         }
     };

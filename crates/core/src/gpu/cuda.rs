@@ -13,8 +13,8 @@ use std::sync::{Arc, Mutex};
 use cudarc::driver::{CudaContext, CudaFunction, CudaSlice, CudaStream, LaunchConfig, PushKernelArg};
 use cudarc::nvrtc::{compile_ptx_with_opts, CompileOptions};
 
-use crate::frame::{decode_frame, encode_frame, level_widths, Coeffs};
-use crate::quality::{encode_rank_for_quality, Geometry};
+use crate::frame::{decode_frame, level_widths, Coeffs};
+use crate::quality::Geometry;
 use crate::resample::Taps;
 use crate::resize::{parse_source, plane_taps, Resizer};
 use crate::tico::{Layout, TicoHeader};
@@ -307,7 +307,7 @@ impl Resizer for CudaResizer {
         self.name.clone()
     }
 
-    fn process(&self, cs: &[u8], quality: u8) -> Result<Vec<u8>> {
+    fn process(&self, cs: &[u8], target: crate::quality::Target) -> Result<Vec<u8>> {
         let (h, ls, ld) = parse_source(cs, &self.src, &self.dst)?;
         let mut c = self.acquire(&ls, &ld)?;
         let result = (|| -> Result<Vec<u8>> {
@@ -320,7 +320,7 @@ impl Resizer for CudaResizer {
             let nd = Coeffs::len(&ld);
             c.stream.memcpy_dtoh(&c.a.slice(0..nd), &mut c.host[..nd]).map_err(err)?;
             c.stream.synchronize().map_err(err)?;
-            encode_frame(&h, &ld, &c.host[..nd], encode_rank_for_quality(quality))
+            crate::resize::encode_target(&h, &ld, &c.host[..nd], target)
         })();
         self.free.lock().unwrap().push(c);
         result

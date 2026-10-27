@@ -18,6 +18,7 @@
 
 use rayon::prelude::*;
 
+use crate::rate::{finest_fitting, max_rank, slice_budgets, Coded, SliceBudget};
 use crate::requant::from_rank;
 use crate::tico::*;
 use crate::util::{parallel_for, SyncPtr};
@@ -155,78 +156,161 @@ pub fn decode_frame(cs: &[u8], h: &TicoHeader, l: &Layout, out: &mut [i32]) -> R
     })
 }
 
-/// Entropy-encodes a frame from its coefficients at a uniform truncation rank.
-pub fn encode_frame(h: &TicoHeader, l: &Layout, coeffs: &[i32], rank: i32) -> Result<Vec<u8>> {
-    let nb = l.bands.len();
-    let (q, r) = from_rank(rank, nb as i32);
+/// Quantizes precinct `p` of `coeffs` at (q, r) into `pd`.
+fn fill_precinct(h: &TicoHeader, l: &Layout, coeffs: &[i32], p: usize, q: i32, r: i32, pd: &mut PrecinctData) {
     let fq = h.fq;
     let round = if fq > 0 { 1u32 << (fq - 1) } else { 0 };
     let max_mag = (1u32 << TRUNCATION_MAX) - 1;
     let cw = l.cw;
     let plane = l.precincts * cw;
-    let slices: Vec<Result<Vec<u8>>> = (0..l.slices)
+    pd.q = q;
+    pd.r = r;
+    pd.packets.resize_with(l.packets.len(), Vec::new);
+    for (k, pk) in l.packets.iter().enumerate() {
+        let lines = &mut pd.packets[k];
+        lines.resize_with(pk.band_end - pk.band_begin, BandLine::default);
+        for (i, bl) in lines.iter_mut().enumerate() {
+            let b = pk.band_begin + i;
+            let band = &l.bands[b];
+            bl.band = b;
+            bl.gtli = compute_gtli(band.gain, band.priority, q, r);
+            let hi = band.high || pk.line == 1;
+            let at = ((if hi { 4 } else { 0 }) + band.comp) * plane + p * cw + band.offset;
+            let row = &coeffs[at..at + band.width];
+            bl.gcli.clear();
+            bl.gcli.resize(band.groups, 0);
+            bl.mag.clear();
+            bl.mag.resize(band.groups * GROUP, 0);
+            bl.neg.clear();
+            bl.neg.resize(band.groups * GROUP, 0);
+            let t = bl.gtli;
+            for g in 0..band.groups {
+                let mut d = [0u32; GROUP];
+                let mut mx = 0;
+                for j in 0..GROUP {
+                    let x = g * GROUP + j;
+                    if x >= band.width {
+                        break;
+                    }
+                    let c = row[x];
+                    let a = ((c.unsigned_abs() + round) >> fq).min(max_mag);
+                    d[j] = a;
+                    mx = mx.max(a);
+                    bl.neg[x] = (c < 0) as u8;
+                }
+                let gc = bit_length(mx);
+                let mut any = 0;
+                if gc > t {
+                    for j in 0..GROUP {
+                        let m = quant_uniform(d[j], gc, t);
+                        bl.mag[g * GROUP + j] = m;
+                        any |= m;
+                    }
+                }
+                for j in 0..GROUP {
+                    if bl.mag[g * GROUP + j] == 0 {
+                        bl.neg[g * GROUP + j] = 0;
+                    }
+                }
+                bl.gcli[g] = if any != 0 { gc as u8 } else { t as u8 };
+            }
+        }
+    }
+}
+
+/// Entropy-encodes a frame from its coefficients at a uniform truncation rank.
+pub fn encode_frame(h: &TicoHeader, l: &Layout, coeffs: &[i32], rank: i32) -> Result<Vec<u8>> {
+    Ok(encode_uniform(h, l, coeffs, rank)?.0)
+}
+
+/// [`encode_frame`], also returning each precinct's coded size.
+fn encode_uniform(h: &TicoHeader, l: &Layout, coeffs: &[i32], rank: i32) -> Result<(Vec<u8>, Vec<usize>)> {
+    let nb = l.bands.len();
+    let (q, r) = from_rank(rank, nb as i32);
+    let slices: Vec<Result<(Vec<u8>, Vec<usize>)>> = (0..l.slices)
         .into_par_iter()
         .map(|s| {
             let mut st = PredState::default();
             st.reset(nb);
-            let mut pd = PrecinctData { q, r, packets: vec![Vec::new(); l.packets.len()], ..Default::default() };
+            let mut pd = PrecinctData::default();
             let mut scratch = EncodeScratch::default();
             let mut out = vec![0xff, 0x20, 0x00, 0x04, (s >> 8) as u8, s as u8];
             let p0 = s * l.slice_height;
             let p1 = l.precincts.min(p0 + l.slice_height);
+            let mut sizes = Vec::with_capacity(p1 - p0);
             for p in p0..p1 {
-                for (k, pk) in l.packets.iter().enumerate() {
-                    let lines = &mut pd.packets[k];
-                    lines.resize_with(pk.band_end - pk.band_begin, BandLine::default);
-                    for (i, bl) in lines.iter_mut().enumerate() {
-                        let b = pk.band_begin + i;
-                        let band = &l.bands[b];
-                        bl.band = b;
-                        bl.gtli = compute_gtli(band.gain, band.priority, q, r);
-                        let hi = band.high || pk.line == 1;
-                        let at = ((if hi { 4 } else { 0 }) + band.comp) * plane + p * cw + band.offset;
-                        let row = &coeffs[at..at + band.width];
-                        bl.gcli.clear();
-                        bl.gcli.resize(band.groups, 0);
-                        bl.mag.clear();
-                        bl.mag.resize(band.groups * GROUP, 0);
-                        bl.neg.clear();
-                        bl.neg.resize(band.groups * GROUP, 0);
-                        let t = bl.gtli;
-                        for g in 0..band.groups {
-                            let mut d = [0u32; GROUP];
-                            let mut mx = 0;
-                            for j in 0..GROUP {
-                                let x = g * GROUP + j;
-                                if x >= band.width {
-                                    break;
-                                }
-                                let c = row[x];
-                                let a = ((c.unsigned_abs() + round) >> fq).min(max_mag);
-                                d[j] = a;
-                                mx = mx.max(a);
-                                bl.neg[x] = (c < 0) as u8;
-                            }
-                            let gc = bit_length(mx);
-                            let mut any = 0;
-                            if gc > t {
-                                for j in 0..GROUP {
-                                    let m = quant_uniform(d[j], gc, t);
-                                    bl.mag[g * GROUP + j] = m;
-                                    any |= m;
-                                }
-                            }
-                            for j in 0..GROUP {
-                                if bl.mag[g * GROUP + j] == 0 {
-                                    bl.neg[g * GROUP + j] = 0;
-                                }
-                            }
-                            bl.gcli[g] = if any != 0 { gc as u8 } else { t as u8 };
-                        }
-                    }
-                }
+                let before = out.len();
+                fill_precinct(h, l, coeffs, p, q, r, &mut pd);
                 choose_modes(l, &mut pd, &st);
                 encode_precinct(l, &pd, None, &mut st, &mut scratch, &mut out)?;
+                sizes.push(out.len() - before);
+            }
+            Ok((out, sizes))
+        })
+        .collect();
+    let mut parts = Vec::with_capacity(l.slices);
+    let mut sizes = Vec::with_capacity(l.precincts);
+    for r in slices {
+        let (v, sz) = r?;
+        parts.push(v);
+        sizes.extend(sz);
+    }
+    Ok((assemble_codestream(h, l.width as i32, l.height as i32, &parts), sizes))
+}
+
+/// Entropy-encodes a frame to fit `budget` codestream bytes (see [`crate::rate`]): each
+/// precinct takes the finest rank, but never finer than `finest`, that fits its share.
+pub fn encode_frame_budget(h: &TicoHeader, l: &Layout, coeffs: &[i32], finest: i32, budget: usize) -> Result<Vec<u8>> {
+    // First pass at the finest rank: the output when it fits, else the precinct weights.
+    let (first, weights) = encode_uniform(h, l, coeffs, finest)?;
+    if first.len() <= budget {
+        return Ok(first);
+    }
+    let nb = l.bands.len();
+    let hi = max_rank(l).max(finest);
+    let budgets = slice_budgets(l, h.raw.len(), budget, &weights);
+    let code = |p: usize, rank: i32, enc: &PredState, pd: &mut PrecinctData, scratch: &mut EncodeScratch| {
+        let (q, r) = from_rank(rank, nb as i32);
+        fill_precinct(h, l, coeffs, p, q, r, pd);
+        choose_modes(l, pd, enc);
+        let mut state = enc.clone();
+        let mut bytes = Vec::new();
+        encode_precinct(l, pd, None, &mut state, scratch, &mut bytes)?;
+        Ok(Coded { rank, bytes, state })
+    };
+    // Every slice starts its search where the first precinct of the middle slice lands
+    // (computed once, so the output does not depend on the thread count).
+    let start = {
+        let s = l.slices / 2;
+        let p = s * l.slice_height;
+        let p1 = l.precincts.min(p + l.slice_height);
+        let share = SliceBudget::new(budgets[s], &weights[p..p1]).share(weights[p]);
+        let mut enc = PredState::default();
+        enc.reset(nb);
+        let (mut pd, mut scratch) = (PrecinctData::default(), EncodeScratch::default());
+        finest_fitting(finest, hi, finest, share, |rank| code(p, rank, &enc, &mut pd, &mut scratch))?.rank
+    };
+    let slices: Vec<Result<Vec<u8>>> = (0..l.slices)
+        .into_par_iter()
+        .map(|s| {
+            let mut enc = PredState::default();
+            enc.reset(nb);
+            let mut pd = PrecinctData::default();
+            let mut scratch = EncodeScratch::default();
+            let mut out = Vec::with_capacity(budgets[s] + 4096);
+            out.extend_from_slice(&[0xff, 0x20, 0x00, 0x04, (s >> 8) as u8, s as u8]);
+            let p0 = s * l.slice_height;
+            let p1 = l.precincts.min(p0 + l.slice_height);
+            let mut left = SliceBudget::new(budgets[s], &weights[p0..p1]);
+            let mut hint = start;
+            for p in p0..p1 {
+                let best = finest_fitting(finest, hi, hint, left.share(weights[p]), |rank| {
+                    code(p, rank, &enc, &mut pd, &mut scratch)
+                })?;
+                hint = best.rank;
+                left.spend(best.bytes.len(), weights[p]);
+                out.extend_from_slice(&best.bytes);
+                enc = best.state;
             }
             Ok(out)
         })

@@ -23,8 +23,8 @@ use opencl3::memory::{Buffer, ClMem, CL_MEM_READ_ONLY, CL_MEM_READ_WRITE};
 use opencl3::program::Program;
 use opencl3::types::{cl_device_id, CL_BLOCKING};
 
-use crate::frame::{decode_frame, encode_frame, level_widths, Coeffs};
-use crate::quality::{encode_rank_for_quality, Geometry};
+use crate::frame::{decode_frame, level_widths, Coeffs};
+use crate::quality::Geometry;
 use crate::resample::Taps;
 use crate::resize::{parse_source, plane_taps, Resizer};
 use crate::tico::{Layout, TicoHeader};
@@ -391,14 +391,14 @@ impl Resizer for OpenClResizer {
         self.name.clone()
     }
 
-    fn process(&self, cs: &[u8], quality: u8) -> Result<Vec<u8>> {
+    fn process(&self, cs: &[u8], target: crate::quality::Target) -> Result<Vec<u8>> {
         let (h, ls, ld) = parse_source(cs, &self.src, &self.dst)?;
         let mut c = self.acquire(&ls, &ld)?;
         let result = (|| -> Result<Vec<u8>> {
             let ns = Coeffs::len(&ls);
             decode_frame(cs, &h, &ls, &mut c.host[..ns])?;
             let out = self.run(&mut c, &h, &ls, &ld)?;
-            encode_frame(&h, &ld, &out, encode_rank_for_quality(quality))
+            crate::resize::encode_target(&h, &ld, &out, target)
         })();
         self.free.lock().unwrap().push(c);
         result

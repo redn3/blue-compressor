@@ -175,6 +175,7 @@ pub unsafe extern "C" fn bc_transcode(
         input,
         output,
         quality: o.quality.clamp(1, 4) as u8,
+        bpp: None,
         resolution: resolution(o.resolution),
         backend: backend(o.backend),
         threads: o.threads.max(0) as usize,

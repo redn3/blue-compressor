@@ -20,13 +20,90 @@ pub fn rank_for_quality(quality: u8) -> Option<i32> {
     }
 }
 
+/// Range of the bits per sample setting.
+pub const BPP_MIN: f64 = 0.5;
+pub const BPP_MAX: f64 = 8.0;
+
+/// What a job compresses to: a quality preset (1 to 4) or a target size in bits per Bayer
+/// sample, kept in tenths (0.1 resolution) so it can be compared and used as a key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Target {
+    Quality(u8),
+    /// Tenths of a bit per sample.
+    Bpp(u16),
+}
+
+impl Target {
+    /// A preset, clamped to 1 to 4.
+    pub fn quality(q: u8) -> Target {
+        Target::Quality(q.clamp(1, 4))
+    }
+
+    /// A bits per sample target rounded to 0.1 and clamped to [`BPP_MIN`, `BPP_MAX`].
+    pub fn bpp(v: f64) -> Target {
+        let v = if v.is_finite() { v } else { BPP_MAX };
+        Target::Bpp((v.clamp(BPP_MIN, BPP_MAX) * 10.0).round() as u16)
+    }
+
+    /// The bpp target when one is given, else the quality preset.
+    pub fn new(quality: u8, bpp: Option<f64>) -> Target {
+        bpp.map_or_else(|| Target::quality(quality), Target::bpp)
+    }
+
+    pub fn bpp_value(&self) -> Option<f64> {
+        match *self {
+            Target::Bpp(t) => Some(t as f64 / 10.0),
+            Target::Quality(_) => None,
+        }
+    }
+
+    /// Codestream byte budget of one `width` x `height` frame (bpp mode).
+    pub fn budget(&self, width: u32, height: u32) -> Option<usize> {
+        match *self {
+            Target::Bpp(t) => Some((t as u64 * width as u64 * height as u64 / 80) as usize),
+            Target::Quality(_) => None,
+        }
+    }
+
+    /// The quality preset (1 when in bpp mode).
+    pub fn preset(&self) -> u8 {
+        match *self {
+            Target::Quality(q) => q,
+            Target::Bpp(_) => 1,
+        }
+    }
+}
+
+/// Bits per Bayer sample of `bytes` per frame of `width` x `height`.
+pub fn bpp_of(bytes: f64, width: u32, height: u32) -> f64 {
+    let n = width as f64 * height as f64;
+    if n > 0.0 {
+        8.0 * bytes / n
+    } else {
+        0.0
+    }
+}
+
+/// Folder name form of a bpp value: "1.2bpp", "3bpp".
+pub fn bpp_tag(bpp: f64) -> String {
+    let t = (bpp * 10.0).round() as i64;
+    if t % 10 == 0 {
+        format!("{}bpp", t / 10)
+    } else {
+        format!("{}.{}bpp", t / 10, t % 10)
+    }
+}
+
+/// Finest rank the resize re-encoder uses (the Q1 truncation for resized output).
+pub const RESIZE_FINEST_RANK: i32 = 125;
+
 /// Rank used by the re-encoder for resized output. Resized output has no camera coding to
 /// preserve; Q1 uses a fine truncation that is transparent to the resampled signal.
 pub fn encode_rank_for_quality(quality: u8) -> i32 {
     if let Some(r) = std::env::var("BC_ENCODE_RANK").ok().and_then(|v| v.parse().ok()) {
         return r; // calibration only
     }
-    rank_for_quality(quality).unwrap_or(125)
+    rank_for_quality(quality).unwrap_or(RESIZE_FINEST_RANK)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

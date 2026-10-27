@@ -11,7 +11,7 @@ use std::time::{Duration, Instant, SystemTime};
 use bluecompress::{Backend, Options, Resolution};
 use serde::{Deserialize, Serialize};
 
-use crate::{codec_name, fourcc, is_clip, parse_resolution, ps, q, resolution_name};
+use crate::{bpp_json, codec_name, fourcc, is_clip, parse_resolution, ps, q, resolution_name, setting_label};
 
 const SETTINGS_FILE: &str = ".bluecompress-watch.json";
 
@@ -19,6 +19,8 @@ pub struct WatchConfig {
     pub input_dir: PathBuf,
     pub output_dir: PathBuf,
     pub quality: u8,
+    /// Bits per sample target instead of `quality`.
+    pub bpp: Option<f64>,
     pub resolution: Resolution,
     pub backend: Backend,
     pub threads: usize,
@@ -33,6 +35,9 @@ pub struct WatchConfig {
 #[serde(rename_all = "camelCase")]
 pub struct PersistedWatchSettings {
     pub quality: Option<u8>,
+    /// Bits per sample target chosen in the Web UI; takes precedence over `quality`.
+    #[serde(default)]
+    pub bpp: Option<f64>,
     pub resolution: Option<String>,
     pub clear_after_process: Option<bool>,
 }
@@ -44,6 +49,8 @@ pub struct WatchSnapshot {
     pub input_dir: String,
     pub output_dir: String,
     pub quality: u8,
+    /// Bits per sample target instead of `quality`, if set.
+    pub bpp: Option<f64>,
     pub resolution: String,
     pub poll_seconds: u64,
     pub clear_after_process: bool,
@@ -70,6 +77,16 @@ pub fn is_ignored_name(name: &str) -> bool {
         || name.eq_ignore_ascii_case("#snapshot")
         || name.ends_with(".partial")
         || name.ends_with(".tmp")
+}
+
+/// The watch bpp target at start: a setting saved from the Web UI wins (a saved bpp, or a
+/// saved quality, which means no bpp), else the configured one.
+pub fn initial_bpp(persisted: &PersistedWatchSettings, configured: Option<f64>) -> Option<f64> {
+    match (persisted.bpp, persisted.quality) {
+        (Some(b), _) => bluecompress::Target::bpp(b).bpp_value(),
+        (None, Some(_)) => None,
+        (None, None) => configured,
+    }
 }
 
 pub fn load_persisted_settings(output_dir: &Path) -> PersistedWatchSettings {
@@ -172,6 +189,7 @@ pub fn run_watch(
 
     let persisted = load_persisted_settings(&cfg.output_dir);
     let init_quality = persisted.quality.filter(|q| (1..=4).contains(q)).unwrap_or(cfg.quality);
+    let init_bpp = initial_bpp(&persisted, cfg.bpp);
     let init_resolution = persisted.resolution.as_deref().and_then(parse_resolution).unwrap_or(cfg.resolution);
     let init_clear = persisted.clear_after_process.unwrap_or(cfg.clear_after_process);
 
@@ -180,6 +198,7 @@ pub fn run_watch(
         s.input_dir = ps(&cfg.input_dir);
         s.output_dir = ps(&cfg.output_dir);
         s.quality = init_quality;
+        s.bpp = init_bpp;
         s.resolution = resolution_name(init_resolution).into();
         s.poll_seconds = cfg.poll_seconds;
         s.clear_after_process = init_clear;
@@ -188,10 +207,10 @@ pub fn run_watch(
 
     if !cfg.quiet && !cfg.json {
         println!(
-            "[watch] watching {} -> {} (Q{}, {}, poll {}s, clear source: {})",
+            "[watch] watching {} -> {} ({}, {}, poll {}s, clear source: {})",
             cfg.input_dir.display(),
             cfg.output_dir.display(),
-            init_quality,
+            setting_label(init_quality, init_bpp),
             resolution_name(init_resolution),
             cfg.poll_seconds,
             if init_clear { "on" } else { "off" }
@@ -312,11 +331,11 @@ pub fn run_watch(
                     break;
                 }
 
-                let (live_quality, live_resolution) = {
+                let (live_quality, live_bpp, live_resolution) = {
                     let s = state.lock().unwrap();
                     let qv = s.quality.clamp(1, 4);
                     let rv = parse_resolution(&s.resolution).unwrap_or(cfg.resolution);
-                    (qv, rv)
+                    (qv, s.bpp, rv)
                 };
 
                 update_state(&state, hook.as_ref(), |s| {
@@ -331,24 +350,28 @@ pub fn run_watch(
                     if cfg.json {
                         println!(
                             "{{\"event\":\"start\",\"input\":{},\"output\":{},\"codec\":{},\"width\":{},\"height\":{},\
-                             \"frames\":{},\"out_width\":{ow},\"out_height\":{oh},\"quality\":{}}}",
+                             \"frames\":{},\"out_width\":{ow},\"out_height\":{oh},\"quality\":{},\"bpp\":{},\
+                             \"source_bpp\":{:.3}}}",
                             q(&ins),
                             q(&outs),
                             q(fourcc(&info)),
                             info.width,
                             info.height,
                             info.frames,
-                            live_quality
+                            live_quality,
+                            bpp_json(live_bpp),
+                            info.bpp
                         );
                     } else if !cfg.quiet {
                         println!(
-                            "[watch] compressing {rel_s}: {} {}x{}, {} frames @ {:.3} fps -> {ow}x{oh} Q{}",
+                            "[watch] compressing {rel_s}: {} {}x{}, {} frames @ {:.3} fps, {:.2} bpp -> {ow}x{oh} {}",
                             codec_name(&info),
                             info.width,
                             info.height,
                             info.frames,
                             info.fps,
-                            live_quality
+                            info.bpp,
+                            setting_label(live_quality, live_bpp)
                         );
                     }
                     let _ = std::io::stdout().flush();
@@ -358,6 +381,7 @@ pub fn run_watch(
                     input: clip.clone(),
                     output: tmp_out.clone(),
                     quality: live_quality,
+                    bpp: live_bpp,
                     resolution: live_resolution,
                     backend: cfg.backend,
                     threads: cfg.threads,

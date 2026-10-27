@@ -1,13 +1,13 @@
 //! The engine the app drives: the real core, or (feature `mock`) a stand-in with realistic
 //! numbers for working on the interface without decoding anything.
 
-pub use bluecompress::{Backend, Codec, Options, Resolution};
+pub use bluecompress::{Backend, Codec, Options, Resolution, Target};
 
 #[cfg(not(feature = "mock"))]
-pub use bluecompress::{backend_description, output_size, preview_region, probe, thumbnail, transcode_staged};
+pub use bluecompress::{backend_description, output_size, preview_region_for, probe, thumbnail, transcode_staged};
 
 #[cfg(feature = "mock")]
-pub use mock::{backend_description, output_size, preview_region, probe, thumbnail, transcode_staged};
+pub use mock::{backend_description, output_size, preview_region_for, probe, thumbnail, transcode_staged};
 
 #[cfg(feature = "mock")]
 mod mock {
@@ -34,6 +34,7 @@ mod mock {
                 file_bytes,
                 video_bytes: file_bytes - 5_000_000,
                 audio_tracks: 1,
+                bpp: 8.0 * (file_bytes - 5_000_000) as f64 / (276.0 * 6060.0 * 3410.0),
             }
         } else {
             ClipInfo {
@@ -45,6 +46,7 @@ mod mock {
                 file_bytes,
                 video_bytes: file_bytes - 5_000_000,
                 audio_tracks: 1,
+                bpp: 8.0 * (file_bytes - 5_000_000) as f64 / (360.0 * 8268.0 * 4652.0),
             }
         })
     }
@@ -77,6 +79,19 @@ mod mock {
         q * (f64::from(w) / f64::from(width)).powi(2)
     }
 
+    /// Output size as a fraction of the source for any target: a bpp target fills its
+    /// budget, but never more than the lossless repack.
+    fn keep_for(target: Target, info: &ClipInfo, resolution: Resolution) -> f64 {
+        match target.bpp_value() {
+            None => keep_ratio(target.preset(), resolution, info.width),
+            Some(b) => {
+                let (w, h) = output_size(info.width, info.height, resolution);
+                let area = f64::from(w) * f64::from(h) / (f64::from(info.width) * f64::from(info.height));
+                (b / info.bpp).min(0.91) * area
+            }
+        }
+    }
+
     /// The scene at quad (qx, qy) of a `qw` x `qh` quad grid: sky, hills and foliage-like
     /// texture, linear light. Defined per quad so any crop or zoom samples the same picture.
     fn scene(qx: f64, qy: f64, qw: f64, qh: f64, t: f64) -> [f64; 3] {
@@ -102,15 +117,15 @@ mod mock {
         (h >> 11) as f64 / (1u64 << 53) as f64 - 0.5
     }
 
-    static LAST: std::sync::Mutex<Option<(std::path::PathBuf, u32, u8, Resolution)>> = std::sync::Mutex::new(None);
+    static LAST: std::sync::Mutex<Option<(std::path::PathBuf, u32, Target, Resolution)>> = std::sync::Mutex::new(None);
 
     /// Before and after of `crop` (fractions of the frame) at `width` pixels. The after image
     /// smooths the noise by the quality step and averages quad blocks when downscaling. A new
     /// frame or setting costs a simulated decode; panning and zooming only re-render.
-    pub fn preview_region(
+    pub fn preview_region_for(
         path: &Path,
         frame: u32,
-        quality: u8,
+        target: Target,
         resolution: Resolution,
         _b: Backend,
         crop: [f64; 4],
@@ -119,7 +134,7 @@ mod mock {
         let info = probe(path)?;
         let frame = frame.min(info.frames - 1);
         {
-            let key = (path.to_path_buf(), frame, quality, resolution);
+            let key = (path.to_path_buf(), frame, target, resolution);
             let mut last = LAST.lock().unwrap();
             if last.as_ref() != Some(&key) {
                 std::thread::sleep(Duration::from_millis(450));
@@ -132,11 +147,12 @@ mod mock {
         let w = width.clamp(16, 8192) as usize;
         let h = ((w as f64 * (crop[3] * qh) / (crop[2] * qw)).round() as usize).max(1);
         let t = f64::from(frame) / f64::from(info.frames.max(1));
-        let strength = match quality {
-            1 => 0.0,
-            2 => 0.25,
-            3 => 0.5,
-            _ => 0.85,
+        let strength = match target {
+            Target::Quality(1) => 0.0,
+            Target::Quality(2) => 0.25,
+            Target::Quality(3) => 0.5,
+            Target::Quality(_) => 0.85,
+            Target::Bpp(_) => ((0.91 - keep_for(target, &info, Resolution::Original)) / 0.56).clamp(0.0, 0.85),
         };
         let (ow, _) = output_size(info.width, info.height, resolution);
         let block = ((f64::from(info.width) / f64::from(ow)).round() as i64).max(1);
@@ -180,14 +196,21 @@ mod mock {
             before_rgba: before,
             after_rgba: after,
             source_frame_bytes: source,
-            output_frame_bytes: (source as f64 * keep_ratio(quality, resolution, info.width) * (0.97 + 0.06 * t))
-                as u64,
+            output_frame_bytes: (source as f64 * keep_for(target, &info, resolution) * (0.97 + 0.06 * t)) as u64,
             frames: info.frames,
         })
     }
 
     pub fn thumbnail(path: &Path, frame: u32, width: u32) -> bluecompress::Result<Thumbnail> {
-        let p = preview_region(path, frame, 1, Resolution::Original, Backend::Cpu, [0.0, 0.0, 1.0, 1.0], width)?;
+        let p = preview_region_for(
+            path,
+            frame,
+            Target::quality(1),
+            Resolution::Original,
+            Backend::Cpu,
+            [0.0, 0.0, 1.0, 1.0],
+            width,
+        )?;
         Ok(Thumbnail { width: p.width, height: p.height, rgba: p.before_rgba })
     }
 
@@ -223,20 +246,7 @@ mod mock {
             let el = start.elapsed().as_secs_f64();
             progress(f64::from(f + 1) / f64::from(info.frames), f64::from(f + 1) / el.max(1e-3));
         }
-        let ratio = match o.quality {
-            1 => 0.91,
-            2 => 0.82,
-            3 => 0.63,
-            _ => 0.43,
-        } * if resize {
-            if o.resolution == Resolution::K4 {
-                0.25
-            } else {
-                0.5
-            }
-        } else {
-            1.0
-        };
+        let ratio = keep_for(Target::new(o.quality, o.bpp), &info, o.resolution);
         let seconds = start.elapsed().as_secs_f64();
         Ok(Outcome {
             input_bytes: info.file_bytes,

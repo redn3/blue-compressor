@@ -86,6 +86,34 @@ square-root companding transfer curve. Blue Compressor:
   geometry stages run on the GPU (Metal on macOS, optional CUDA and OpenCL); entropy coding stays
   on the CPU.
 
+### Advanced: a target in bits per pixel
+
+The quality steps are all most people need. For those who think in bit rates there is
+an **Advanced** switch in the app (and `--bpp` on the command line) that sets the size
+directly, in bits per Bayer sample: the coded size of a frame times 8, divided by its
+width times height. Nikon's own HE stills come out at about 3 bpp and HE\* at about 5,
+following the analysis credited below; `bluecompress probe` and the app show each
+clip's own rate.
+
+* Each frame is rate controlled to fit `bpp × width × height / 8` bytes. The first pass
+  is the finest coding allowed (the lossless repack, or the resizer's finest setting);
+  if that fits, it is the output. Otherwise the budget is shared over the slices and
+  precincts in proportion to their sizes in that pass, each precinct takes the finest
+  quantization that fits its share, and any bytes it leaves go to the ones after it.
+  Coding is never finer than the camera's.
+* A target at or above the clip's own rate gains nothing and gives the Q1 lossless repack.
+* Targets go from 0.5 to 8 in 0.1 steps. Output is deterministic, whatever the thread
+  count. It works at the original resolution and with 6K or 4K resizing, on every
+  backend (the GPU does the resizing; rate control is part of the entropy coding, which
+  is on the CPU). It costs about two to three times the CPU time of a fixed quality step
+  at the original resolution, because precincts are coded more than once to find the
+  finest fit.
+
+The bits-per-sample measure and the HE and HE\* figures come from *Nikon HE and HE\* RAW:
+Format analysis and decoding reference* (sections 2.1 and 2.2), copyright (c) 2026
+patrol_taking_9j (RdWing), licensed under
+[CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
+
 ## Repository layout
 
 ```
@@ -134,7 +162,7 @@ cargo tauri build        # release bundle (.app/.dmg, .msi/.exe, .deb/.AppImage)
 ```
 
 The app writes each version into a folder named after its setting, next to the clip
-(`Compressed Q2/`, `Compressed Q3 4K/`), and keeps the file names so edits relink. Use
+(`Compressed Q2/`, `Compressed Q3 4K/`, or `Compressed 1.2bpp/` in Advanced mode), and keeps the file names so edits relink. Use
 **Compress again** on a finished clip to make another version with different settings.
 
 Platform prerequisites are listed in the [Tauri guide](https://v2.tauri.app/start/prerequisites/).
@@ -155,6 +183,9 @@ bluecompress compress -q 3 -r 6k clip.NEV --output clip_6k.NEV
 # Machine-readable progress for build servers (one JSON object per line)
 bluecompress compress --json --skip-existing footage/ -o out/
 
+# Advanced: about 2.5 bits per pixel, every frame rate controlled to fit
+bluecompress compress --bpp 2.5 footage/ -o out/
+
 # Watch a folder for incoming clips (add --clear-watch to remove sources after compression)
 bluecompress watch --input /watch/in --output /watch/out -q 3 -r original
 
@@ -165,14 +196,18 @@ bluecompress probe --json clip.R3D
 bluecompress backends
 ```
 
-Options: `-q 1..4`, `-r original|6k|4k`, `-b auto|cpu|metal|cuda|opencl`, `-j threads`,
+Options: `-q 1..4` or `--bpp 0.5..8` (not both), `-r original|6k|4k`, `-b auto|cpu|metal|cuda|opencl`, `-j threads`,
 `--suffix`, `--overwrite`, `--skip-existing`, `--json`, `--quiet`.
 
 * **Writing outputs**: each output goes to `<name>.partial` and is renamed when
   complete. Originals are never modified. Ctrl+C cancels cleanly.
 * **Exit codes**: 0 success, 1 a clip failed, 2 usage error, 3 cancelled.
 * **JSON events**: `start`, `progress`, `done`, `skipped`, `error`, `summary`. The `probe`
-  command emits `clip` events instead.
+  command emits `clip` events instead, with each clip's source `bpp`. With `--bpp`, the
+  `start` event carries `bpp` and `source_bpp`.
+* **Folders**: the app and the Web UI (`serve`) write next to each clip into a folder
+  named after the setting: `Compressed Q2/`, `Compressed Q3 4K/`, or for a bpp target
+  `Compressed 1.2bpp/` and `Compressed 2bpp 4K/`.
 
 ## Docker and Synology NAS
 
@@ -245,6 +280,8 @@ services:
 | `QUALITY` | `2` | Default quality preset (`1`..`4`) for the Web UI (and fallback for `WATCH_QUALITY`). |
 | `RESOLUTION` | `original` | Default resolution (`original`, `6k`, `4k`) for the Web UI (and fallback for `WATCH_RESOLUTION`). |
 | `WATCH_QUALITY` | `3` | Quality preset for watch-folder jobs (`1`..`4`), also adjustable live in the Web UI. |
+| `BPP` | unset | Advanced: default bits-per-pixel target (`0.5`..`8`) for the Web UI instead of `QUALITY` (and fallback for `WATCH_BPP`). |
+| `WATCH_BPP` | unset | Advanced: bits-per-pixel target for watch-folder jobs instead of `WATCH_QUALITY`. Choosing a quality in the Web UI switches back to it. |
 | `WATCH_RESOLUTION` | `original` | Output resolution for watch-folder jobs (`original`, `6k`, `4k`), also adjustable live in the Web UI. |
 | `WATCH_POLL_SECONDS` | `5` | Seconds between watch-folder scans and file-copy stability checks. |
 | `WATCH_CLEAR` | `false` | Set to `true` (or toggle **Clear watch folder after process** in the Web UI) to delete source clips from `WATCH_INPUT` once compression succeeds. |

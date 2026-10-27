@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use crate::bmff::{InputFile, Movie};
 use crate::frame::{decode_frame, inverse_star_tetrix, inverse_wavelet, Coeffs, Planes, Transfer};
 use crate::nraw::NrawFrame;
-use crate::quality::{rank_for_quality, source_geometry, target_geometry};
+use crate::quality::{bpp_of, rank_for_quality, source_geometry, target_geometry, Target};
 use crate::requant::{requant_codestream, RequantParams};
 use crate::tico::{Layout, TicoHeader};
 use crate::transcode::is_supported_codec;
@@ -42,7 +42,7 @@ struct Raw {
 
 /// The last decoded frame pair, so zooming and panning around one frame stay fast.
 struct Decoded {
-    key: (PathBuf, u32, u8, Resolution),
+    key: (PathBuf, u32, Target, Resolution),
     before: Raw,
     after: Raw,
     source_frame_bytes: u64,
@@ -137,8 +137,14 @@ fn render(rgb: &[[f32; 3]], gains: [f32; 3], exposure: f32) -> Vec<u8> {
     out
 }
 
-fn decode_pair(path: &Path, frame: u32, quality: u8, resolution: Resolution, backend: Backend) -> Result<Arc<Decoded>> {
-    let key = (path.to_path_buf(), frame, quality, resolution);
+fn decode_pair(
+    path: &Path,
+    frame: u32,
+    target: Target,
+    resolution: Resolution,
+    backend: Backend,
+) -> Result<Arc<Decoded>> {
+    let key = (path.to_path_buf(), frame, target, resolution);
     if let Some(d) = CACHE.lock().unwrap().as_ref().filter(|d| d.key == key) {
         return Ok(d.clone());
     }
@@ -158,10 +164,22 @@ fn decode_pair(path: &Path, frame: u32, quality: u8, resolution: Resolution, bac
 
     let src = source_geometry(&movie);
     let dst = target_geometry(src, resolution);
+    // As in a real run: a bpp target at or above the clip's gives the lossless repack.
+    let mut target = target;
+    if let Some(b) = target.bpp_value() {
+        let video_bytes: u64 = video.samples.iter().map(|s| s.size as u64).sum();
+        if b >= bpp_of(video_bytes as f64 / video.samples.len() as f64, video.width, video.height) {
+            target = Target::quality(1);
+        }
+    }
     let out_cs = if dst.width != video.width || dst.height != video.height {
-        resize::create(backend, src, dst)?.process(cs, quality)?
+        resize::create(backend, src, dst)?.process(cs, target)?
     } else {
-        let p = RequantParams { target_rank: rank_for_quality(quality), ..Default::default() };
+        let p = RequantParams {
+            target_rank: rank_for_quality(target.preset()),
+            budget: target.budget(video.width, video.height),
+            ..Default::default()
+        };
         requant_codestream(cs, &p, 0)?.0
     };
     let d = Arc::new(Decoded {
@@ -188,7 +206,7 @@ fn frame_count(path: &Path) -> Result<u32> {
 pub fn preview_frame(
     path: &Path,
     frame: u32,
-    quality: u8,
+    target: Target,
     resolution: Resolution,
     backend: Backend,
     crop: [f64; 4],
@@ -196,7 +214,11 @@ pub fn preview_frame(
 ) -> Result<Preview> {
     let frames = frame_count(path)?;
     let frame = frame.min(frames.saturating_sub(1));
-    let d = decode_pair(path, frame, quality.clamp(1, 4), resolution, backend)?;
+    let target = match target {
+        Target::Quality(q) => Target::quality(q),
+        t => t,
+    };
+    let d = decode_pair(path, frame, target, resolution, backend)?;
     let x = crop[0].clamp(0.0, 1.0);
     let y = crop[1].clamp(0.0, 1.0);
     let crop = [x, y, crop[2].clamp(1e-4, 1.0 - x).max(1e-4), crop[3].clamp(1e-4, 1.0 - y).max(1e-4)];

@@ -43,7 +43,7 @@
           <p class="hint" id="resolution-note"></p>
         </section>
 
-        <section class="field">
+        <section class="field" id="quality-field">
           <div class="field-label" id="label-quality">Quality</div>
           <div class="seg seg-quality" id="seg-quality" role="radiogroup" aria-label="Quality">
             <button data-value="1" role="radio"><b>Q1</b><small>Lossless</small></button>
@@ -61,6 +61,29 @@
               <div class="meter-fill" id="quality-meter"></div>
             </div>
             <div class="meter-legend"><span>Original size</span><span id="quality-meter-label"></span></div>
+          </div>
+        </section>
+
+        <section class="field advanced-field">
+          <label class="switch-row" id="advanced-row" title="For people who know raw bit rates. Off, the quality steps above are all you need.">
+            <span class="switch-text">
+              <span class="switch-title">Advanced</span>
+              <span class="switch-sub" id="advanced-sub">Set the size yourself, in bits per pixel</span>
+            </span>
+            <input type="checkbox" id="advanced" class="switch">
+          </label>
+          <div class="bpp-card" id="bpp-card" hidden>
+            <div class="bpp-head">
+              <span class="field-label" id="label-bpp">Bits per pixel</span>
+              <span class="bpp-value"><input type="number" class="mini-input" id="bpp-num" min="0.5" max="8" step="0.1" inputmode="decimal" aria-label="Bits per pixel"><span>bpp</span></span>
+            </div>
+            <div class="bpp-slider">
+              <input type="range" id="bpp-range" class="range" min="0.5" max="8" step="0.1" aria-label="Bits per pixel">
+              <div class="bpp-sources" id="bpp-sources" aria-hidden="true"></div>
+            </div>
+            <div class="bpp-ticks" id="bpp-ticks" aria-hidden="true"></div>
+            <div class="bpp-legend"><span><i class="bpp-source-key"></i>Source clip</span><span>HE and HE*: Nikon's own rates</span></div>
+            <p class="hint bpp-note" id="bpp-note"></p>
           </div>
         </section>
 
@@ -184,9 +207,14 @@
           <div class="v-meta" id="v-meta"></div>
         </div>
         <div class="v-controls">
-          <div class="v-group"><span class="v-group-label">Quality</span>
+          <div class="v-group" id="v-quality-group"><span class="v-group-label">Quality</span>
             <div class="seg seg-sm" id="v-quality">
               <button data-value="1">Q1</button><button data-value="2">Q2</button><button data-value="3">Q3</button><button data-value="4">Q4</button>
+            </div>
+          </div>
+          <div class="v-group" id="v-bpp-group" hidden><span class="v-group-label">Bits per pixel</span>
+            <div class="v-squeeze">
+              <input type="number" class="mini-input" id="v-bpp" min="0.5" max="8" step="0.1" inputmode="decimal" aria-label="Bits per pixel">
             </div>
           </div>
           <div class="v-group"><span class="v-group-label">Resolution</span>
@@ -347,6 +375,7 @@
             <option value="1">Q1 Lossless</option><option value="2">Q2 Archival</option>
             <option value="3">Q3 High</option><option value="4">Q4 Compact</option>
           </select>
+          <input type="number" class="mini-input job-b" min="0.5" max="8" step="0.1" inputmode="decimal" title="Bits per pixel" aria-label="Bits per pixel">
           <select class="mini-select job-r" title="Resolution">
             <option value="original">Original</option><option value="6k">6K</option><option value="4k">4K UHD</option>
           </select>

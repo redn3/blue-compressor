@@ -19,7 +19,7 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State, WindowEvent};
 
-use engine::{Backend, Codec, Options, Resolution};
+use engine::{Backend, Codec, Options, Resolution, Target};
 
 #[derive(Default)]
 struct Runner {
@@ -43,6 +43,8 @@ struct Clip {
     frames: u32,
     fps: f64,
     bytes: u64,
+    /// Average coded bits per Bayer sample of the clip.
+    bpp: f64,
 }
 
 #[derive(Serialize)]
@@ -66,6 +68,9 @@ struct JobRequest {
     id: u64,
     path: String,
     quality: u8,
+    /// Bits per sample target instead of `quality` (Advanced mode).
+    #[serde(default)]
+    bpp: Option<f64>,
     resolution: String,
     /// Compress even when a compressed copy already exists ("Compress again").
     #[serde(default)]
@@ -164,6 +169,7 @@ fn describe(path: &Path) -> Clip {
         frames: 0,
         fps: 0.0,
         bytes: std::fs::metadata(path).map(|m| m.len()).unwrap_or(0),
+        bpp: 0.0,
     };
     match engine::probe(path) {
         Ok(i) => Clip {
@@ -177,24 +183,25 @@ fn describe(path: &Path) -> Clip {
             frames: i.frames,
             fps: i.fps,
             bytes: i.file_bytes,
+            bpp: i.bpp,
             ..base
         },
         Err(e) => Clip { error: Some(e.to_string()), ..base },
     }
 }
 
-/// Short name of a setting, used for output folders: "Q2", "Q3 6K", "Q1 4K".
-fn variant(quality: u8, resolution: &str) -> String {
-    bluecompress::variant_name(quality, resolution)
+/// What a job compresses to: its bpp target when it has one, else its quality.
+fn target_of(quality: u8, bpp: Option<f64>) -> Target {
+    Target::new(quality, bpp)
 }
 
 /// Where a job writes. Clips keep their file names, so edits relink; the setting goes in
 /// the folder name instead. Next to the clips that is a "Compressed Q2" (or "Compressed
 /// Q3 4K") folder beside each clip. In a chosen folder the files go straight in, and a second
-/// version of the same clip goes into a sub-folder named after its setting. Never an
-/// existing file, and never the input itself.
-fn output_for(input: &Path, folder: Option<&str>, quality: u8, resolution: &str) -> PathBuf {
-    let tag = variant(quality, resolution);
+/// version of the same clip goes into a sub-folder named after its setting ("Q2", "Q3 6K",
+/// "1.2bpp"). Never an existing file, and never the input itself.
+fn output_for(input: &Path, folder: Option<&str>, target: Target, resolution: &str) -> PathBuf {
+    let tag = bluecompress::variant_name_for(target, resolution);
     let name = input.file_name().unwrap_or_default();
     let same = |a: &Path, b: &Path| match (a.canonicalize(), b.canonicalize()) {
         (Ok(x), Ok(y)) => x == y,
@@ -252,6 +259,7 @@ async fn preview(
     path: String,
     frame: u32,
     quality: u8,
+    bpp: Option<f64>,
     resolution: String,
     backend: String,
     width: u32,
@@ -261,7 +269,8 @@ async fn preview(
     let backend = backend_of(&backend);
     let crop = crop.unwrap_or([0.0, 0.0, 1.0, 1.0]);
     let p = tauri::async_runtime::spawn_blocking(move || {
-        engine::preview_region(Path::new(&path), frame, quality.clamp(1, 4), res, backend, crop, width.clamp(16, 8192))
+        let target = target_of(quality, bpp);
+        engine::preview_region_for(Path::new(&path), frame, target, res, backend, crop, width.clamp(16, 8192))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -297,8 +306,8 @@ async fn thumbnail(path: String, width: u32) -> Result<tauri::ipc::Response, Str
 
 /// A compressed copy of `input` for this setting that an earlier run already finished, if
 /// any: the places `output_for` would put it, in the same order.
-fn existing_for(input: &Path, folder: Option<&str>, quality: u8, resolution: &str) -> Option<(PathBuf, u64)> {
-    bluecompress::existing_compressed(input, folder, quality, resolution)
+fn existing_for(input: &Path, folder: Option<&str>, target: Target, resolution: &str) -> Option<(PathBuf, u64)> {
+    bluecompress::existing_compressed_for(input, folder, target, resolution)
 }
 
 /// Seconds a finished clip actually spent compressing, without the time it was paused.
@@ -322,6 +331,8 @@ struct CheckExistingItem {
     id: u64,
     path: String,
     quality: u8,
+    #[serde(default)]
+    bpp: Option<f64>,
     resolution: String,
     width: u32,
     height: u32,
@@ -341,11 +352,8 @@ fn check_existing_outputs(folder: Option<&str>, items: &[CheckExistingItem]) -> 
         .iter()
         .filter_map(|it| {
             let res = bluecompress::effective_resolution(it.width, it.height, &it.resolution);
-            existing_for(Path::new(&it.path), folder, it.quality.clamp(1, 4), res).map(|(p, bytes)| ExistingOutput {
-                id: it.id,
-                output: p.to_string_lossy().into_owned(),
-                bytes,
-            })
+            existing_for(Path::new(&it.path), folder, target_of(it.quality, it.bpp), res)
+                .map(|(p, bytes)| ExistingOutput { id: it.id, output: p.to_string_lossy().into_owned(), bytes })
         })
         .collect()
 }
@@ -393,10 +401,11 @@ fn start(app: AppHandle, state: State<'_, Runner>, jobs: Vec<JobRequest>, settin
                 .map(|i| engine::output_size(i.width, i.height, resolution(&job.resolution)) != (i.width, i.height))
                 .unwrap_or(false);
             let res_name = if resized { job.resolution.as_str() } else { "original" };
+            let target = target_of(job.quality, job.bpp);
             // Already compressed by an earlier, interrupted run: keep it.
             if !job.force {
                 if let Some((out, out_bytes)) =
-                    existing_for(&input, settings.output_folder.as_deref(), job.quality.clamp(1, 4), res_name)
+                    existing_for(&input, settings.output_folder.as_deref(), target, res_name)
                 {
                     let _ = app.emit(
                         "job-done",
@@ -415,7 +424,7 @@ fn start(app: AppHandle, state: State<'_, Runner>, jobs: Vec<JobRequest>, settin
                     continue;
                 }
             }
-            let output = output_for(&input, settings.output_folder.as_deref(), job.quality.clamp(1, 4), res_name);
+            let output = output_for(&input, settings.output_folder.as_deref(), target, res_name);
             if let Some(dir) = output.parent() {
                 if let Err(e) = std::fs::create_dir_all(dir) {
                     let _ = app.emit(
@@ -435,6 +444,7 @@ fn start(app: AppHandle, state: State<'_, Runner>, jobs: Vec<JobRequest>, settin
                 input,
                 output,
                 quality: job.quality.clamp(1, 4),
+                bpp: target.bpp_value(),
                 resolution: resolution(&job.resolution),
                 backend,
                 threads: 0,

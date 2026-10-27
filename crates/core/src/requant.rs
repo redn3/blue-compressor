@@ -5,6 +5,7 @@
 
 use std::sync::Mutex;
 
+use crate::rate::{finest_fitting, max_rank, slice_budgets, Coded, SliceBudget};
 use crate::tico::*;
 use crate::util::parallel_for;
 use crate::Result;
@@ -17,11 +18,16 @@ pub struct RequantParams {
     pub optimize_modes: bool,
     /// Drop coded-but-empty bit planes (groups whose magnitudes are all zero).
     pub tidy: bool,
+    /// Target codestream size in bytes (bits per sample mode, see [`crate::rate`]). Each
+    /// precinct then takes the finest rank that fits its share, never finer than the
+    /// camera's, and `target_rank` is ignored. A codestream that already fits is repacked
+    /// losslessly.
+    pub budget: Option<usize>,
 }
 
 impl Default for RequantParams {
     fn default() -> Self {
-        RequantParams { target_rank: None, optimize_modes: true, tidy: true }
+        RequantParams { target_rank: None, optimize_modes: true, tidy: true, budget: None }
     }
 }
 
@@ -86,14 +92,77 @@ fn requant_line(band: &Band, bl: &mut BandLine, new_gtli: i32) {
     }
 }
 
+/// Requantizes a decoded precinct to `target` (no-op when the camera's rank is already at
+/// least as coarse) and tidies it.
+fn requantize(l: &Layout, pd: &mut PrecinctData, target: i32, rank0: i32, tidy_lines: bool) -> bool {
+    let nb = l.bands.len() as i32;
+    if target > rank0 {
+        let (q, r) = from_rank(target, nb);
+        pd.q = q;
+        pd.r = r;
+        for lines in pd.packets.iter_mut() {
+            for bl in lines.iter_mut() {
+                let band = &l.bands[bl.band];
+                let t1 = compute_gtli(band.gain, band.priority, q, r);
+                if t1 != bl.gtli {
+                    requant_line(band, bl, t1);
+                }
+                tidy(band, bl);
+            }
+        }
+        true
+    } else {
+        if tidy_lines {
+            for lines in pd.packets.iter_mut() {
+                for bl in lines.iter_mut() {
+                    tidy(&l.bands[bl.band], bl);
+                }
+            }
+        }
+        false
+    }
+}
+
 /// Transcodes one codestream, parallel over slices.
 pub fn requant_codestream(cs: &[u8], prm: &RequantParams, threads: usize) -> Result<(Vec<u8>, CodestreamStats)> {
+    if let Some(budget) = prm.budget {
+        // First pass: the lossless repack, which is the output when it already fits.
+        let lossless = RequantParams { target_rank: None, budget: None, ..*prm };
+        let (out, stats, sizes) = requant_inner(cs, &lossless, threads)?;
+        return if out.len() <= budget {
+            Ok((out, stats))
+        } else {
+            requant_to_budget(cs, prm, budget, &sizes, threads)
+        };
+    }
+    let (out, stats, _) = requant_inner(cs, prm, threads)?;
+    Ok((out, stats))
+}
+
+fn join_slices(header: &TicoHeader, slices: Vec<SliceOut>) -> (Vec<u8>, CodestreamStats, Vec<usize>) {
+    let mut total = CodestreamStats::default();
+    let mut parts = Vec::with_capacity(slices.len());
+    let mut all_sizes = Vec::new();
+    for m in slices {
+        let (v, st, sizes) = m.into_inner().unwrap();
+        total.precincts += st.precincts;
+        total.requantized += st.requantized;
+        total.rank_sum += st.rank_sum;
+        parts.push(v);
+        all_sizes.extend(sizes);
+    }
+    (assemble_codestream(header, header.width, header.height, &parts), total, all_sizes)
+}
+
+type SliceOut = Mutex<(Vec<u8>, CodestreamStats, Vec<usize>)>;
+
+/// [`requant_codestream`] without rate control; also returns each precinct's coded size.
+fn requant_inner(cs: &[u8], prm: &RequantParams, threads: usize) -> Result<(Vec<u8>, CodestreamStats, Vec<usize>)> {
     let (header, first_slice) = TicoHeader::parse(cs)?;
     let l = Layout::make(&header, header.width as usize, header.height as usize)?;
     let precincts = find_precincts(cs, first_slice, &l)?;
     let nb = l.bands.len();
-    let slices: Vec<Mutex<(Vec<u8>, CodestreamStats)>> =
-        (0..l.slices).map(|_| Mutex::new((Vec::new(), CodestreamStats::default()))).collect();
+    let slices: Vec<SliceOut> = (0..l.slices).map(|_| Mutex::default()).collect();
     let lossless = prm.target_rank.is_none();
 
     parallel_for(l.slices, threads, |s| {
@@ -108,54 +177,155 @@ pub fn requant_codestream(cs: &[u8], prm: &RequantParams, threads: usize) -> Res
         let mut st = CodestreamStats::default();
         let p0 = s * l.slice_height;
         let p1 = l.precincts.min(p0 + l.slice_height);
+        let mut sizes = Vec::with_capacity(p1 - p0);
         for p in p0..p1 {
+            let before = out.len();
             decode_precinct(cs, precincts[p], &l, p, &mut dec, &mut pd, lossless)?;
             let rank0 = rank_of(pd.q, pd.r, nb as i32);
             st.precincts += 1;
             st.rank_sum += rank0 as i64;
-            match prm.target_rank {
-                Some(target) if target > rank0 => {
-                    let (q, r) = from_rank(target, nb as i32);
-                    pd.q = q;
-                    pd.r = r;
+            if let Some(target) = prm.target_rank {
+                if requantize(&l, &mut pd, target, rank0, prm.tidy) {
                     st.requantized += 1;
-                    for lines in pd.packets.iter_mut() {
-                        for bl in lines.iter_mut() {
-                            let band = &l.bands[bl.band];
-                            let t1 = compute_gtli(band.gain, band.priority, q, r);
-                            if t1 != bl.gtli {
-                                requant_line(band, bl, t1);
-                            }
-                            tidy(band, bl);
-                        }
-                    }
                 }
-                Some(_) if prm.tidy => {
-                    for lines in pd.packets.iter_mut() {
-                        for bl in lines.iter_mut() {
-                            tidy(&l.bands[bl.band], bl);
-                        }
-                    }
-                }
-                _ => {}
             }
             if prm.optimize_modes {
                 choose_modes(&l, &mut pd, &enc);
             }
             encode_precinct(&l, &pd, Some(cs), &mut enc, &mut scratch, &mut out)?;
+            sizes.push(out.len() - before);
         }
-        *slices[s].lock().unwrap() = (out, st);
+        *slices[s].lock().unwrap() = (out, st, sizes);
         Ok(())
     })?;
+    Ok(join_slices(&header, slices))
+}
 
-    let mut total = CodestreamStats::default();
-    let mut parts = Vec::with_capacity(l.slices);
-    for m in slices {
-        let (v, st) = m.into_inner().unwrap();
-        total.precincts += st.precincts;
-        total.requantized += st.requantized;
-        total.rank_sum += st.rank_sum;
-        parts.push(v);
+/// Reusable buffers for coding one precinct candidate in [`requant_to_budget`].
+#[derive(Default)]
+struct Trial {
+    pd: PrecinctData,
+}
+
+impl Trial {
+    /// Codes `base` (decoded at the camera's `rank0`) at `rank`.
+    fn code(
+        &mut self,
+        l: &Layout,
+        base: &PrecinctData,
+        rank0: i32,
+        rank: i32,
+        prm: &RequantParams,
+        enc: &PredState,
+        scratch: &mut EncodeScratch,
+    ) -> Result<Coded> {
+        copy_precinct(&mut self.pd, base);
+        requantize(l, &mut self.pd, rank, rank0, prm.tidy);
+        if prm.optimize_modes {
+            choose_modes(l, &mut self.pd, enc);
+        }
+        let mut state = enc.clone();
+        let mut bytes = Vec::with_capacity(base.coded_bytes + 64);
+        encode_precinct(l, &self.pd, None, &mut state, scratch, &mut bytes)?;
+        Ok(Coded { rank, bytes, state })
     }
-    Ok((assemble_codestream(&header, header.width, header.height, &parts), total))
+}
+
+/// `dst = src.clone()`, reusing `dst`'s allocations.
+fn copy_precinct(dst: &mut PrecinctData, src: &PrecinctData) {
+    dst.q = src.q;
+    dst.r = src.r;
+    dst.coded_bytes = src.coded_bytes;
+    dst.modes.clone_from(&src.modes);
+    dst.spans.clone_from(&src.spans);
+    dst.packets.resize_with(src.packets.len(), Vec::new);
+    for (d, s) in dst.packets.iter_mut().zip(&src.packets) {
+        d.resize_with(s.len(), BandLine::default);
+        for (a, b) in d.iter_mut().zip(s) {
+            a.band = b.band;
+            a.gtli = b.gtli;
+            a.gcli.clone_from(&b.gcli);
+            a.mag.clone_from(&b.mag);
+            a.neg.clone_from(&b.neg);
+        }
+    }
+}
+
+/// [`requant_codestream`] with rate control to `budget` bytes (see [`crate::rate`]).
+/// `weights` are the precincts' sizes in the lossless repack.
+fn requant_to_budget(
+    cs: &[u8],
+    prm: &RequantParams,
+    budget: usize,
+    weights: &[usize],
+    threads: usize,
+) -> Result<(Vec<u8>, CodestreamStats)> {
+    let (header, first_slice) = TicoHeader::parse(cs)?;
+    let l = Layout::make(&header, header.width as usize, header.height as usize)?;
+    let precincts = find_precincts(cs, first_slice, &l)?;
+    let nb = l.bands.len();
+    let hi = max_rank(&l);
+    let budgets = slice_budgets(&l, header.raw.len(), budget, weights);
+    let slices: Vec<SliceOut> = (0..l.slices).map(|_| Mutex::default()).collect();
+
+    // Where each slice starts its search: the rank the first precinct of the middle slice
+    // needs for its share. Computed once before the slices run, so it is the same for any
+    // thread count, and it saves most of the search at every slice start.
+    let start = {
+        let s = l.slices / 2;
+        let p = s * l.slice_height;
+        let mut dec = PredState::default();
+        let mut enc = PredState::default();
+        dec.reset(nb);
+        enc.reset(nb);
+        let mut base = PrecinctData::default();
+        decode_precinct(cs, precincts[p], &l, p, &mut dec, &mut base, false)?;
+        let rank0 = rank_of(base.q, base.r, nb as i32);
+        let p1 = l.precincts.min(p + l.slice_height);
+        let share = SliceBudget::new(budgets[s], &weights[p..p1]).share(weights[p]);
+        let mut trial = Trial::default();
+        let mut scratch = EncodeScratch::default();
+        finest_fitting(rank0, hi.max(rank0), rank0, share, |rank| {
+            trial.code(&l, &base, rank0, rank, prm, &enc, &mut scratch)
+        })?
+        .rank
+    };
+
+    parallel_for(l.slices, threads, |s| {
+        let mut dec = PredState::default();
+        let mut enc = PredState::default();
+        dec.reset(nb);
+        enc.reset(nb);
+        let mut base = PrecinctData::default();
+        let mut scratch = EncodeScratch::default();
+        let mut out = Vec::with_capacity(budgets[s] + 4096);
+        out.extend_from_slice(&[0xff, 0x20, 0x00, 0x04, (s >> 8) as u8, s as u8]);
+        let mut st = CodestreamStats::default();
+        let p0 = s * l.slice_height;
+        let p1 = l.precincts.min(p0 + l.slice_height);
+        let mut left = SliceBudget::new(budgets[s], &weights[p0..p1]);
+        let mut hint = start;
+        let mut trial = Trial::default();
+        for p in p0..p1 {
+            decode_precinct(cs, precincts[p], &l, p, &mut dec, &mut base, false)?;
+            let rank0 = rank_of(base.q, base.r, nb as i32);
+            st.precincts += 1;
+            st.rank_sum += rank0 as i64;
+            let share = left.share(weights[p]);
+            let best = finest_fitting(rank0, hi.max(rank0), hint.max(rank0), share, |rank| {
+                trial.code(&l, &base, rank0, rank, prm, &enc, &mut scratch)
+            })?;
+            if best.rank > rank0 {
+                st.requantized += 1;
+            }
+            hint = best.rank;
+            left.spend(best.bytes.len(), weights[p]);
+            out.extend_from_slice(&best.bytes);
+            enc = best.state;
+        }
+        *slices[s].lock().unwrap() = (out, st, Vec::new());
+        Ok(())
+    })?;
+    let (out, stats, _) = join_slices(&header, slices);
+    Ok((out, stats))
 }

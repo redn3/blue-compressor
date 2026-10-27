@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use bluecompress::{Backend, Codec, Options, Resolution};
+use bluecompress::{Backend, Codec, Options, Resolution, Target};
 use serde::{Deserialize, Serialize};
 
 use crate::watch::{
@@ -29,6 +29,8 @@ pub struct ServeConfig {
     pub browse_root: PathBuf,
     pub initial_paths: Vec<String>,
     pub default_quality: u8,
+    /// Bits per sample target for new clips instead of `default_quality` (BPP or --bpp).
+    pub default_bpp: Option<f64>,
     pub default_resolution: Resolution,
     pub default_backend: Backend,
     pub threads: usize,
@@ -38,6 +40,7 @@ pub struct ServeConfig {
 struct ServerState {
     browse_root: PathBuf,
     default_quality: u8,
+    default_bpp: Option<f64>,
     default_resolution: Resolution,
     default_backend: Backend,
     threads: usize,
@@ -64,6 +67,8 @@ struct Clip {
     frames: u32,
     fps: f64,
     bytes: u64,
+    /// Average coded bits per Bayer sample of the clip.
+    bpp: f64,
 }
 
 #[derive(Serialize)]
@@ -76,6 +81,7 @@ struct AppInfo {
     web: bool,
     browse_root: String,
     default_quality: u8,
+    default_bpp: Option<f64>,
     default_resolution: String,
     watch: WatchSnapshot,
 }
@@ -84,7 +90,9 @@ struct AppInfo {
 #[serde(rename_all = "camelCase")]
 struct SetWatchSettingsArgs {
     clear_after_process: Option<bool>,
+    /// Setting a quality without a bpp switches the watch folder back to quality mode.
     quality: Option<u8>,
+    bpp: Option<f64>,
     resolution: Option<String>,
 }
 
@@ -100,6 +108,9 @@ struct JobRequest {
     id: u64,
     path: String,
     quality: u8,
+    /// Bits per sample target instead of `quality` (Advanced mode).
+    #[serde(default)]
+    bpp: Option<f64>,
     resolution: String,
     /// Compress even when a compressed copy already exists ("Compress again").
     #[serde(default)]
@@ -129,6 +140,7 @@ struct QueueJob {
     name: String,
     bytes: u64,
     quality: u8,
+    bpp: Option<f64>,
     resolution: String,
     force: bool,
     clip: Option<serde_json::Value>,
@@ -210,6 +222,8 @@ struct PreviewArgs {
     path: String,
     frame: u32,
     quality: u8,
+    #[serde(default)]
+    bpp: Option<f64>,
     resolution: String,
     backend: String,
     width: u32,
@@ -340,6 +354,7 @@ fn describe_clip(path: &Path) -> Clip {
         frames: 0,
         fps: 0.0,
         bytes: std::fs::metadata(path).map(|m| m.len()).unwrap_or(0),
+        bpp: 0.0,
     };
     match bluecompress::probe(path) {
         Ok(i) => Clip {
@@ -353,18 +368,20 @@ fn describe_clip(path: &Path) -> Clip {
             frames: i.frames,
             fps: i.fps,
             bytes: i.file_bytes,
+            bpp: i.bpp,
             ..base
         },
         Err(e) => Clip { error: Some(e.to_string()), ..base },
     }
 }
 
-fn variant(quality: u8, resolution: &str) -> String {
-    bluecompress::variant_name(quality, resolution)
+/// What a job compresses to: its bpp target when it has one, else its quality.
+fn target_of(quality: u8, bpp: Option<f64>) -> Target {
+    Target::new(quality, bpp)
 }
 
-fn output_for(input: &Path, folder: Option<&str>, quality: u8, resolution: &str) -> PathBuf {
-    let tag = variant(quality, resolution);
+fn output_for(input: &Path, folder: Option<&str>, target: Target, resolution: &str) -> PathBuf {
+    let tag = bluecompress::variant_name_for(target, resolution);
     let name = input.file_name().unwrap_or_default();
     let same = |a: &Path, b: &Path| match (a.canonicalize(), b.canonicalize()) {
         (Ok(x), Ok(y)) => x == y,
@@ -387,8 +404,8 @@ fn output_for(input: &Path, folder: Option<&str>, quality: u8, resolution: &str)
 
 /// A finished compressed copy of `input` that an earlier run already wrote for this
 /// setting, if any: the places `output_for` would put it, in the same order.
-fn existing_for(input: &Path, folder: Option<&str>, quality: u8, resolution: &str) -> Option<(PathBuf, u64)> {
-    bluecompress::existing_compressed(input, folder, quality, resolution)
+fn existing_for(input: &Path, folder: Option<&str>, target: Target, resolution: &str) -> Option<(PathBuf, u64)> {
+    bluecompress::existing_compressed_for(input, folder, target, resolution)
 }
 
 #[derive(Deserialize)]
@@ -397,6 +414,8 @@ struct CheckExistingItem {
     id: u64,
     path: String,
     quality: u8,
+    #[serde(default)]
+    bpp: Option<f64>,
     resolution: String,
     width: u32,
     height: u32,
@@ -423,11 +442,8 @@ fn check_existing_outputs(folder: Option<&str>, items: &[CheckExistingItem]) -> 
         .iter()
         .filter_map(|it| {
             let res = bluecompress::effective_resolution(it.width, it.height, &it.resolution);
-            existing_for(Path::new(&it.path), folder, it.quality.clamp(1, 4), res).map(|(p, bytes)| ExistingOutput {
-                id: it.id,
-                output: p.to_string_lossy().into_owned(),
-                bytes,
-            })
+            existing_for(Path::new(&it.path), folder, target_of(it.quality, it.bpp), res)
+                .map(|(p, bytes)| ExistingOutput { id: it.id, output: p.to_string_lossy().into_owned(), bytes })
         })
         .collect()
 }
@@ -668,6 +684,7 @@ fn start_queue(state: &Arc<ServerState>, args: StartArgs) -> Result<(), String> 
                 name,
                 bytes,
                 quality: job.quality.clamp(1, 4),
+                bpp: job.bpp.and_then(|b| Target::bpp(b).bpp_value()),
                 resolution: job.resolution,
                 force: job.force,
                 clip: job.clip,
@@ -731,6 +748,7 @@ fn run_job(st: &Arc<ServerState>, job: &QueueJob, settings: &Settings) {
     let backend = backend_of(&settings.backend, st.default_backend);
     let folder = settings.output_folder.as_deref();
     let quality = job.quality.clamp(1, 4);
+    let target = target_of(quality, job.bpp);
     let input = PathBuf::from(&job.path);
     let info = bluecompress::probe(&input).ok();
     let resized = info
@@ -741,7 +759,7 @@ fn run_job(st: &Arc<ServerState>, job: &QueueJob, settings: &Settings) {
 
     // Already compressed by an earlier (for example interrupted) run: keep it.
     if !job.force {
-        if let Some((out, out_bytes)) = existing_for(&input, folder, quality, res_name) {
+        if let Some((out, out_bytes)) = existing_for(&input, folder, target, res_name) {
             let done = JobDone {
                 id: job.id,
                 skipped: true,
@@ -769,7 +787,7 @@ fn run_job(st: &Arc<ServerState>, job: &QueueJob, settings: &Settings) {
         }
     }
 
-    let output = output_for(&input, folder, quality, res_name);
+    let output = output_for(&input, folder, target, res_name);
     if let Some(dir) = output.parent() {
         if let Err(e) = std::fs::create_dir_all(dir) {
             job_error(st, job.id, format!("cannot create {}: {e}", dir.display()), false);
@@ -789,8 +807,15 @@ fn run_job(st: &Arc<ServerState>, job: &QueueJob, settings: &Settings) {
         j.fps = 0.0;
     });
     broadcast_event(&st.sse_clients, "job-start", JobStart { id: job.id, output: out_s.clone() });
-    let options =
-        Options { input, output, quality, resolution: resolution_of(&job.resolution), backend, threads: st.threads };
+    let options = Options {
+        input,
+        output,
+        quality,
+        bpp: target.bpp_value(),
+        resolution: resolution_of(&job.resolution),
+        backend,
+        threads: st.threads,
+    };
     let mut last = Instant::now() - Duration::from_secs(1);
     let clients = st.sse_clients.clone();
     // The core reports frames per second since the clip started; take paused time out.
@@ -868,6 +893,7 @@ fn invoke_command(state: &Arc<ServerState>, cmd: &str, body: &[u8]) -> HttpRespo
                 web: true,
                 browse_root: ps(&state.browse_root),
                 default_quality: state.default_quality,
+                default_bpp: state.default_bpp,
                 default_resolution: resolution_name(state.default_resolution).into(),
                 watch: state.watch_state.lock().unwrap().clone(),
             };
@@ -890,17 +916,24 @@ fn invoke_command(state: &Arc<ServerState>, cmd: &str, body: &[u8]) -> HttpRespo
                 if let Some(q) = args.quality {
                     ws.quality = q.clamp(1, 4);
                 }
+                if let Some(b) = args.bpp {
+                    ws.bpp = Target::bpp(b).bpp_value();
+                } else if args.quality.is_some() {
+                    ws.bpp = None;
+                }
                 if let Some(r) = args.resolution.as_deref().and_then(parse_resolution) {
                     ws.resolution = resolution_name(r).into();
                 }
                 if ws.enabled {
                     let out_dir = PathBuf::from(&ws.output_dir);
                     let qv = ws.quality;
+                    let bv = ws.bpp;
                     let rv = ws.resolution.clone();
                     let cv = ws.clear_after_process;
                     save_persisted_settings(&out_dir, |p| {
-                        if args.quality.is_some() {
+                        if args.quality.is_some() || args.bpp.is_some() {
                             p.quality = Some(qv);
+                            p.bpp = bv;
                         }
                         if args.resolution.is_some() {
                             p.resolution = Some(rv);
@@ -998,10 +1031,10 @@ fn invoke_command(state: &Arc<ServerState>, cmd: &str, body: &[u8]) -> HttpRespo
             let res = resolution_of(&args.resolution);
             let backend = backend_of(&args.backend, state.default_backend);
             let crop = args.crop.unwrap_or([0.0, 0.0, 1.0, 1.0]);
-            match bluecompress::preview_region(
+            match bluecompress::preview_region_for(
                 Path::new(&args.path),
                 args.frame,
-                args.quality.clamp(1, 4),
+                target_of(args.quality, args.bpp),
                 res,
                 backend,
                 crop,
@@ -1270,6 +1303,7 @@ pub fn run_serve(cfg: ServeConfig, cancel: &'static AtomicBool) -> u8 {
                 input_dir: ps(&wcfg.input_dir),
                 output_dir: ps(&wcfg.output_dir),
                 quality: qv,
+                bpp: crate::watch::initial_bpp(&persisted, wcfg.bpp),
                 resolution: resolution_name(rv).into(),
                 poll_seconds: wcfg.poll_seconds,
                 clear_after_process: cv,
@@ -1283,6 +1317,7 @@ pub fn run_serve(cfg: ServeConfig, cancel: &'static AtomicBool) -> u8 {
     let state = Arc::new(ServerState {
         browse_root: cfg.browse_root,
         default_quality: cfg.default_quality,
+        default_bpp: cfg.default_bpp,
         default_resolution: cfg.default_resolution,
         default_backend: cfg.default_backend,
         threads: cfg.threads,

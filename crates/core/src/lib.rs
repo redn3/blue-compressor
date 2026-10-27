@@ -19,6 +19,7 @@ mod gpu;
 pub mod nraw;
 mod preview;
 pub mod quality;
+mod rate;
 pub mod requant;
 pub mod resample;
 pub mod resize;
@@ -27,6 +28,7 @@ mod transcode;
 mod util;
 
 pub use preview::{Preview, Thumbnail};
+pub use quality::{bpp_of, bpp_tag, Target, BPP_MAX, BPP_MIN};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -62,6 +64,8 @@ pub struct ClipInfo {
     pub file_bytes: u64,
     pub video_bytes: u64,
     pub audio_tracks: u32,
+    /// Average coded bits per Bayer sample of the video frames (8 * bytes / (width * height)).
+    pub bpp: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -89,6 +93,10 @@ pub struct Options {
     pub output: PathBuf,
     /// 1 lossless repack, 2 archival, 3 high, 4 compact.
     pub quality: u8,
+    /// Target bits per Bayer sample (0.5 to 8, 0.1 steps) instead of a quality preset: each
+    /// frame is rate controlled to fit. A target at or above the source's gives the
+    /// lossless repack.
+    pub bpp: Option<f64>,
     pub resolution: Resolution,
     pub backend: Backend,
     /// 0 = all cores.
@@ -115,15 +123,18 @@ pub fn probe(path: &std::path::Path) -> Result<ClipInfo> {
         c if c == bmff::fourcc(b"NR3D") => Codec::R3dNe,
         c => return Err(Error(format!("not a Nikon N-RAW or R3D NE clip (codec {})", bmff::fourcc_str(c)))),
     };
+    let video_bytes: u64 = v.samples.iter().map(|s| s.size as u64).sum();
+    let frames = v.samples.len() as u32;
     Ok(ClipInfo {
         codec,
         width: v.width,
         height: v.height,
-        frames: v.samples.len() as u32,
+        frames,
         fps: quality::video_frame_rate(&m),
         file_bytes: input.size(),
-        video_bytes: v.samples.iter().map(|s| s.size as u64).sum(),
+        video_bytes,
         audio_tracks: m.tracks.iter().filter(|t| t.handler == bmff::fourcc(b"soun")).count() as u32,
+        bpp: bpp_of(video_bytes as f64 / frames.max(1) as f64, v.width, v.height),
     })
 }
 
@@ -208,10 +219,19 @@ pub fn transcode_staged(options: &Options, cancel: &AtomicBool, progress: &mut d
 
 /// Folder tag of a setting, as the queues name output folders: "Q2", "Q3 6K", "Q4 4K".
 pub fn variant_name(quality: u8, resolution: &str) -> String {
+    variant_name_for(Target::quality(quality), resolution)
+}
+
+/// [`variant_name`] for any target: "Q2", "Q3 6K", "1.2bpp", "2bpp 4K".
+pub fn variant_name_for(target: Target, resolution: &str) -> String {
+    let base = match target {
+        Target::Quality(q) => format!("Q{q}"),
+        Target::Bpp(_) => bpp_tag(target.bpp_value().unwrap_or_default()),
+    };
     match resolution {
-        "6k" => format!("Q{quality} 6K"),
-        "4k" => format!("Q{quality} 4K"),
-        _ => format!("Q{quality}"),
+        "6k" => format!("{base} 6K"),
+        "4k" => format!("{base} 4K"),
+        _ => base,
     }
 }
 
@@ -244,8 +264,18 @@ pub fn existing_compressed(
     quality: u8,
     resolution: &str,
 ) -> Option<(PathBuf, u64)> {
+    existing_compressed_for(input, folder, Target::quality(quality), resolution)
+}
+
+/// [`existing_compressed`] for any target (bpp outputs live in `Compressed 1.2bpp/`).
+pub fn existing_compressed_for(
+    input: &std::path::Path,
+    folder: Option<&str>,
+    target: Target,
+    resolution: &str,
+) -> Option<(PathBuf, u64)> {
     use std::path::Path;
-    let tag = variant_name(quality.clamp(1, 4), resolution);
+    let tag = variant_name_for(target, resolution);
     let name = input.file_name()?;
     let candidates: Vec<PathBuf> = match folder {
         Some(f) if !f.is_empty() => vec![Path::new(f).join(name), Path::new(f).join(&tag).join(name)],
@@ -275,7 +305,7 @@ pub fn preview_frame(
     backend: Backend,
     width: u32,
 ) -> Result<Preview> {
-    preview::preview_frame(path, frame, quality, resolution, backend, [0.0, 0.0, 1.0, 1.0], width)
+    preview::preview_frame(path, frame, Target::quality(quality), resolution, backend, [0.0, 0.0, 1.0, 1.0], width)
 }
 
 /// Like [`preview_frame`] for the region `crop` = [x, y, width, height] in fractions of the
@@ -290,7 +320,20 @@ pub fn preview_region(
     crop: [f64; 4],
     width: u32,
 ) -> Result<Preview> {
-    preview::preview_frame(path, frame, quality, resolution, backend, crop, width)
+    preview::preview_frame(path, frame, Target::quality(quality), resolution, backend, crop, width)
+}
+
+/// [`preview_region`] for any target, including a bpp target.
+pub fn preview_region_for(
+    path: &std::path::Path,
+    frame: u32,
+    target: Target,
+    resolution: Resolution,
+    backend: Backend,
+    crop: [f64; 4],
+    width: u32,
+) -> Result<Preview> {
+    preview::preview_frame(path, frame, target, resolution, backend, crop, width)
 }
 
 /// A small picture of frame `frame` (clamped) of a clip, `width` pixels wide, for lists and

@@ -66,6 +66,27 @@ fn parse_quality(s: &str) -> Option<u8> {
     }
 }
 
+/// A bits per sample target: a number from 0.5 to 8 (an optional "bpp" suffix is allowed),
+/// rounded to 0.1.
+pub(crate) fn parse_bpp(s: &str) -> Option<f64> {
+    let t = s.trim().to_ascii_lowercase();
+    let v: f64 = t.strip_suffix("bpp").unwrap_or(&t).trim().parse().ok()?;
+    (v.is_finite() && (bluecompress::BPP_MIN..=bluecompress::BPP_MAX).contains(&v)).then(|| (v * 10.0).round() / 10.0)
+}
+
+/// "Q2" or "1.2bpp" for log lines.
+pub(crate) fn setting_label(quality: u8, bpp: Option<f64>) -> String {
+    match bpp {
+        Some(b) => bluecompress::bpp_tag(b),
+        None => format!("Q{quality}"),
+    }
+}
+
+/// JSON value of an optional bpp target.
+pub(crate) fn bpp_json(bpp: Option<f64>) -> String {
+    bpp.map_or_else(|| "null".into(), |b| format!("{b:.1}"))
+}
+
 pub(crate) fn parse_resolution(s: &str) -> Option<Resolution> {
     match s.trim().to_ascii_lowercase().as_str() {
         "original" | "orig" => Some(Resolution::Original),
@@ -100,6 +121,7 @@ fn env_nonempty(key: &str) -> Option<String> {
 
 struct Cli {
     quality: Option<u8>,
+    bpp: Option<f64>,
     resolution: Option<Resolution>,
     backend: Option<Backend>,
     threads: usize,
@@ -138,6 +160,10 @@ usage:
 options:
   -q, --quality 1..4      1 lossless repack (pixel-identical), 2 archival (default),
                           3 high, 4 compact
+      --bpp B             instead of -q: target size in bits per Bayer sample, 0.5 to 8 in
+                          0.1 steps (Nikon HE stills are about 3, HE* about 5). Each frame
+                          is rate controlled to fit; a target at or above the clip's own
+                          gives the lossless repack
   -r, --resolution R      original (default), 6k or 4k
   -b, --backend B         auto (default), cpu, metal, cuda or opencl; --cpu / --gpu also work
   -j, --threads N         worker threads (default: all cores)
@@ -158,6 +184,7 @@ serve and watch options:
       --poll-seconds N    watch poll interval in seconds (default: WATCH_POLL_SECONDS or 5)
       --clear-watch       delete source clip in watch input folder after compression succeeds
       --once              watch: run one scan pass on stable files and exit
+                          watch and serve also read WATCH_QUALITY or WATCH_BPP (or BPP)
 
 Folders are searched recursively for .nev and .r3d files. Originals are never modified;
 outputs are written to <name>.partial and renamed when complete.
@@ -244,7 +271,7 @@ fn probe_cmd(o: &Cli) -> u8 {
             println!(
                 "{{\"event\":\"clip\",\"input\":{},\"codec\":{},\"format\":{},\"width\":{},\"height\":{},\
                  \"frames\":{},\"fps\":{},\"file_bytes\":{},\"video_bytes\":{},\"audio_tracks\":{},\
-                 \"output_6k\":[{w6},{h6}],\"output_4k\":[{w4},{h4}]}}",
+                 \"bpp\":{:.3},\"output_6k\":[{w6},{h6}],\"output_4k\":[{w4},{h4}]}}",
                 q(&ps(&p)),
                 q(fourcc(&info)),
                 q(codec_name(&info)),
@@ -254,11 +281,13 @@ fn probe_cmd(o: &Cli) -> u8 {
                 info.fps,
                 info.file_bytes,
                 info.video_bytes,
-                info.audio_tracks
+                info.audio_tracks,
+                info.bpp
             );
         } else {
             println!(
-                "{}\n  {} {}x{}, {} frames @ {:.3} fps, {:.2} GB, {} audio track(s)\n  6K -> {w6}x{h6}, 4K -> {w4}x{h4}",
+                "{}\n  {} {}x{}, {} frames @ {:.3} fps, {:.2} GB, {:.2} bits per sample, {} audio track(s)\n  \
+                 6K -> {w6}x{h6}, 4K -> {w4}x{h4}",
                 p.display(),
                 codec_name(&info),
                 info.width,
@@ -266,6 +295,7 @@ fn probe_cmd(o: &Cli) -> u8 {
                 info.frames,
                 info.fps,
                 info.file_bytes as f64 / 1e9,
+                info.bpp,
                 info.audio_tracks
             );
         }
@@ -307,6 +337,7 @@ fn backends_cmd(o: &Cli) -> u8 {
 
 fn compress_cmd(o: &Cli) -> u8 {
     let quality = o.quality.unwrap_or(2);
+    let bpp = o.bpp;
     let resolution = o.resolution.unwrap_or(Resolution::Original);
     let backend = o.backend.unwrap_or(Backend::Auto);
     let mut missing = Vec::new();
@@ -382,31 +413,43 @@ fn compress_cmd(o: &Cli) -> u8 {
             if o.json {
                 println!(
                     "{{\"event\":\"start\",\"input\":{},\"output\":{},\"codec\":{},\"width\":{},\"height\":{},\
-                     \"frames\":{},\"out_width\":{ow},\"out_height\":{oh},\"quality\":{}}}",
+                     \"frames\":{},\"out_width\":{ow},\"out_height\":{oh},\"quality\":{},\"bpp\":{},\
+                     \"source_bpp\":{:.3}}}",
                     q(&ins),
                     q(&outs),
                     q(fourcc(&info)),
                     info.width,
                     info.height,
                     info.frames,
-                    quality
+                    quality,
+                    bpp_json(bpp),
+                    info.bpp
                 );
             } else if !o.quiet {
                 eprintln!(
-                    "{ins}: {} {}x{}, {} frames @ {:.3} fps -> {ow}x{oh} Q{}",
+                    "{ins}: {} {}x{}, {} frames @ {:.3} fps, {:.2} bpp -> {ow}x{oh} {}{}",
                     codec_name(&info),
                     info.width,
                     info.height,
                     info.frames,
                     info.fps,
-                    quality
+                    info.bpp,
+                    setting_label(quality, bpp),
+                    if bpp.is_some_and(|b| b >= info.bpp) { " (at or above the source: lossless repack)" } else { "" }
                 );
             }
             let _ = stdout.flush();
         }
 
-        let opt =
-            Options { input: input.clone(), output: out.clone(), quality, resolution, backend, threads: o.threads };
+        let opt = Options {
+            input: input.clone(),
+            output: out.clone(),
+            quality,
+            bpp,
+            resolution,
+            backend,
+            threads: o.threads,
+        };
         let mut last_permille = -1i64;
         let result = bluecompress::transcode(&opt, &CANCEL, &mut |fraction, fps| {
             let pm = (fraction * 1000.0) as i64;
@@ -505,6 +548,14 @@ fn env_watch_quality(cli_q: Option<u8>) -> u8 {
         .unwrap_or(3)
 }
 
+/// Watch bpp target: --bpp, else WATCH_BPP or BPP unless -q was given on the command line.
+fn env_watch_bpp(cli_q: Option<u8>, cli_bpp: Option<f64>) -> Option<f64> {
+    if cli_bpp.is_some() || cli_q.is_some() {
+        return cli_bpp;
+    }
+    env_nonempty("WATCH_BPP").or_else(|| env_nonempty("BPP")).and_then(|v| parse_bpp(&v))
+}
+
 fn env_watch_resolution(cli_r: Option<Resolution>) -> Resolution {
     cli_r
         .or_else(|| env_nonempty("WATCH_RESOLUTION").and_then(|v| parse_resolution(&v)))
@@ -555,6 +606,7 @@ fn watch_cmd(o: &Cli) -> u8 {
         input_dir: PathBuf::from(in_dir),
         output_dir: PathBuf::from(out_dir),
         quality: env_watch_quality(o.quality),
+        bpp: env_watch_bpp(o.quality, o.bpp),
         resolution: env_watch_resolution(o.resolution),
         backend: env_watch_backend(o.backend),
         threads: o.threads,
@@ -616,6 +668,7 @@ fn serve_cmd(o: &Cli) -> u8 {
             input_dir: PathBuf::from(in_dir),
             output_dir: PathBuf::from(out_dir),
             quality: env_watch_quality(o.quality),
+            bpp: env_watch_bpp(o.quality, o.bpp),
             resolution: env_watch_resolution(o.resolution),
             backend: env_watch_backend(o.backend),
             threads: o.threads,
@@ -630,6 +683,7 @@ fn serve_cmd(o: &Cli) -> u8 {
             input_dir: PathBuf::from("/watch/in"),
             output_dir: PathBuf::from(watch_out.unwrap_or_else(|| "/watch/out".into())),
             quality: env_watch_quality(o.quality),
+            bpp: env_watch_bpp(o.quality, o.bpp),
             resolution: env_watch_resolution(o.resolution),
             backend: env_watch_backend(o.backend),
             threads: o.threads,
@@ -644,6 +698,8 @@ fn serve_cmd(o: &Cli) -> u8 {
     };
 
     let default_quality = o.quality.or_else(|| env_nonempty("QUALITY").and_then(|v| parse_quality(&v))).unwrap_or(2);
+    let default_bpp =
+        if o.quality.is_some() { None } else { o.bpp.or_else(|| env_nonempty("BPP").and_then(|v| parse_bpp(&v))) };
     let default_resolution = o
         .resolution
         .or_else(|| env_nonempty("RESOLUTION").and_then(|v| parse_resolution(&v)))
@@ -654,6 +710,7 @@ fn serve_cmd(o: &Cli) -> u8 {
         browse_root,
         initial_paths: o.inputs.clone(),
         default_quality,
+        default_bpp,
         default_resolution,
         default_backend: env_watch_backend(o.backend),
         threads: o.threads,
@@ -671,6 +728,7 @@ fn main() -> ExitCode {
     let _ = ctrlc::set_handler(|| CANCEL.store(true, Ordering::Relaxed));
     let mut o = Cli {
         quality: None,
+        bpp: None,
         resolution: None,
         backend: None,
         threads: env_nonempty("THREADS").and_then(|v| v.parse().ok()).unwrap_or(0),
@@ -710,6 +768,10 @@ fn main() -> ExitCode {
             "-q" | "--quality" => match it.next().and_then(|v| parse_quality(&v)) {
                 Some(v) => o.quality = Some(v),
                 None => return bad("quality must be 1 to 4 (or lossless, archival, high, compact)"),
+            },
+            "--bpp" => match it.next().and_then(|v| parse_bpp(&v)) {
+                Some(v) => o.bpp = Some(v),
+                None => return bad("bpp must be a number from 0.5 to 8 (bits per Bayer sample)"),
             },
             "-r" | "--resolution" => match it.next().and_then(|v| parse_resolution(&v)) {
                 Some(r) => o.resolution = Some(r),
@@ -778,6 +840,9 @@ fn main() -> ExitCode {
             _ => o.inputs.push(a),
         }
     }
+    if o.quality.is_some() && o.bpp.is_some() {
+        return bad("use either -q/--quality or --bpp, not both");
+    }
 
     let rc = match cmd.as_str() {
         "version" => {
@@ -817,6 +882,22 @@ mod tests {
     use super::*;
     use std::io::{BufRead, BufReader, Read, Write};
     use std::net::TcpStream;
+
+    #[test]
+    fn parses_bpp_targets() {
+        assert_eq!(parse_bpp("3"), Some(3.0));
+        assert_eq!(parse_bpp("1.2bpp"), Some(1.2));
+        assert_eq!(parse_bpp(" 2.46 BPP "), Some(2.5));
+        assert_eq!(parse_bpp("0.5"), Some(0.5));
+        assert_eq!(parse_bpp("8"), Some(8.0));
+        assert_eq!(parse_bpp("0.4"), None);
+        assert_eq!(parse_bpp("8.5"), None);
+        assert_eq!(parse_bpp("NaN"), None);
+        assert_eq!(parse_bpp("high"), None);
+        assert_eq!(setting_label(2, None), "Q2");
+        assert_eq!(setting_label(2, Some(1.2)), "1.2bpp");
+        assert_eq!(setting_label(2, Some(3.0)), "3bpp");
+    }
 
     fn box_wrap(tag: &[u8; 4], payload: &[u8]) -> Vec<u8> {
         let len = (8 + payload.len()) as u32;
@@ -1011,6 +1092,7 @@ mod tests {
                 input_dir: watch_in.clone(),
                 output_dir: watch_out.clone(),
                 quality: 3,
+                bpp: None,
                 resolution: Resolution::Original,
                 backend: Backend::Cpu,
                 threads: 2,
@@ -1055,6 +1137,7 @@ mod tests {
             browse_root: base.clone(),
             initial_paths: vec![],
             default_quality: 2,
+            default_bpp: None,
             default_resolution: Resolution::Original,
             default_backend: Backend::Cpu,
             threads: 2,
@@ -1062,6 +1145,7 @@ mod tests {
                 input_dir: watch_in.clone(),
                 output_dir: watch_out.clone(),
                 quality: 3,
+                bpp: None,
                 resolution: Resolution::Original,
                 backend: Backend::Cpu,
                 threads: 2,
@@ -1132,6 +1216,8 @@ mod tests {
         let scan_val: serde_json::Value = serde_json::from_slice(&scan_bytes).unwrap();
         assert_eq!(scan_val[0]["ok"], serde_json::Value::Bool(true));
         assert_eq!(scan_val[0]["width"], 128);
+        let source_bpp = scan_val[0]["bpp"].as_f64().unwrap();
+        assert!(source_bpp > 1.0, "scan reports the clip's bits per sample");
 
         let thumb_body = serde_json::json!({ "path": web_clip.to_string_lossy(), "width": 32 }).to_string();
         let (st, thumb_bytes) = http_req("POST", "/api/invoke/thumbnail", &thumb_body);
@@ -1184,6 +1270,46 @@ mod tests {
         }
         assert!(saw_done && saw_finished, "SSE stream should emit job-done and queue-finished");
         assert!(media_dir.join("Out").join("WEB_0001.NEV").is_file());
+
+        // A bits per sample job goes next to the clip in "Compressed 1bpp" and is smaller.
+        let bpp_body = serde_json::json!({
+            "jobs": [{ "id": 2, "path": web_clip.to_string_lossy(), "quality": 2, "bpp": 1.0, "resolution": "original" }],
+            "settings": { "backend": "cpu" }
+        })
+        .to_string();
+        let (st, _) = http_req("POST", "/api/invoke/start", &bpp_body);
+        assert_eq!(st, 200);
+        line.clear();
+        while sse_reader.read_line(&mut line).unwrap_or(0) > 0 {
+            if line.contains("queue-finished") {
+                break;
+            }
+            line.clear();
+        }
+        let bpp_out = media_dir.join("Compressed 1bpp").join("WEB_0001.NEV");
+        assert!(bpp_out.is_file(), "bpp output goes into a folder named after the target");
+        let out_info = bluecompress::probe(&bpp_out).unwrap();
+        assert!(out_info.bpp < source_bpp, "{} should be below {source_bpp}", out_info.bpp);
+        let check_body = serde_json::json!({
+            "outputFolder": null,
+            "items": [{ "id": 7, "path": web_clip.to_string_lossy(), "quality": 2, "bpp": 1.0,
+                        "resolution": "original", "width": 128, "height": 64 }]
+        })
+        .to_string();
+        let (st, check_bytes) = http_req("POST", "/api/invoke/check_existing", &check_body);
+        assert_eq!(st, 200);
+        let check_val: serde_json::Value = serde_json::from_slice(&check_bytes).unwrap();
+        assert_eq!(check_val[0]["id"], 7, "the bpp output counts as already done for the same target");
+        let prev_bpp = serde_json::json!({
+            "path": web_clip.to_string_lossy(), "frame": 0, "quality": 2, "bpp": 1.0,
+            "resolution": "original", "backend": "cpu", "width": 32
+        })
+        .to_string();
+        let (st, prev_bytes) = http_req("POST", "/api/invoke/preview", &prev_bpp);
+        assert_eq!(st, 200);
+        let out_frame = u64::from_le_bytes(prev_bytes[24..32].try_into().unwrap());
+        let src_frame = u64::from_le_bytes(prev_bytes[16..24].try_into().unwrap());
+        assert!(out_frame < src_frame, "the preview renders the bpp setting");
 
         let _ = std::fs::remove_dir_all(&base);
     }
