@@ -19,7 +19,7 @@ pub struct WatchConfig {
     pub input_dir: PathBuf,
     pub output_dir: PathBuf,
     pub quality: u8,
-    /// Bits per sample target instead of `quality`.
+    /// Bits per pixel target instead of `quality`.
     pub bpp: Option<f64>,
     pub resolution: Resolution,
     pub backend: Backend,
@@ -35,7 +35,7 @@ pub struct WatchConfig {
 #[serde(rename_all = "camelCase")]
 pub struct PersistedWatchSettings {
     pub quality: Option<u8>,
-    /// Bits per sample target chosen in the Web UI; takes precedence over `quality`.
+    /// Bits per pixel target chosen in the Web UI; takes precedence over `quality`.
     #[serde(default)]
     pub bpp: Option<f64>,
     pub resolution: Option<String>,
@@ -49,7 +49,7 @@ pub struct WatchSnapshot {
     pub input_dir: String,
     pub output_dir: String,
     pub quality: u8,
-    /// Bits per sample target instead of `quality`, if set.
+    /// Bits per pixel target instead of `quality`, if set.
     pub bpp: Option<f64>,
     pub resolution: String,
     pub poll_seconds: u64,

@@ -307,7 +307,7 @@ impl Resizer for CudaResizer {
         self.name.clone()
     }
 
-    fn process(&self, cs: &[u8], target: crate::quality::Target) -> Result<Vec<u8>> {
+    fn process(&self, cs: &[u8], target: crate::quality::Target, seed: &mut Vec<i32>) -> Result<Vec<u8>> {
         let (h, ls, ld) = parse_source(cs, &self.src, &self.dst)?;
         let mut c = self.acquire(&ls, &ld)?;
         let result = (|| -> Result<Vec<u8>> {
@@ -320,7 +320,7 @@ impl Resizer for CudaResizer {
             let nd = Coeffs::len(&ld);
             c.stream.memcpy_dtoh(&c.a.slice(0..nd), &mut c.host[..nd]).map_err(err)?;
             c.stream.synchronize().map_err(err)?;
-            crate::resize::encode_target(&h, &ld, &c.host[..nd], target)
+            crate::resize::encode_target(&h, &ld, &c.host[..nd], target, seed)
         })();
         self.free.lock().unwrap().push(c);
         result

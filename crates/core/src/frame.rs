@@ -18,7 +18,7 @@
 
 use rayon::prelude::*;
 
-use crate::rate::{finest_fitting, max_rank, slice_budgets, Coded, SliceBudget};
+use crate::rate::{finest_fitting, max_rank, seed_slack, slice_budgets, Coded, SliceBudget};
 use crate::requant::from_rank;
 use crate::tico::*;
 use crate::util::{parallel_for, SyncPtr};
@@ -261,11 +261,27 @@ fn encode_uniform(h: &TicoHeader, l: &Layout, coeffs: &[i32], rank: i32) -> Resu
 /// Entropy-encodes a frame to fit `budget` codestream bytes (see [`crate::rate`]): each
 /// precinct takes the finest rank, but never finer than `finest`, that fits its share.
 pub fn encode_frame_budget(h: &TicoHeader, l: &Layout, coeffs: &[i32], finest: i32, budget: usize) -> Result<Vec<u8>> {
+    encode_frame_budget_seeded(h, l, coeffs, finest, budget, &mut Vec::new())
+}
+
+/// [`encode_frame_budget`] for consecutive frames of a clip: `seed` holds the ranks the
+/// previous frame chose (empty for the first) and is updated for the next.
+pub fn encode_frame_budget_seeded(
+    h: &TicoHeader,
+    l: &Layout,
+    coeffs: &[i32],
+    finest: i32,
+    budget: usize,
+    seed: &mut Vec<i32>,
+) -> Result<Vec<u8>> {
     // First pass at the finest rank: the output when it fits, else the precinct weights.
     let (first, weights) = encode_uniform(h, l, coeffs, finest)?;
     if first.len() <= budget {
+        seed.clear();
         return Ok(first);
     }
+    let prev = std::mem::take(seed);
+    let seeded = prev.len() == l.precincts;
     let nb = l.bands.len();
     let hi = max_rank(l).max(finest);
     let budgets = slice_budgets(l, h.raw.len(), budget, &weights);
@@ -280,7 +296,9 @@ pub fn encode_frame_budget(h: &TicoHeader, l: &Layout, coeffs: &[i32], finest: i
     };
     // Every slice starts its search where the first precinct of the middle slice lands
     // (computed once, so the output does not depend on the thread count).
-    let start = {
+    let start = if seeded {
+        finest
+    } else {
         let s = l.slices / 2;
         let p = s * l.slice_height;
         let p1 = l.precincts.min(p + l.slice_height);
@@ -288,9 +306,9 @@ pub fn encode_frame_budget(h: &TicoHeader, l: &Layout, coeffs: &[i32], finest: i
         let mut enc = PredState::default();
         enc.reset(nb);
         let (mut pd, mut scratch) = (PrecinctData::default(), EncodeScratch::default());
-        finest_fitting(finest, hi, finest, share, |rank| code(p, rank, &enc, &mut pd, &mut scratch))?.rank
+        finest_fitting(finest, hi, finest, share, 0, |rank| code(p, rank, &enc, &mut pd, &mut scratch))?.rank
     };
-    let slices: Vec<Result<Vec<u8>>> = (0..l.slices)
+    let slices: Vec<Result<(Vec<u8>, Vec<i32>)>> = (0..l.slices)
         .into_par_iter()
         .map(|s| {
             let mut enc = PredState::default();
@@ -303,19 +321,28 @@ pub fn encode_frame_budget(h: &TicoHeader, l: &Layout, coeffs: &[i32], finest: i
             let p1 = l.precincts.min(p0 + l.slice_height);
             let mut left = SliceBudget::new(budgets[s], &weights[p0..p1]);
             let mut hint = start;
+            let mut ranks = Vec::with_capacity(p1 - p0);
             for p in p0..p1 {
-                let best = finest_fitting(finest, hi, hint, left.share(weights[p]), |rank| {
+                let share = left.share(weights[p]);
+                let (guess, slack) = if seeded { (prev[p], seed_slack(share)) } else { (hint, 0) };
+                let best = finest_fitting(finest, hi, guess.clamp(finest, hi), share, slack, |rank| {
                     code(p, rank, &enc, &mut pd, &mut scratch)
                 })?;
                 hint = best.rank;
+                ranks.push(best.rank);
                 left.spend(best.bytes.len(), weights[p]);
                 out.extend_from_slice(&best.bytes);
                 enc = best.state;
             }
-            Ok(out)
+            Ok((out, ranks))
         })
         .collect();
-    let parts = slices.into_iter().collect::<Result<Vec<_>>>()?;
+    let mut parts = Vec::with_capacity(l.slices);
+    for r in slices {
+        let (out, ranks) = r?;
+        parts.push(out);
+        seed.extend(ranks);
+    }
     Ok(assemble_codestream(h, l.width as i32, l.height as i32, &parts))
 }
 

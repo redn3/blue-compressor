@@ -28,8 +28,10 @@ pub struct ServeConfig {
     pub listen: String,
     pub browse_root: PathBuf,
     pub initial_paths: Vec<String>,
+    /// Legacy quality step for new clips (QUALITY or -q): the UI starts on the matching
+    /// quick pick (1 Lossless, 2 Light, 3 Medium, 4 Strong).
     pub default_quality: u8,
-    /// Bits per sample target for new clips instead of `default_quality` (BPP or --bpp).
+    /// Bits per pixel for new clips instead of `default_quality` (BPP or --bpp).
     pub default_bpp: Option<f64>,
     pub default_resolution: Resolution,
     pub default_backend: Backend,
@@ -67,7 +69,7 @@ struct Clip {
     frames: u32,
     fps: f64,
     bytes: u64,
-    /// Average coded bits per Bayer sample of the clip.
+    /// Average coded bits per pixel (per Bayer sample) of the clip.
     bpp: f64,
 }
 
@@ -90,9 +92,12 @@ struct AppInfo {
 #[serde(rename_all = "camelCase")]
 struct SetWatchSettingsArgs {
     clear_after_process: Option<bool>,
-    /// Setting a quality without a bpp switches the watch folder back to quality mode.
+    /// Lossless (1) or a legacy step (2 to 4: 0.8, 0.6, 0.4 x each clip's own bpp).
+    /// Setting a quality without a bpp switches the watch folder back to it.
     quality: Option<u8>,
     bpp: Option<f64>,
+    #[serde(default)]
+    lossless: bool,
     resolution: Option<String>,
 }
 
@@ -107,10 +112,15 @@ struct Settings {
 struct JobRequest {
     id: u64,
     path: String,
-    quality: u8,
-    /// Bits per sample target instead of `quality` (Advanced mode).
+    /// Legacy quality step (1 lossless, 2 to 4: 0.8, 0.6, 0.4 x the clip's own bpp), used
+    /// when neither `bpp` nor `lossless` is given.
+    #[serde(default)]
+    quality: Option<u8>,
+    /// Target in bits per pixel.
     #[serde(default)]
     bpp: Option<f64>,
+    #[serde(default)]
+    lossless: bool,
     resolution: String,
     /// Compress even when a compressed copy already exists ("Compress again").
     #[serde(default)]
@@ -139,8 +149,10 @@ struct QueueJob {
     path: String,
     name: String,
     bytes: u64,
+    /// 1 for the lossless repack (with no `bpp`).
     quality: u8,
     bpp: Option<f64>,
+    lossless: bool,
     resolution: String,
     force: bool,
     clip: Option<serde_json::Value>,
@@ -221,9 +233,12 @@ struct PlanOutputArgs {
 struct PreviewArgs {
     path: String,
     frame: u32,
-    quality: u8,
+    #[serde(default)]
+    quality: Option<u8>,
     #[serde(default)]
     bpp: Option<f64>,
+    #[serde(default)]
+    lossless: bool,
     resolution: String,
     backend: String,
     width: u32,
@@ -375,9 +390,19 @@ fn describe_clip(path: &Path) -> Clip {
     }
 }
 
-/// What a job compresses to: its bpp target when it has one, else its quality.
-fn target_of(quality: u8, bpp: Option<f64>) -> Target {
-    Target::new(quality, bpp)
+/// What a job for `input` compresses to: lossless, its bpp, or a legacy quality step as
+/// the bpp it stands for on that clip.
+fn target_of(input: &Path, quality: Option<u8>, bpp: Option<f64>, lossless: bool) -> Target {
+    bluecompress::named_target(input, Target::from_fields(quality, bpp, lossless))
+}
+
+/// The target a queued job keeps.
+fn job_target(job: &QueueJob) -> Target {
+    if job.lossless {
+        Target::lossless()
+    } else {
+        Target::new(job.quality, job.bpp)
+    }
 }
 
 fn output_for(input: &Path, folder: Option<&str>, target: Target, resolution: &str) -> PathBuf {
@@ -413,9 +438,12 @@ fn existing_for(input: &Path, folder: Option<&str>, target: Target, resolution: 
 struct CheckExistingItem {
     id: u64,
     path: String,
-    quality: u8,
+    #[serde(default)]
+    quality: Option<u8>,
     #[serde(default)]
     bpp: Option<f64>,
+    #[serde(default)]
+    lossless: bool,
     resolution: String,
     width: u32,
     height: u32,
@@ -442,7 +470,8 @@ fn check_existing_outputs(folder: Option<&str>, items: &[CheckExistingItem]) -> 
         .iter()
         .filter_map(|it| {
             let res = bluecompress::effective_resolution(it.width, it.height, &it.resolution);
-            existing_for(Path::new(&it.path), folder, target_of(it.quality, it.bpp), res)
+            let path = Path::new(&it.path);
+            existing_for(path, folder, target_of(path, it.quality, it.bpp, it.lossless), res)
                 .map(|(p, bytes)| ExistingOutput { id: it.id, output: p.to_string_lossy().into_owned(), bytes })
         })
         .collect()
@@ -678,13 +707,16 @@ fn start_queue(state: &Arc<ServerState>, args: StartArgs) -> Result<(), String> 
                 ),
                 None => ("waiting", 0.0, None, None),
             };
+            let target = target_of(Path::new(&job.path), job.quality, job.bpp, job.lossless);
+            let (quality, bpp) = target.option_fields();
             let entry = QueueJob {
                 id: job.id,
                 path: job.path,
                 name,
                 bytes,
-                quality: job.quality.clamp(1, 4),
-                bpp: job.bpp.and_then(|b| Target::bpp(b).bpp_value()),
+                quality,
+                bpp,
+                lossless: target.is_lossless(),
                 resolution: job.resolution,
                 force: job.force,
                 clip: job.clip,
@@ -747,8 +779,8 @@ fn start_queue(state: &Arc<ServerState>, args: StartArgs) -> Result<(), String> 
 fn run_job(st: &Arc<ServerState>, job: &QueueJob, settings: &Settings) {
     let backend = backend_of(&settings.backend, st.default_backend);
     let folder = settings.output_folder.as_deref();
-    let quality = job.quality.clamp(1, 4);
-    let target = target_of(quality, job.bpp);
+    let target = job_target(job);
+    let (quality, bpp) = target.option_fields();
     let input = PathBuf::from(&job.path);
     let info = bluecompress::probe(&input).ok();
     let resized = info
@@ -811,7 +843,7 @@ fn run_job(st: &Arc<ServerState>, job: &QueueJob, settings: &Settings) {
         input,
         output,
         quality,
-        bpp: target.bpp_value(),
+        bpp,
         resolution: resolution_of(&job.resolution),
         backend,
         threads: st.threads,
@@ -913,12 +945,13 @@ fn invoke_command(state: &Arc<ServerState>, cmd: &str, body: &[u8]) -> HttpRespo
                 if let Some(c) = args.clear_after_process {
                     ws.clear_after_process = c;
                 }
-                if let Some(q) = args.quality {
+                let quality = if args.lossless { Some(1) } else { args.quality };
+                if let Some(q) = quality {
                     ws.quality = q.clamp(1, 4);
                 }
-                if let Some(b) = args.bpp {
+                if let (Some(b), false) = (args.bpp, args.lossless) {
                     ws.bpp = Target::bpp(b).bpp_value();
-                } else if args.quality.is_some() {
+                } else if quality.is_some() {
                     ws.bpp = None;
                 }
                 if let Some(r) = args.resolution.as_deref().and_then(parse_resolution) {
@@ -931,7 +964,7 @@ fn invoke_command(state: &Arc<ServerState>, cmd: &str, body: &[u8]) -> HttpRespo
                     let rv = ws.resolution.clone();
                     let cv = ws.clear_after_process;
                     save_persisted_settings(&out_dir, |p| {
-                        if args.quality.is_some() || args.bpp.is_some() {
+                        if quality.is_some() || args.bpp.is_some() {
                             p.quality = Some(qv);
                             p.bpp = bv;
                         }
@@ -1034,7 +1067,7 @@ fn invoke_command(state: &Arc<ServerState>, cmd: &str, body: &[u8]) -> HttpRespo
             match bluecompress::preview_region_for(
                 Path::new(&args.path),
                 args.frame,
-                target_of(args.quality, args.bpp),
+                target_of(Path::new(&args.path), args.quality, args.bpp, args.lossless),
                 res,
                 backend,
                 crop,

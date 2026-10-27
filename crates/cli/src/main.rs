@@ -22,7 +22,7 @@ use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use bluecompress::{Backend, ClipInfo, Codec, Options, Resolution};
+use bluecompress::{Backend, ClipInfo, Codec, Options, Resolution, Target};
 
 static CANCEL: AtomicBool = AtomicBool::new(false);
 
@@ -66,7 +66,7 @@ fn parse_quality(s: &str) -> Option<u8> {
     }
 }
 
-/// A bits per sample target: a number from 0.5 to 8 (an optional "bpp" suffix is allowed),
+/// A bits per pixel target: a number from 0.5 to 8 (an optional "bpp" suffix is allowed),
 /// rounded to 0.1.
 pub(crate) fn parse_bpp(s: &str) -> Option<f64> {
     let t = s.trim().to_ascii_lowercase();
@@ -74,11 +74,24 @@ pub(crate) fn parse_bpp(s: &str) -> Option<f64> {
     (v.is_finite() && (bluecompress::BPP_MIN..=bluecompress::BPP_MAX).contains(&v)).then(|| (v * 10.0).round() / 10.0)
 }
 
-/// "Q2" or "1.2bpp" for log lines.
+/// "1.2bpp", "lossless" or for a legacy step "0.8x source bpp", for log lines.
 pub(crate) fn setting_label(quality: u8, bpp: Option<f64>) -> String {
     match bpp {
         Some(b) => bluecompress::bpp_tag(b),
-        None => format!("Q{quality}"),
+        None if quality <= 1 => "lossless".into(),
+        None => format!("{}x source bpp", bluecompress::LEGACY_FRACTIONS[(quality.min(4) - 2) as usize]),
+    }
+}
+
+/// The one-line note for scripts still using -q.
+fn quality_note(quality: u8) -> String {
+    match quality {
+        0 | 1 => "note: -q 1 is now --lossless; -q/--quality is kept for existing scripts".into(),
+        q => format!(
+            "note: -q/--quality is deprecated; -q {q} now means {} x each clip's own bits per pixel. \
+             Use --bpp B or --lossless",
+            bluecompress::LEGACY_FRACTIONS[(q.min(4) - 2) as usize]
+        ),
     }
 }
 
@@ -120,8 +133,11 @@ fn env_nonempty(key: &str) -> Option<String> {
 }
 
 struct Cli {
+    /// Lossless (1) or a legacy step; --lossless sets 1.
     quality: Option<u8>,
     bpp: Option<f64>,
+    /// -q/--quality was given (the legacy alias).
+    legacy_q: bool,
     resolution: Option<Resolution>,
     backend: Option<Backend>,
     threads: usize,
@@ -158,12 +174,14 @@ usage:
   bluecompress [options] <clip> <output file>
 
 options:
-  -q, --quality 1..4      1 lossless repack (pixel-identical), 2 archival (default),
-                          3 high, 4 compact
-      --bpp B             instead of -q: target size in bits per Bayer sample, 0.5 to 8 in
-                          0.1 steps (Nikon HE stills are about 3, HE* about 5). Each frame
-                          is rate controlled to fit; a target at or above the clip's own
-                          gives the lossless repack
+      --bpp B             target size in bits per pixel, 0.5 to 8 in 0.1 steps (Nikon HE
+                          stills are about 3, HE* about 5; probe shows a clip's own). Each
+                          frame is rate controlled to fit; a target at or above the clip's
+                          own gives the lossless repack
+      --lossless          repack the camera's coded data without loss (pixel-identical)
+                          default when neither is given: 0.8 x each clip's own bits per pixel
+  -q, --quality 1..4      legacy alias kept for existing scripts: 1 = --lossless, 2, 3 and
+                          4 = 0.8, 0.6 and 0.4 x each clip's own bits per pixel
   -r, --resolution R      original (default), 6k or 4k
   -b, --backend B         auto (default), cpu, metal, cuda or opencl; --cpu / --gpu also work
   -j, --threads N         worker threads (default: all cores)
@@ -184,7 +202,8 @@ serve and watch options:
       --poll-seconds N    watch poll interval in seconds (default: WATCH_POLL_SECONDS or 5)
       --clear-watch       delete source clip in watch input folder after compression succeeds
       --once              watch: run one scan pass on stable files and exit
-                          watch and serve also read WATCH_QUALITY or WATCH_BPP (or BPP)
+                          watch and serve also read WATCH_BPP (or BPP), or the legacy
+                          WATCH_QUALITY (or QUALITY) with the meaning of -q
 
 Folders are searched recursively for .nev and .r3d files. Originals are never modified;
 outputs are written to <name>.partial and renamed when complete.
@@ -286,7 +305,7 @@ fn probe_cmd(o: &Cli) -> u8 {
             );
         } else {
             println!(
-                "{}\n  {} {}x{}, {} frames @ {:.3} fps, {:.2} GB, {:.2} bits per sample, {} audio track(s)\n  \
+                "{}\n  {} {}x{}, {} frames @ {:.3} fps, {:.2} GB, {:.2} bits per pixel, {} audio track(s)\n  \
                  6K -> {w6}x{h6}, 4K -> {w4}x{h4}",
                 p.display(),
                 codec_name(&info),
@@ -408,13 +427,19 @@ fn compress_cmd(o: &Cli) -> u8 {
             let _ = std::fs::create_dir_all(parent);
         }
 
+        // Legacy steps become a bpp for this clip; a bpp at or above its own is lossless.
+        let requested = Target::new(quality, bpp);
+        let mut fields = (quality, bpp);
         if let Ok(info) = bluecompress::probe(input) {
+            let named = requested.resolve_legacy(info.bpp);
+            fields = named.option_fields();
+            let target = named.resolve(info.bpp);
             let (ow, oh) = bluecompress::output_size(info.width, info.height, resolution);
             if o.json {
                 println!(
                     "{{\"event\":\"start\",\"input\":{},\"output\":{},\"codec\":{},\"width\":{},\"height\":{},\
                      \"frames\":{},\"out_width\":{ow},\"out_height\":{oh},\"quality\":{},\"bpp\":{},\
-                     \"source_bpp\":{:.3}}}",
+                     \"lossless\":{},\"source_bpp\":{:.3}}}",
                     q(&ins),
                     q(&outs),
                     q(fourcc(&info)),
@@ -422,7 +447,8 @@ fn compress_cmd(o: &Cli) -> u8 {
                     info.height,
                     info.frames,
                     quality,
-                    bpp_json(bpp),
+                    bpp_json(target.bpp_value()),
+                    target.is_lossless(),
                     info.bpp
                 );
             } else if !o.quiet {
@@ -434,8 +460,12 @@ fn compress_cmd(o: &Cli) -> u8 {
                     info.frames,
                     info.fps,
                     info.bpp,
-                    setting_label(quality, bpp),
-                    if bpp.is_some_and(|b| b >= info.bpp) { " (at or above the source: lossless repack)" } else { "" }
+                    setting_label(fields.0, fields.1),
+                    if !requested.is_lossless() && target.is_lossless() {
+                        " (at or above the source: lossless repack)"
+                    } else {
+                        ""
+                    }
                 );
             }
             let _ = stdout.flush();
@@ -444,8 +474,8 @@ fn compress_cmd(o: &Cli) -> u8 {
         let opt = Options {
             input: input.clone(),
             output: out.clone(),
-            quality,
-            bpp,
+            quality: fields.0,
+            bpp: fields.1,
             resolution,
             backend,
             threads: o.threads,
@@ -729,6 +759,7 @@ fn main() -> ExitCode {
     let mut o = Cli {
         quality: None,
         bpp: None,
+        legacy_q: false,
         resolution: None,
         backend: None,
         threads: env_nonempty("THREADS").and_then(|v| v.parse().ok()).unwrap_or(0),
@@ -766,12 +797,22 @@ fn main() -> ExitCode {
                 return ExitCode::SUCCESS;
             }
             "-q" | "--quality" => match it.next().and_then(|v| parse_quality(&v)) {
-                Some(v) => o.quality = Some(v),
+                Some(v) if o.quality.is_none() => {
+                    o.quality = Some(v);
+                    o.legacy_q = true;
+                }
+                Some(_) => return bad("use only one of --bpp, --lossless or -q/--quality"),
                 None => return bad("quality must be 1 to 4 (or lossless, archival, high, compact)"),
             },
+            "--lossless" => {
+                if o.quality.is_some() {
+                    return bad("use only one of --bpp, --lossless or -q/--quality");
+                }
+                o.quality = Some(1);
+            }
             "--bpp" => match it.next().and_then(|v| parse_bpp(&v)) {
                 Some(v) => o.bpp = Some(v),
-                None => return bad("bpp must be a number from 0.5 to 8 (bits per Bayer sample)"),
+                None => return bad("bpp must be a number from 0.5 to 8 (bits per pixel)"),
             },
             "-r" | "--resolution" => match it.next().and_then(|v| parse_resolution(&v)) {
                 Some(r) => o.resolution = Some(r),
@@ -841,7 +882,10 @@ fn main() -> ExitCode {
         }
     }
     if o.quality.is_some() && o.bpp.is_some() {
-        return bad("use either -q/--quality or --bpp, not both");
+        return bad("use only one of --bpp, --lossless or -q/--quality");
+    }
+    if o.legacy_q && !matches!(cmd.as_str(), "probe" | "backends" | "version") {
+        eprintln!("{}", quality_note(o.quality.unwrap_or(2)));
     }
 
     let rc = match cmd.as_str() {
@@ -894,7 +938,11 @@ mod tests {
         assert_eq!(parse_bpp("8.5"), None);
         assert_eq!(parse_bpp("NaN"), None);
         assert_eq!(parse_bpp("high"), None);
-        assert_eq!(setting_label(2, None), "Q2");
+        assert_eq!(setting_label(1, None), "lossless");
+        assert_eq!(setting_label(2, None), "0.8x source bpp");
+        assert_eq!(setting_label(4, None), "0.4x source bpp");
+        assert!(quality_note(3).contains("0.6 x each clip's own bits per pixel"));
+        assert!(quality_note(1).contains("--lossless"));
         assert_eq!(setting_label(2, Some(1.2)), "1.2bpp");
         assert_eq!(setting_label(2, Some(3.0)), "3bpp");
     }
@@ -1217,7 +1265,7 @@ mod tests {
         assert_eq!(scan_val[0]["ok"], serde_json::Value::Bool(true));
         assert_eq!(scan_val[0]["width"], 128);
         let source_bpp = scan_val[0]["bpp"].as_f64().unwrap();
-        assert!(source_bpp > 1.0, "scan reports the clip's bits per sample");
+        assert!(source_bpp > 1.0, "scan reports the clip's bits per pixel");
 
         let thumb_body = serde_json::json!({ "path": web_clip.to_string_lossy(), "width": 32 }).to_string();
         let (st, thumb_bytes) = http_req("POST", "/api/invoke/thumbnail", &thumb_body);
@@ -1271,7 +1319,7 @@ mod tests {
         assert!(saw_done && saw_finished, "SSE stream should emit job-done and queue-finished");
         assert!(media_dir.join("Out").join("WEB_0001.NEV").is_file());
 
-        // A bits per sample job goes next to the clip in "Compressed 1bpp" and is smaller.
+        // A bits per pixel job goes next to the clip in "Compressed 1bpp" and is smaller.
         let bpp_body = serde_json::json!({
             "jobs": [{ "id": 2, "path": web_clip.to_string_lossy(), "quality": 2, "bpp": 1.0, "resolution": "original" }],
             "settings": { "backend": "cpu" }
@@ -1300,6 +1348,33 @@ mod tests {
         assert_eq!(st, 200);
         let check_val: serde_json::Value = serde_json::from_slice(&check_bytes).unwrap();
         assert_eq!(check_val[0]["id"], 7, "the bpp output counts as already done for the same target");
+        // Lossless goes into "Compressed Lossless"; a legacy quality step into a folder
+        // named after the bpp it stands for on this clip.
+        let legacy = bluecompress::bpp_tag(bluecompress::legacy_bpp(4, source_bpp).unwrap());
+        let more_body = serde_json::json!({
+            "jobs": [
+                { "id": 3, "path": web_clip.to_string_lossy(), "lossless": true, "resolution": "original" },
+                { "id": 4, "path": web_clip.to_string_lossy(), "quality": 4, "resolution": "original" }
+            ],
+            "settings": { "backend": "cpu" }
+        })
+        .to_string();
+        let (st, _) = http_req("POST", "/api/invoke/start", &more_body);
+        assert_eq!(st, 200);
+        line.clear();
+        while sse_reader.read_line(&mut line).unwrap_or(0) > 0 {
+            if line.contains("queue-finished") {
+                break;
+            }
+            line.clear();
+        }
+        let lossless_out = media_dir.join("Compressed Lossless").join("WEB_0001.NEV");
+        assert!(lossless_out.is_file(), "lossless output folder");
+        let lossless_info = bluecompress::probe(&lossless_out).unwrap();
+        assert!(lossless_info.bpp <= source_bpp + 1e-9);
+        let legacy_out = media_dir.join(format!("Compressed {legacy}")).join("WEB_0001.NEV");
+        assert!(legacy_out.is_file(), "legacy -q 4 goes to {legacy}");
+        assert!(bluecompress::probe(&legacy_out).unwrap().bpp < lossless_info.bpp);
         let prev_bpp = serde_json::json!({
             "path": web_clip.to_string_lossy(), "frame": 0, "quality": 2, "bpp": 1.0,
             "resolution": "original", "backend": "cpu", "width": 32

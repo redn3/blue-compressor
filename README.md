@@ -53,21 +53,34 @@ settings.
 
 ## What it does
 
-| Setting | What happens | Z8 8K N-RAW (2.60 GB) | ZR 6K R3D NE (2.14 GB) |
-| --- | --- | --- | --- |
-| **Q1 Lossless** | Repacks the coded data without the camera's padding. Every decoded pixel is identical. | 2.36 GB (−9%) | 2.05 GB (−4%) |
-| **Q2 Archival** (default) | Requantizes one notch past the camera's own setting. | 2.12 GB (−18%) | 1.58 GB (−27%) |
-| **Q3 High** | One step further. | 1.59 GB (−39%) | 1.22 GB (−43%) |
-| **Q4 Compact** | For offline and reference copies. | 0.99 GB (−62%) | 0.90 GB (−58%) |
-| **6K** (Q2) | Area-scales each CFA colour plane in linear raw to 6048 × 3402, then re-encodes. | 0.94 GB (−64%) | (already 6K) |
-| **4K UHD** (Q2) | Same, to 3840 × 2160. | 0.49 GB (−81%) | 0.56 GB (−74%) |
+Compression is set as a size in **bits per pixel** (bpp): the coded size of a frame
+times 8, divided by its width times height. `bluecompress probe` and the app show each
+clip's own rate; Nikon's own HE stills come out at about 3 bpp and HE\* at about 5 (see
+the credit below). Four quick picks set it for you:
 
-These were measured on one sample clip from each camera; your footage will vary with
-content, ISO and the camera's quality setting. Q1 outputs decode to exactly the same
-coefficients as the originals.
+| Pick | What happens | Size |
+| --- | --- | --- |
+| **Lossless** | Repacks the coded data without the camera's padding. Every decoded pixel is identical. | Z8 8K N-RAW 2.60 GB to 2.36 GB (−9%), ZR 6K R3D NE 2.14 GB to 2.05 GB (−4%) |
+| **Light** (default) | 0.8 × the clips' own bits per pixel. Good for archive copies. | about 20% smaller |
+| **Medium** | 0.6 × the clips' own bits per pixel, for everyday storage. | about 40% smaller |
+| **Strong** | 0.4 × the clips' own bits per pixel, for offline edits and reference copies. | about 60% smaller |
 
-Speed on a recent Apple silicon laptop: quality-only changes run at about 40 to 55 fps (entropy
-decoding and encoding on all CPU cores). 8K to 6K runs at about 31 fps with Metal and
+The picks only move the bpp slider (to 0.1, at least 0.5); the setting itself is always
+a bpp value or Lossless, and any value from 0.5 to 8 can be typed in. The lossless sizes
+were measured on one sample clip from each camera. The other sizes follow from the target
+because every frame is rate controlled to fit it (see below), so they hold on any footage
+(unless the 0.5 floor or the lossless repack comes first); how the picture holds up at a given bpp depends on content and ISO, so check the
+previewer on your own clips. Lossless outputs decode to exactly the same coefficients as
+the originals.
+
+Resizing to **6K** (6048 × 3402) or **4K UHD** (3840 × 2160) area-scales each CFA colour
+plane in linear raw and re-encodes at the chosen bpp of the smaller frame. Measured with
+the earlier Q2 preset, that took the Z8 clip to 0.94 GB (−64%) at 6K and 0.49 GB (−81%) at
+4K, and the ZR clip to 0.56 GB (−74%) at 4K.
+
+Speed on a recent Apple silicon laptop, measured with the earlier fixed quality steps: about
+40 to 55 fps at the original resolution (entropy decoding and encoding on all CPU cores); a
+bpp target costs more CPU time, see below. 8K to 6K runs at about 31 fps with Metal and
 12 fps on the CPU alone.
 
 ### How it works
@@ -76,8 +89,8 @@ TICO RAW is a JPEG XS variant: four Star-Tetrix decorrelated components on the 2
 Bayer quad grid, a 5/3 wavelet (five horizontal levels, one vertical), and a
 square-root companding transfer curve. Blue Compressor:
 
-* **Q1 to Q4**: entropy-decodes every precinct and requantizes the coefficients with a
-  coarser truncation (never finer than the camera's). It then re-encodes with the
+* **Original resolution**: entropy-decodes every precinct and requantizes the coefficients
+  with a coarser truncation (never finer than the camera's). It then re-encodes with the
   cheapest coding modes and rebuilds the container's sample tables. Nothing is
   transformed, so there is no generation loss beyond the chosen quantization.
 * **6K / 4K**: decodes fully to the Bayer mosaic, then converts to linear raw. It
@@ -86,14 +99,7 @@ square-root companding transfer curve. Blue Compressor:
   geometry stages run on the GPU (Metal on macOS, optional CUDA and OpenCL); entropy coding stays
   on the CPU.
 
-### Advanced: a target in bits per pixel
-
-The quality steps are all most people need. For those who think in bit rates there is
-an **Advanced** switch in the app (and `--bpp` on the command line) that sets the size
-directly, in bits per Bayer sample: the coded size of a frame times 8, divided by its
-width times height. Nikon's own HE stills come out at about 3 bpp and HE\* at about 5,
-following the analysis credited below; `bluecompress probe` and the app show each
-clip's own rate.
+### Rate control
 
 * Each frame is rate controlled to fit `bpp × width × height / 8` bytes. The first pass
   is the finest coding allowed (the lossless repack, or the resizer's finest setting);
@@ -101,15 +107,19 @@ clip's own rate.
   precincts in proportion to their sizes in that pass, each precinct takes the finest
   quantization that fits its share, and any bytes it leaves go to the ones after it.
   Coding is never finer than the camera's.
-* A target at or above the clip's own rate gains nothing and gives the Q1 lossless repack.
+* A target at or above the clip's own rate gains nothing and gives the lossless repack.
+* Each precinct first tries the setting the same precinct took in the previous frame, and
+  keeps it when it fits with little to spare, so most precincts are coded once or twice.
+  Frames are rate controlled in fixed runs of four, so the output does not depend on the
+  thread count.
 * Targets go from 0.5 to 8 in 0.1 steps. Output is deterministic, whatever the thread
   count. It works at the original resolution and with 6K or 4K resizing, on every
   backend (the GPU does the resizing; rate control is part of the entropy coding, which
-  is on the CPU). It costs about two to three times the CPU time of a fixed quality step
-  at the original resolution, because precincts are coded more than once to find the
-  finest fit.
+  is on the CPU). It costs more CPU time than the lossless repack, because some
+  precincts are coded more than once to find the finest fit; reusing the previous
+  frame's setting keeps that to about 1.3 to 1.9 codings per precinct on average.
 
-The bits-per-sample measure and the HE and HE\* figures come from *Nikon HE and HE\* RAW:
+The bits per pixel measure and the HE and HE\* figures come from *Nikon HE and HE\* RAW:
 Format analysis and decoding reference* (sections 2.1 and 2.2), copyright (c) 2026
 patrol_taking_9j (RdWing), licensed under
 [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
@@ -162,7 +172,7 @@ cargo tauri build        # release bundle (.app/.dmg, .msi/.exe, .deb/.AppImage)
 ```
 
 The app writes each version into a folder named after its setting, next to the clip
-(`Compressed Q2/`, `Compressed Q3 4K/`, or `Compressed 1.2bpp/` in Advanced mode), and keeps the file names so edits relink. Use
+(`Compressed 1.2bpp/`, `Compressed 0.9bpp 4K/` or `Compressed Lossless/`), and keeps the file names so edits relink. Use
 **Compress again** on a finished clip to make another version with different settings.
 
 Platform prerequisites are listed in the [Tauri guide](https://v2.tauri.app/start/prerequisites/).
@@ -174,20 +184,21 @@ which current Windows versions already have. The UI is plain HTML, CSS and JavaS
 ## Command line
 
 ```bash
-# Compress a folder (recursively) into another folder at the default Q2
+# Compress a folder (recursively) into another folder at the default
+# (0.8 x each clip's own bits per pixel, the app's Light)
 bluecompress compress /Volumes/CARD -o /Volumes/Archive/compressed
 
-# One clip, explicit output, 6K at Q3 on the GPU
-bluecompress compress -q 3 -r 6k clip.NEV --output clip_6k.NEV
+# One clip, explicit output, 6K at 1.5 bits per pixel on the GPU
+bluecompress compress --bpp 1.5 -r 6k clip.NEV --output clip_6k.NEV
+
+# Pixel-identical repack
+bluecompress compress --lossless footage/ -o out/
 
 # Machine-readable progress for build servers (one JSON object per line)
 bluecompress compress --json --skip-existing footage/ -o out/
 
-# Advanced: about 2.5 bits per pixel, every frame rate controlled to fit
-bluecompress compress --bpp 2.5 footage/ -o out/
-
 # Watch a folder for incoming clips (add --clear-watch to remove sources after compression)
-bluecompress watch --input /watch/in --output /watch/out -q 3 -r original
+bluecompress watch --input /watch/in --output /watch/out --bpp 1.8 -r original
 
 # Start the Web UI server (port 9847 by default) with optional background watch folder
 bluecompress serve --listen 0.0.0.0:9847 --watch-input /watch/in --watch-output /watch/out
@@ -196,18 +207,23 @@ bluecompress probe --json clip.R3D
 bluecompress backends
 ```
 
-Options: `-q 1..4` or `--bpp 0.5..8` (not both), `-r original|6k|4k`, `-b auto|cpu|metal|cuda|opencl`, `-j threads`,
+Options: `--bpp 0.5..8` or `--lossless` (one of them; without either the default is 0.8 ×
+each clip's own bits per pixel), `-r original|6k|4k`, `-b auto|cpu|metal|cuda|opencl`, `-j threads`,
 `--suffix`, `--overwrite`, `--skip-existing`, `--json`, `--quiet`.
 
+* **Legacy `-q` / `--quality`**: kept so existing scripts keep working, with one note on
+  stderr. `-q 1` is `--lossless`; `-q 2`, `-q 3` and `-q 4` are 0.8, 0.6 and 0.4 × each
+  clip's own bits per pixel, rounded to 0.1 and at least 0.5 (the app's Light, Medium and
+  Strong). It cannot be combined with `--bpp` or `--lossless`.
 * **Writing outputs**: each output goes to `<name>.partial` and is renamed when
   complete. Originals are never modified. Ctrl+C cancels cleanly.
 * **Exit codes**: 0 success, 1 a clip failed, 2 usage error, 3 cancelled.
 * **JSON events**: `start`, `progress`, `done`, `skipped`, `error`, `summary`. The `probe`
-  command emits `clip` events instead, with each clip's source `bpp`. With `--bpp`, the
-  `start` event carries `bpp` and `source_bpp`.
+  command emits `clip` events instead, with each clip's source `bpp`. The `start` event
+  carries the clip's `bpp` target (null for lossless), `lossless` and `source_bpp`.
 * **Folders**: the app and the Web UI (`serve`) write next to each clip into a folder
-  named after the setting: `Compressed Q2/`, `Compressed Q3 4K/`, or for a bpp target
-  `Compressed 1.2bpp/` and `Compressed 2bpp 4K/`.
+  named after the setting: `Compressed 1.2bpp/`, `Compressed 2bpp 4K/` or
+  `Compressed Lossless/`.
 
 ## Docker and Synology NAS
 
@@ -227,7 +243,7 @@ docker run -d \
   -v /path/to/your/media:/media \
   -v /path/to/your/watch-in:/watch/in \
   -v /path/to/your/watch-out:/watch/out \
-  -e WATCH_QUALITY=3 \
+  -e WATCH_BPP=1.8 \
   -e WATCH_RESOLUTION=original \
   ghcr.io/redn3/blue-compressor:latest
 ```
@@ -252,6 +268,9 @@ services:
       - WATCH_ENABLED=true
       - WATCH_INPUT=/watch/in
       - WATCH_OUTPUT=/watch/out
+      # Compression: QUALITY and WATCH_QUALITY pick 1 Lossless, 2 Light, 3 Medium or
+      # 4 Strong (0.8, 0.6 or 0.4 x each clip's own bits per pixel). Set BPP or WATCH_BPP
+      # instead for a fixed size in bits per pixel, for example 1.8.
       - QUALITY=2
       - RESOLUTION=original
       - WATCH_QUALITY=3
@@ -277,11 +296,11 @@ services:
 | `WATCH_ENABLED` | `true` | Set to `false` or `0` to disable the background watch-folder loop. |
 | `WATCH_INPUT` | `/watch/in` | Folder watched recursively for incoming `.NEV` and `.R3D` clips. |
 | `WATCH_OUTPUT` | `/watch/out` | Destination folder for watch-folder outputs (relative paths kept). |
-| `QUALITY` | `2` | Default quality preset (`1`..`4`) for the Web UI (and fallback for `WATCH_QUALITY`). |
+| `BPP` | unset | Default size in bits per pixel (`0.5`..`8`) for the Web UI, instead of `QUALITY` (and fallback for `WATCH_BPP`). |
+| `QUALITY` | `2` | Compatibility alias, the Web UI's starting pick: `1` Lossless, `2` Light, `3` Medium, `4` Strong (0.8, 0.6 and 0.4 × each clip's own bits per pixel). Fallback for `WATCH_QUALITY`. |
 | `RESOLUTION` | `original` | Default resolution (`original`, `6k`, `4k`) for the Web UI (and fallback for `WATCH_RESOLUTION`). |
-| `WATCH_QUALITY` | `3` | Quality preset for watch-folder jobs (`1`..`4`), also adjustable live in the Web UI. |
-| `BPP` | unset | Advanced: default bits-per-pixel target (`0.5`..`8`) for the Web UI instead of `QUALITY` (and fallback for `WATCH_BPP`). |
-| `WATCH_BPP` | unset | Advanced: bits-per-pixel target for watch-folder jobs instead of `WATCH_QUALITY`. Choosing a quality in the Web UI switches back to it. |
+| `WATCH_BPP` | unset | Size in bits per pixel (`0.5`..`8`) for every watch-folder clip, instead of `WATCH_QUALITY`. Also adjustable live in the Web UI. |
+| `WATCH_QUALITY` | `3` | Compatibility alias for watch-folder jobs, relative to each clip: `1` Lossless, `2` Light, `3` Medium, `4` Strong. Choosing a pick in the Web UI switches to it. |
 | `WATCH_RESOLUTION` | `original` | Output resolution for watch-folder jobs (`original`, `6k`, `4k`), also adjustable live in the Web UI. |
 | `WATCH_POLL_SECONDS` | `5` | Seconds between watch-folder scans and file-copy stability checks. |
 | `WATCH_CLEAR` | `false` | Set to `true` (or toggle **Clear watch folder after process** in the Web UI) to delete source clips from `WATCH_INPUT` once compression succeeds. |
@@ -292,7 +311,7 @@ Because the image `ENTRYPOINT` is `bluecompress`, you can also invoke any CLI co
 
 ```bash
 docker run --rm -v "$PWD":/data ghcr.io/redn3/blue-compressor:latest \
-  compress -q 2 /data/clip.NEV --output /data/clip_q2.NEV
+  compress --bpp 1.5 /data/clip.NEV --output /data/clip_1.5bpp.NEV
 
 docker run --rm -v "$PWD":/data ghcr.io/redn3/blue-compressor:latest \
   probe /data/clip.NEV
@@ -304,7 +323,10 @@ docker run --rm -v "$PWD":/data ghcr.io/redn3/blue-compressor:latest \
 
 * `bc_probe`
 * `bc_output_size`
-* `bc_transcode` (synchronous, with a progress and cancel callback)
+* `bc_transcode` (synchronous, with a progress and cancel callback; its `quality` field is
+  the legacy step: 1 lossless, 2 to 4 are 0.8, 0.6 and 0.4 × the clip's own bits per pixel)
+* `bc_transcode_bpp` (the same with a size in bits per pixel; 0 or less means lossless)
+* `bc_clip_bpp` (a probed clip's own bits per pixel)
 * `bc_backend_description`
 * `bc_version`
 
@@ -325,7 +347,7 @@ point `BC_TEST_CLIPS` at a folder of `.NEV` / `.R3D` files:
 BC_TEST_CLIPS=~/footage cargo test --release -p bluecompress --test clips -- --nocapture
 ```
 
-These check that Q1 decodes to identical coefficients, and that lossy and 4K outputs
+These check that the lossless repack decodes to identical coefficients, and that lossy and 4K outputs
 parse and decode.
 
 ### Checking outputs
@@ -335,8 +357,9 @@ those clips, compare them with the originals, and check metadata, audio and time
 
 ### Determinism
 
-Output is deterministic for a given build and backend. Q1 to Q4 involve only integer
-arithmetic and are bit-identical on every platform and backend. Resizing uses float
+Output is deterministic for a given build and backend, whatever the thread count. At the
+original resolution only integer arithmetic is involved, so outputs are bit-identical on
+every platform and backend. Resizing uses float
 arithmetic, so CPU, Metal and CUDA outputs, and builds for CPUs with and without FMA,
 differ in a few hundred of several million coefficients per frame. The differences
 are one quantization step each: float rounding, with no visible effect.

@@ -1,4 +1,4 @@
-//! Bits per sample rate control on synthetic frames (camera footage is not part of the
+//! Bits per pixel rate control on synthetic frames (camera footage is not part of the
 //! repository; see tests/clips.rs for checks on real clips).
 
 use bluecompress::frame::{
@@ -200,4 +200,63 @@ fn bpp_targets_round_and_clamp() {
     assert_eq!(bluecompress::bpp_tag(1.2), "1.2bpp");
     assert_eq!(bluecompress::bpp_tag(3.0), "3bpp");
     assert_eq!(bluecompress::variant_name_for(Target::bpp(1.2), "4k"), "1.2bpp 4K");
+}
+
+#[test]
+fn legacy_steps_map_to_fractions_of_the_source() {
+    use bluecompress::legacy_bpp;
+    assert_eq!(legacy_bpp(1, 2.9), None);
+    assert_eq!(legacy_bpp(2, 2.9), Some(2.3));
+    assert_eq!(legacy_bpp(3, 2.9), Some(1.7));
+    assert_eq!(legacy_bpp(4, 2.9), Some(1.2));
+    assert_eq!(legacy_bpp(4, 1.0), Some(0.5), "never below the 0.5 bpp floor");
+    assert_eq!(Target::quality(1).resolve(2.9), Target::lossless());
+    assert_eq!(Target::quality(3).resolve(2.9), Target::bpp(1.7));
+    // A bpp at or above the source is the lossless repack.
+    assert_eq!(Target::bpp(3.0).resolve(2.9), Target::lossless());
+    assert_eq!(Target::bpp(2.8).resolve(2.9), Target::bpp(2.8));
+    // Request fields: lossless wins, then bpp, then the legacy step (Light by default).
+    assert_eq!(Target::from_fields(Some(3), Some(1.0), true), Target::lossless());
+    assert_eq!(Target::from_fields(Some(3), Some(1.0), false), Target::bpp(1.0));
+    assert_eq!(Target::from_fields(Some(4), None, false), Target::quality(4));
+    assert_eq!(Target::from_fields(None, None, false), Target::quality(2));
+    assert_eq!(bluecompress::variant_name_for(Target::lossless(), "original"), "Lossless");
+    assert_eq!(bluecompress::variant_name_for(Target::bpp(1.2), "original"), "1.2bpp");
+}
+
+#[test]
+fn seeded_frames_are_accurate_and_deterministic() {
+    use bluecompress::frame::encode_frame_budget_seeded;
+    use bluecompress::requant::requant_codestream_seeded;
+    let frames: Vec<_> = (10..14).map(source).collect();
+    let src_bpp = frames[0].1;
+    let t = (src_bpp * 0.6 * 10.0).round() / 10.0;
+    let budget = Target::bpp(t).budget(W as u32, H as u32);
+    let run = |threads| {
+        let mut seed = Vec::new();
+        frames
+            .iter()
+            .map(|(cs, _)| {
+                let prm = RequantParams { budget, ..Default::default() };
+                requant_codestream_seeded(cs, &prm, threads, &mut seed).unwrap().0
+            })
+            .collect::<Vec<_>>()
+    };
+    let a = run(1);
+    assert_eq!(a, run(0), "the seeded run does not depend on the thread count");
+    for out in &a {
+        let got = bpp_of(out.len() as f64, W as u32, H as u32);
+        assert!(got <= t && got >= t * 0.97, "seeded frame at {got} for {t}");
+        decoded(out);
+    }
+    let (h, l) = header(W, H);
+    let budget = Target::bpp(1.0).budget(W as u32, H as u32).unwrap();
+    let mut seed = Vec::new();
+    for s in 20..23 {
+        let c = scene(&l, s);
+        let out = encode_frame_budget_seeded(&h, &l, &c, 125, budget, &mut seed).unwrap();
+        let got = bpp_of(out.len() as f64, W as u32, H as u32);
+        assert!((0.97..=1.0).contains(&got), "seeded encode at {got}");
+        assert!(!seed.is_empty());
+    }
 }

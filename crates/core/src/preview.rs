@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use crate::bmff::{InputFile, Movie};
 use crate::frame::{decode_frame, inverse_star_tetrix, inverse_wavelet, Coeffs, Planes, Transfer};
 use crate::nraw::NrawFrame;
-use crate::quality::{bpp_of, rank_for_quality, source_geometry, target_geometry, Target};
+use crate::quality::{movie_bpp, rank_for_quality, source_geometry, target_geometry, Target};
 use crate::requant::{requant_codestream, RequantParams};
 use crate::tico::{Layout, TicoHeader};
 use crate::transcode::is_supported_codec;
@@ -164,16 +164,11 @@ fn decode_pair(
 
     let src = source_geometry(&movie);
     let dst = target_geometry(src, resolution);
-    // As in a real run: a bpp target at or above the clip's gives the lossless repack.
-    let mut target = target;
-    if let Some(b) = target.bpp_value() {
-        let video_bytes: u64 = video.samples.iter().map(|s| s.size as u64).sum();
-        if b >= bpp_of(video_bytes as f64 / video.samples.len() as f64, video.width, video.height) {
-            target = Target::quality(1);
-        }
-    }
+    // As in a real run: legacy steps resolved for this clip, a bpp at or above the clip's
+    // the lossless repack.
+    let target = target.resolve(movie_bpp(&movie));
     let out_cs = if dst.width != video.width || dst.height != video.height {
-        resize::create(backend, src, dst)?.process(cs, target)?
+        resize::create(backend, src, dst)?.process(cs, target, &mut Vec::new())?
     } else {
         let p = RequantParams {
             target_rank: rank_for_quality(target.preset()),

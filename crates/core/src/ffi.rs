@@ -149,13 +149,53 @@ pub unsafe extern "C" fn bc_output_size(w: u32, h: u32, res: c_int, out_w: *mut 
     }
 }
 
-/// Runs synchronously; call from a background thread. Returns 0 on success.
+/// Runs synchronously; call from a background thread. Returns 0 on success. `quality` 1
+/// is the lossless repack; the legacy steps 2 to 4 are 0.8, 0.6 and 0.4 times each clip's
+/// own bits per pixel.
 ///
 /// # Safety
 /// `options` must be valid with NUL-terminated UTF-8 paths; `result` may be null.
 #[no_mangle]
 pub unsafe extern "C" fn bc_transcode(
     options: *const bc_options,
+    progress: bc_progress_fn,
+    user: *mut c_void,
+    result: *mut bc_result,
+) -> c_int {
+    transcode_with(options, None, progress, user, result)
+}
+
+/// [`bc_transcode`] to a target in bits per pixel (0.5 to 8, rounded to 0.1), which takes
+/// the place of `options.quality`; 0 or less gives the lossless repack.
+///
+/// # Safety
+/// As [`bc_transcode`].
+#[no_mangle]
+pub unsafe extern "C" fn bc_transcode_bpp(
+    options: *const bc_options,
+    bpp: f64,
+    progress: bc_progress_fn,
+    user: *mut c_void,
+    result: *mut bc_result,
+) -> c_int {
+    transcode_with(options, Some(bpp), progress, user, result)
+}
+
+/// Average bits per pixel of a probed clip's video (0 when it has no frames).
+///
+/// # Safety
+/// `info` may be null or point to a bc_clip_info filled by [`bc_probe`].
+#[no_mangle]
+pub unsafe extern "C" fn bc_clip_bpp(info: *const bc_clip_info) -> f64 {
+    match info.as_ref() {
+        Some(i) if i.frames > 0 => crate::bpp_of(i.video_bytes as f64 / i.frames as f64, i.width, i.height),
+        _ => 0.0,
+    }
+}
+
+unsafe fn transcode_with(
+    options: *const bc_options,
+    bpp: Option<f64>,
     progress: bc_progress_fn,
     user: *mut c_void,
     result: *mut bc_result,
@@ -174,8 +214,8 @@ pub unsafe extern "C" fn bc_transcode(
     let opts = Options {
         input,
         output,
-        quality: o.quality.clamp(1, 4) as u8,
-        bpp: None,
+        quality: if bpp.is_some() { 1 } else { o.quality.clamp(1, 4) as u8 },
+        bpp: bpp.filter(|&b| b > 0.0),
         resolution: resolution(o.resolution),
         backend: backend(o.backend),
         threads: o.threads.max(0) as usize,

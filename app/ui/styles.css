@@ -1087,23 +1087,26 @@ body.per-clip .job-settings { display: flex; }
 }
 .fs-buttons { display: flex; gap: 8px; flex: none; }
 
-/* Advanced: bits per pixel ------------------------------------------------------ */
+/* Compression: quick picks and bits per pixel ---------------------------------- */
 
-.advanced-field .switch-row { margin-bottom: 0; }
+.seg-picks button { height: 34px; font-size: 12.5px; }
 .bpp-card {
   margin-top: 8px;
-  padding: 10px 14px 10px;
+  padding: 11px 14px 10px;
   border-radius: var(--radius);
   background: var(--surface);
   border: 1px solid var(--border);
 }
-.bpp-card[hidden], .field[hidden], .v-group[hidden] { display: none; }
-.bpp-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
-.bpp-head .field-label { margin: 0; }
+.comp-text { margin: 0 0 4px; color: var(--text-2); font-size: 11.5px; line-height: 1.45; min-height: 1.45em; }
+.comp-readout { font-weight: 600; font-size: 12.5px; font-variant-numeric: tabular-nums; min-height: 1.4em; margin-bottom: 10px; }
+.comp-readout:empty { display: none; }
+.bpp-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.bpp-title { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); cursor: help; }
 .bpp-value { display: flex; align-items: center; gap: 6px; color: var(--text-3); font-size: 11.5px; }
-.bpp-value .mini-input { width: 58px; height: 26px; text-align: right; }
+.bpp-value .mini-input { width: 86px; height: 26px; text-align: right; }
 .bpp-slider { position: relative; display: flex; padding: 6px 0; }
 .bpp-slider .range { min-width: 0; width: 100%; margin: 0; }
+.bpp-slider .range.lossless { background: linear-gradient(90deg, var(--ok) 100%, var(--seg-bg) 100%); }
 .bpp-sources { position: absolute; left: 8px; right: 8px; top: 0; bottom: 0; pointer-events: none; }
 .bpp-source {
   position: absolute;
@@ -1116,7 +1119,7 @@ body.per-clip .job-settings { display: flex; }
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
   pointer-events: auto;
 }
-.bpp-ticks { position: relative; height: 30px; margin: 2px 8px 0; }
+.bpp-ticks { position: relative; height: 48px; margin: 2px 8px 0; }
 .bpp-tick {
   position: absolute;
   top: 0;
@@ -1127,17 +1130,25 @@ body.per-clip .job-settings { display: flex; }
   font-size: 10px;
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .bpp-tick i { display: block; width: 1px; height: 5px; background: var(--border-strong); margin-bottom: 2px; }
 .bpp-tick b { font-weight: 550; }
 .bpp-tick em { font-style: normal; font-weight: 650; font-size: 9.5px; color: var(--accent-2); letter-spacing: 0.02em; }
 .bpp-tick.marked i { background: var(--accent-2); height: 7px; }
+.bpp-tick.stop { transform: translateX(-100%); align-items: flex-end; margin-left: 2px; }
+.bpp-tick.stop b { margin-top: 29px; }
+.bpp-tick.stop b { color: var(--ok); font-weight: 650; }
+.bpp-tick.stop i { background: var(--ok); height: 7px; margin-right: 1px; }
 .bpp-legend { display: flex; justify-content: space-between; gap: 8px; margin-top: 4px; font-size: 10.5px; color: var(--text-3); }
 .bpp-source-key { display: inline-block; width: 3px; height: 9px; margin-right: 5px; border-radius: 2px; background: var(--warn); vertical-align: -1px; }
-.bpp-note { min-height: 2.9em; }
+.bpp-note { min-height: 1.45em; }
 .bpp-note.warn { color: var(--warn); }
-.job-b { width: 64px; height: 26px; }
-body:not(.advanced) .job-b { display: none; }
-body.advanced .job-q { display: none; }
+.job-b { width: 72px; height: 26px; }
 .job-bpp { color: var(--text-2); }
-#v-bpp { width: 70px; }
+#v-bpp { width: 76px; }
+.watch-bpp { width: 64px; height: 28px; }
+.watch-controls { grid-template-columns: 1fr auto; }
+.watch-controls #watch-resolution { grid-column: 1 / -1; }
+.bpp-card[hidden], .field[hidden], .v-group[hidden] { display: none; }
+.watch-controls > * { min-width: 0; }

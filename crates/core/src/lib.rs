@@ -28,7 +28,7 @@ mod transcode;
 mod util;
 
 pub use preview::{Preview, Thumbnail};
-pub use quality::{bpp_of, bpp_tag, Target, BPP_MAX, BPP_MIN};
+pub use quality::{bpp_of, bpp_tag, legacy_bpp, Target, BPP_MAX, BPP_MIN, LEGACY_FRACTIONS};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -217,14 +217,27 @@ pub fn transcode_staged(options: &Options, cancel: &AtomicBool, progress: &mut d
     }
 }
 
-/// Folder tag of a setting, as the queues name output folders: "Q2", "Q3 6K", "Q4 4K".
+/// Folder tag of a quality step: "Lossless", "Q3 6K" (legacy steps unresolved; see
+/// [`named_target`]).
 pub fn variant_name(quality: u8, resolution: &str) -> String {
     variant_name_for(Target::quality(quality), resolution)
 }
 
-/// [`variant_name`] for any target: "Q2", "Q3 6K", "1.2bpp", "2bpp 4K".
+/// A target as it is named for the clip `input`: a legacy quality step 2 to 4 becomes the
+/// bpp it stands for on that clip (probing it), so its folder is "Compressed 1.2bpp" like
+/// any bpp job's. Other targets as they are.
+pub fn named_target(input: &std::path::Path, target: Target) -> Target {
+    match target {
+        Target::Quality(q) if q > 1 => probe(input).map_or(target, |ci| target.resolve_legacy(ci.bpp)),
+        t => t,
+    }
+}
+
+/// Folder tag of a target, as the queues name output folders: "Lossless", "1.2bpp",
+/// "2bpp 4K".
 pub fn variant_name_for(target: Target, resolution: &str) -> String {
     let base = match target {
+        Target::Quality(q) if q <= 1 => "Lossless".to_string(),
         Target::Quality(q) => format!("Q{q}"),
         Target::Bpp(_) => bpp_tag(target.bpp_value().unwrap_or_default()),
     };

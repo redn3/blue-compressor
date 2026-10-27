@@ -8,10 +8,14 @@
 //! marker, is split over the slices and then over the precincts in proportion to their
 //! first pass sizes, so detailed precincts get more bytes than flat ones, and whatever a
 //! precinct does not use carries forward to the rest of its slice. Each precinct takes the
-//! finest truncation rank that fits its share, found by galloping from the previous
-//! precinct's rank and then bisecting, so a typical precinct is encoded two or three times.
-//! Slices are independent and every decision depends only on the frame data, so the output
-//! is the same for any thread count.
+//! finest truncation rank that fits its share, found by galloping from a guess and then
+//! bisecting. The guess is the rank the same precinct took in the previous frame of the
+//! clip (consecutive video frames code alike), or for the first frame of a run the
+//! previous precinct's rank. A guess from the previous frame that fits with little to
+//! spare is taken as is, so most precincts of a video are encoded once or twice.
+//! Slices are independent and every decision depends only on the frame data and on which
+//! frame came before (frames are rate controlled in fixed runs, see `transcode`), so the
+//! output is the same for any thread count.
 //!
 //! Background on bpp as a measure: "Nikon HE and HE* RAW, Format analysis and decoding
 //! reference", sections 2.1 and 2.2, Copyright (c) 2026 patrol_taking_9j, CC BY-SA 4.0.
@@ -51,17 +55,23 @@ pub(crate) fn slice_budgets(l: &Layout, header_bytes: usize, budget: usize, weig
 }
 
 /// The finest rank in [lo, hi] whose coding fits `budget` bytes, assuming coded size does
-/// not grow with rank; `hi` when nothing fits. `code(rank)` encodes one candidate.
+/// not grow with rank; `hi` when nothing fits. `code(rank)` encodes one candidate. When the
+/// `hint` itself fits with at most `slack` bytes to spare it is taken without trying finer
+/// ranks (a good guess from the previous frame then costs one encode instead of two).
 pub(crate) fn finest_fitting(
     lo: i32,
     hi: i32,
     hint: i32,
     budget: usize,
+    slack: usize,
     mut code: impl FnMut(i32) -> Result<Coded>,
 ) -> Result<Coded> {
     let hi = hi.max(lo);
     let fits = |c: &Coded| c.bytes.len() <= budget;
     let first = code(hint.clamp(lo, hi))?;
+    if fits(&first) && budget - first.bytes.len() <= slack {
+        return Ok(first);
+    }
     let (mut bad, mut good) = if fits(&first) {
         // Gallop towards finer ranks until one does not fit.
         let mut good = first;
@@ -110,6 +120,12 @@ pub(crate) fn finest_fitting(
     Ok(good)
 }
 
+/// Bytes a precinct may leave unused when its guess comes from the previous frame: what it
+/// leaves goes to the precincts after it, so a small slack costs next to nothing in size.
+pub(crate) fn seed_slack(share: usize) -> usize {
+    share / 32
+}
+
 /// Per-slice budget bookkeeping: each precinct gets the bytes left times its share of the
 /// weight left, so what one precinct does not use carries forward to the rest of the slice.
 pub(crate) struct SliceBudget {
@@ -150,7 +166,7 @@ mod tests {
             let want = (0..=200).find(|&r| 10000 / (r as usize + 1) <= budget).unwrap_or(200);
             for hint in [0, 3, 40, 99, 150, 200] {
                 assert_eq!(
-                    finest_fitting(0, 200, hint, budget, fake).unwrap().rank,
+                    finest_fitting(0, 200, hint, budget, 0, fake).unwrap().rank,
                     want,
                     "budget {budget} hint {hint}"
                 );
@@ -160,6 +176,20 @@ mod tests {
 
     #[test]
     fn nothing_fits_gives_the_coarsest() {
-        assert_eq!(finest_fitting(10, 20, 12, 1, fake).unwrap().rank, 20);
+        assert_eq!(finest_fitting(10, 20, 12, 1, 0, fake).unwrap().rank, 20);
+    }
+
+    #[test]
+    fn a_close_hint_is_taken_as_is() {
+        // Rank 9 codes 1000 bytes: within 50 of a 1040 byte budget, so no finer try.
+        let mut tries = 0;
+        let c = finest_fitting(0, 200, 9, 1040, 50, |r| {
+            tries += 1;
+            fake(r)
+        })
+        .unwrap();
+        assert_eq!((c.rank, tries), (9, 1));
+        // Without slack the search goes on and finds the same rank (8 codes 1111 bytes).
+        assert_eq!(finest_fitting(0, 200, 9, 1040, 0, fake).unwrap().rank, 9);
     }
 }

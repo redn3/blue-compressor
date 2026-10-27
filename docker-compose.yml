@@ -8,6 +8,9 @@ services:
     environment:
       - PORT=9847
       - BROWSE_ROOT=/
+      # Compression: QUALITY and WATCH_QUALITY pick 1 Lossless, 2 Light, 3 Medium or
+      # 4 Strong (0.8, 0.6 or 0.4 x each clip's own bits per pixel). Set BPP or WATCH_BPP
+      # instead for a fixed size in bits per pixel, for example 1.8.
       - QUALITY=2
       - RESOLUTION=original
       - WATCH_ENABLED=true

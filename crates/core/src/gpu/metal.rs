@@ -401,7 +401,7 @@ impl Resizer for MetalResizer {
         self.name.clone()
     }
 
-    fn process(&self, cs: &[u8], target: crate::quality::Target) -> Result<Vec<u8>> {
+    fn process(&self, cs: &[u8], target: crate::quality::Target, seed: &mut Vec<i32>) -> Result<Vec<u8>> {
         let (h, ls, ld) = parse_source(cs, &self.src, &self.dst)?;
         let ctx = self.acquire(&ls, &ld)?;
         let result = (|| -> Result<Vec<u8>> {
@@ -426,7 +426,7 @@ impl Resizer for MetalResizer {
             }
             // Destination coefficients are in A, in the same layout as Coeffs.
             let a = unsafe { std::slice::from_raw_parts(a_ptr, a_len) };
-            crate::resize::encode_target(&h, &ld, &a[..Coeffs::len(&ld)], target)
+            crate::resize::encode_target(&h, &ld, &a[..Coeffs::len(&ld)], target, seed)
         })();
         self.free.lock().unwrap().push(ctx);
         result

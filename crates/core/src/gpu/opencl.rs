@@ -391,14 +391,14 @@ impl Resizer for OpenClResizer {
         self.name.clone()
     }
 
-    fn process(&self, cs: &[u8], target: crate::quality::Target) -> Result<Vec<u8>> {
+    fn process(&self, cs: &[u8], target: crate::quality::Target, seed: &mut Vec<i32>) -> Result<Vec<u8>> {
         let (h, ls, ld) = parse_source(cs, &self.src, &self.dst)?;
         let mut c = self.acquire(&ls, &ld)?;
         let result = (|| -> Result<Vec<u8>> {
             let ns = Coeffs::len(&ls);
             decode_frame(cs, &h, &ls, &mut c.host[..ns])?;
             let out = self.run(&mut c, &h, &ls, &ld)?;
-            crate::resize::encode_target(&h, &ld, &out, target)
+            crate::resize::encode_target(&h, &ld, &out, target, seed)
         })();
         self.free.lock().unwrap().push(c);
         result

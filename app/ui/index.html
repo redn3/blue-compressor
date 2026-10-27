@@ -43,38 +43,19 @@
           <p class="hint" id="resolution-note"></p>
         </section>
 
-        <section class="field" id="quality-field">
-          <div class="field-label" id="label-quality">Quality</div>
-          <div class="seg seg-quality" id="seg-quality" role="radiogroup" aria-label="Quality">
-            <button data-value="1" role="radio"><b>Q1</b><small>Lossless</small></button>
-            <button data-value="2" role="radio"><b>Q2</b><small>Archival</small></button>
-            <button data-value="3" role="radio"><b>Q3</b><small>High</small></button>
-            <button data-value="4" role="radio"><b>Q4</b><small>Compact</small></button>
+        <section class="field" id="compression-field">
+          <div class="field-label" id="label-compression">Compression</div>
+          <div class="seg seg-picks" id="seg-picks" role="radiogroup" aria-label="Compression">
+            <button data-value="lossless" role="radio" title="Repacks the camera's data. Every pixel stays identical.">Lossless</button>
+            <button data-value="light" role="radio" title="0.8 times your clips' bits per pixel">Light</button>
+            <button data-value="medium" role="radio" title="0.6 times your clips' bits per pixel">Medium</button>
+            <button data-value="strong" role="radio" title="0.4 times your clips' bits per pixel">Strong</button>
           </div>
-          <div class="quality-card">
-            <div class="quality-head">
-              <span class="quality-title" id="quality-title"></span>
-              <span class="quality-saving" id="quality-saving"></span>
-            </div>
-            <p class="quality-text" id="quality-text"></p>
-            <div class="meter" aria-hidden="true">
-              <div class="meter-fill" id="quality-meter"></div>
-            </div>
-            <div class="meter-legend"><span>Original size</span><span id="quality-meter-label"></span></div>
-          </div>
-        </section>
-
-        <section class="field advanced-field">
-          <label class="switch-row" id="advanced-row" title="For people who know raw bit rates. Off, the quality steps above are all you need.">
-            <span class="switch-text">
-              <span class="switch-title">Advanced</span>
-              <span class="switch-sub" id="advanced-sub">Set the size yourself, in bits per pixel</span>
-            </span>
-            <input type="checkbox" id="advanced" class="switch">
-          </label>
-          <div class="bpp-card" id="bpp-card" hidden>
+          <div class="bpp-card" id="bpp-card">
+            <p class="comp-text" id="comp-text"></p>
+            <div class="comp-readout" id="comp-readout"></div>
             <div class="bpp-head">
-              <span class="field-label" id="label-bpp">Bits per pixel</span>
+              <span class="bpp-title" title="The size of each frame: how many bits are kept for every pixel of the raw image.">Bits per pixel</span>
               <span class="bpp-value"><input type="number" class="mini-input" id="bpp-num" min="0.5" max="8" step="0.1" inputmode="decimal" aria-label="Bits per pixel"><span>bpp</span></span>
             </div>
             <div class="bpp-slider">
@@ -82,7 +63,7 @@
               <div class="bpp-sources" id="bpp-sources" aria-hidden="true"></div>
             </div>
             <div class="bpp-ticks" id="bpp-ticks" aria-hidden="true"></div>
-            <div class="bpp-legend"><span><i class="bpp-source-key"></i>Source clip</span><span>HE and HE*: Nikon's own rates</span></div>
+            <div class="bpp-legend"><span><i class="bpp-source-key"></i>Your clips</span><span>HE, HE*: Nikon's own rates</span></div>
             <p class="hint bpp-note" id="bpp-note"></p>
           </div>
         </section>
@@ -118,12 +99,13 @@
               <div class="meter-fill" id="watch-meter-fill"></div>
             </div>
             <div class="watch-controls">
-              <div class="seg seg-sm" id="watch-quality" role="radiogroup" aria-label="Watch quality">
-                <button data-value="1" role="radio" title="Q1 Lossless">Q1</button>
-                <button data-value="2" role="radio" title="Q2 Archival">Q2</button>
-                <button data-value="3" role="radio" title="Q3 High">Q3</button>
-                <button data-value="4" role="radio" title="Q4 Compact">Q4</button>
+              <div class="seg seg-sm" id="watch-quality" role="radiogroup" aria-label="Watch compression">
+                <button data-value="1" role="radio" title="Lossless repack">Lossless</button>
+                <button data-value="2" role="radio" title="0.8 times each clip's own bits per pixel">Light</button>
+                <button data-value="3" role="radio" title="0.6 times each clip's own bits per pixel">Medium</button>
+                <button data-value="4" role="radio" title="0.4 times each clip's own bits per pixel">Strong</button>
               </div>
+              <input type="number" class="mini-input watch-bpp" id="watch-bpp" min="0.5" max="8" step="0.1" inputmode="decimal" placeholder="bpp" aria-label="Watch bits per pixel" title="Bits per pixel for every watched clip">
               <div class="seg seg-sm" id="watch-resolution" role="radiogroup" aria-label="Watch resolution">
                 <button data-value="original" role="radio" title="Original resolution">Orig</button>
                 <button data-value="6k" role="radio" title="6K">6K</button>
@@ -207,14 +189,12 @@
           <div class="v-meta" id="v-meta"></div>
         </div>
         <div class="v-controls">
-          <div class="v-group" id="v-quality-group"><span class="v-group-label">Quality</span>
-            <div class="seg seg-sm" id="v-quality">
-              <button data-value="1">Q1</button><button data-value="2">Q2</button><button data-value="3">Q3</button><button data-value="4">Q4</button>
-            </div>
-          </div>
-          <div class="v-group" id="v-bpp-group" hidden><span class="v-group-label">Bits per pixel</span>
+          <div class="v-group" id="v-quality-group"><span class="v-group-label">Compression</span>
             <div class="v-squeeze">
-              <input type="number" class="mini-input" id="v-bpp" min="0.5" max="8" step="0.1" inputmode="decimal" aria-label="Bits per pixel">
+              <div class="seg seg-sm" id="v-quality">
+                <button data-value="lossless">Lossless</button><button data-value="light">Light</button><button data-value="medium">Medium</button><button data-value="strong">Strong</button>
+              </div>
+              <input type="number" class="mini-input" id="v-bpp" min="0.5" max="8" step="0.1" inputmode="decimal" aria-label="Bits per pixel" title="Bits per pixel">
             </div>
           </div>
           <div class="v-group"><span class="v-group-label">Resolution</span>
@@ -371,9 +351,9 @@
         </div>
         <div class="job-meta"></div>
         <div class="job-settings">
-          <select class="mini-select job-q" title="Quality">
-            <option value="1">Q1 Lossless</option><option value="2">Q2 Archival</option>
-            <option value="3">Q3 High</option><option value="4">Q4 Compact</option>
+          <select class="mini-select job-c" title="Compression (picks go by this clip's own bits per pixel)">
+            <option value="lossless">Lossless</option><option value="light">Light</option>
+            <option value="medium">Medium</option><option value="strong">Strong</option><option value="custom">Custom</option>
           </select>
           <input type="number" class="mini-input job-b" min="0.5" max="8" step="0.1" inputmode="decimal" title="Bits per pixel" aria-label="Bits per pixel">
           <select class="mini-select job-r" title="Resolution">

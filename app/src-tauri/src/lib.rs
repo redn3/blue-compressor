@@ -67,10 +67,15 @@ struct Settings {
 struct JobRequest {
     id: u64,
     path: String,
-    quality: u8,
-    /// Bits per sample target instead of `quality` (Advanced mode).
+    /// Legacy quality step (1 lossless, 2 to 4: 0.8, 0.6, 0.4 x the clip's own bpp), used
+    /// when neither `bpp` nor `lossless` is given.
+    #[serde(default)]
+    quality: Option<u8>,
+    /// Target in bits per pixel.
     #[serde(default)]
     bpp: Option<f64>,
+    #[serde(default)]
+    lossless: bool,
     resolution: String,
     /// Compress even when a compressed copy already exists ("Compress again").
     #[serde(default)]
@@ -190,14 +195,21 @@ fn describe(path: &Path) -> Clip {
     }
 }
 
-/// What a job compresses to: its bpp target when it has one, else its quality.
-fn target_of(quality: u8, bpp: Option<f64>) -> Target {
-    Target::new(quality, bpp)
+/// What a job for `input` compresses to: lossless, its bpp, or a legacy quality step as
+/// the bpp it stands for on that clip.
+fn target_of(input: &Path, quality: Option<u8>, bpp: Option<f64>, lossless: bool) -> Target {
+    match Target::from_fields(quality, bpp, lossless) {
+        Target::Quality(q) if q > 1 => {
+            let t = Target::Quality(q);
+            engine::probe(input).map_or(t, |i| t.resolve_legacy(i.bpp))
+        }
+        t => t,
+    }
 }
 
 /// Where a job writes. Clips keep their file names, so edits relink; the setting goes in
-/// the folder name instead. Next to the clips that is a "Compressed Q2" (or "Compressed
-/// Q3 4K") folder beside each clip. In a chosen folder the files go straight in, and a second
+/// the folder name instead. Next to the clips that is a "Compressed 1.2bpp" (or "Compressed
+/// Lossless 4K") folder beside each clip. In a chosen folder the files go straight in, and a second
 /// version of the same clip goes into a sub-folder named after its setting ("Q2", "Q3 6K",
 /// "1.2bpp"). Never an existing file, and never the input itself.
 fn output_for(input: &Path, folder: Option<&str>, target: Target, resolution: &str) -> PathBuf {
@@ -258,8 +270,9 @@ fn plan_output(width: u32, height: u32, resolution: String) -> (u32, u32) {
 async fn preview(
     path: String,
     frame: u32,
-    quality: u8,
+    quality: Option<u8>,
     bpp: Option<f64>,
+    lossless: Option<bool>,
     resolution: String,
     backend: String,
     width: u32,
@@ -269,7 +282,7 @@ async fn preview(
     let backend = backend_of(&backend);
     let crop = crop.unwrap_or([0.0, 0.0, 1.0, 1.0]);
     let p = tauri::async_runtime::spawn_blocking(move || {
-        let target = target_of(quality, bpp);
+        let target = target_of(Path::new(&path), quality, bpp, lossless.unwrap_or(false));
         engine::preview_region_for(Path::new(&path), frame, target, res, backend, crop, width.clamp(16, 8192))
     })
     .await
@@ -330,9 +343,12 @@ fn active_fps(frames: u32, seconds: f64, fps: f64, paused_for: std::time::Durati
 struct CheckExistingItem {
     id: u64,
     path: String,
-    quality: u8,
+    #[serde(default)]
+    quality: Option<u8>,
     #[serde(default)]
     bpp: Option<f64>,
+    #[serde(default)]
+    lossless: bool,
     resolution: String,
     width: u32,
     height: u32,
@@ -352,7 +368,8 @@ fn check_existing_outputs(folder: Option<&str>, items: &[CheckExistingItem]) -> 
         .iter()
         .filter_map(|it| {
             let res = bluecompress::effective_resolution(it.width, it.height, &it.resolution);
-            existing_for(Path::new(&it.path), folder, target_of(it.quality, it.bpp), res)
+            let path = Path::new(&it.path);
+            existing_for(path, folder, target_of(path, it.quality, it.bpp, it.lossless), res)
                 .map(|(p, bytes)| ExistingOutput { id: it.id, output: p.to_string_lossy().into_owned(), bytes })
         })
         .collect()
@@ -401,7 +418,8 @@ fn start(app: AppHandle, state: State<'_, Runner>, jobs: Vec<JobRequest>, settin
                 .map(|i| engine::output_size(i.width, i.height, resolution(&job.resolution)) != (i.width, i.height))
                 .unwrap_or(false);
             let res_name = if resized { job.resolution.as_str() } else { "original" };
-            let target = target_of(job.quality, job.bpp);
+            let target = target_of(&input, job.quality, job.bpp, job.lossless);
+            let (quality, bpp) = target.option_fields();
             // Already compressed by an earlier, interrupted run: keep it.
             if !job.force {
                 if let Some((out, out_bytes)) =
@@ -440,15 +458,8 @@ fn start(app: AppHandle, state: State<'_, Runner>, jobs: Vec<JobRequest>, settin
             }
             let out_s = output.to_string_lossy().into_owned();
             let _ = app.emit("job-start", JobStart { id: job.id, output: out_s.clone() });
-            let options = Options {
-                input,
-                output,
-                quality: job.quality.clamp(1, 4),
-                bpp: target.bpp_value(),
-                resolution: resolution(&job.resolution),
-                backend,
-                threads: 0,
-            };
+            let options =
+                Options { input, output, quality, bpp, resolution: resolution(&job.resolution), backend, threads: 0 };
             let mut last = Instant::now() - std::time::Duration::from_secs(1);
             let app2 = app.clone();
             // The core reports frames per second since the clip started; take paused time out.

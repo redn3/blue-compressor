@@ -5,7 +5,7 @@
 
 use std::sync::Mutex;
 
-use crate::rate::{finest_fitting, max_rank, slice_budgets, Coded, SliceBudget};
+use crate::rate::{finest_fitting, max_rank, seed_slack, slice_budgets, Coded, SliceBudget};
 use crate::tico::*;
 use crate::util::parallel_for;
 use crate::Result;
@@ -18,7 +18,7 @@ pub struct RequantParams {
     pub optimize_modes: bool,
     /// Drop coded-but-empty bit planes (groups whose magnitudes are all zero).
     pub tidy: bool,
-    /// Target codestream size in bytes (bits per sample mode, see [`crate::rate`]). Each
+    /// Target codestream size in bytes (bits per pixel mode, see [`crate::rate`]). Each
     /// precinct then takes the finest rank that fits its share, never finer than the
     /// camera's, and `target_rank` is ignored. A codestream that already fits is repacked
     /// losslessly.
@@ -125,14 +125,26 @@ fn requantize(l: &Layout, pd: &mut PrecinctData, target: i32, rank0: i32, tidy_l
 
 /// Transcodes one codestream, parallel over slices.
 pub fn requant_codestream(cs: &[u8], prm: &RequantParams, threads: usize) -> Result<(Vec<u8>, CodestreamStats)> {
+    requant_codestream_seeded(cs, prm, threads, &mut Vec::new())
+}
+
+/// [`requant_codestream`] for consecutive frames of a clip: with a bpp budget, `seed` holds
+/// the ranks the previous frame chose (empty for the first) and is updated for the next.
+pub fn requant_codestream_seeded(
+    cs: &[u8],
+    prm: &RequantParams,
+    threads: usize,
+    seed: &mut Vec<i32>,
+) -> Result<(Vec<u8>, CodestreamStats)> {
     if let Some(budget) = prm.budget {
         // First pass: the lossless repack, which is the output when it already fits.
         let lossless = RequantParams { target_rank: None, budget: None, ..*prm };
         let (out, stats, sizes) = requant_inner(cs, &lossless, threads)?;
         return if out.len() <= budget {
+            seed.clear();
             Ok((out, stats))
         } else {
-            requant_to_budget(cs, prm, budget, &sizes, threads)
+            requant_to_budget(cs, prm, budget, &sizes, threads, seed)
         };
     }
     let (out, stats, _) = requant_inner(cs, prm, threads)?;
@@ -259,6 +271,7 @@ fn requant_to_budget(
     budget: usize,
     weights: &[usize],
     threads: usize,
+    seed: &mut Vec<i32>,
 ) -> Result<(Vec<u8>, CodestreamStats)> {
     let (header, first_slice) = TicoHeader::parse(cs)?;
     let l = Layout::make(&header, header.width as usize, header.height as usize)?;
@@ -268,10 +281,15 @@ fn requant_to_budget(
     let budgets = slice_budgets(&l, header.raw.len(), budget, weights);
     let slices: Vec<SliceOut> = (0..l.slices).map(|_| Mutex::default()).collect();
 
-    // Where each slice starts its search: the rank the first precinct of the middle slice
-    // needs for its share. Computed once before the slices run, so it is the same for any
-    // thread count, and it saves most of the search at every slice start.
-    let start = {
+    let prev = std::mem::take(seed);
+    let seeded = prev.len() == l.precincts;
+    // Without a previous frame, where each slice starts its search: the rank the first
+    // precinct of the middle slice needs for its share. Computed once before the slices
+    // run, so it is the same for any thread count, and it saves most of the search at
+    // every slice start.
+    let start = if seeded {
+        0
+    } else {
         let s = l.slices / 2;
         let p = s * l.slice_height;
         let mut dec = PredState::default();
@@ -285,7 +303,7 @@ fn requant_to_budget(
         let share = SliceBudget::new(budgets[s], &weights[p..p1]).share(weights[p]);
         let mut trial = Trial::default();
         let mut scratch = EncodeScratch::default();
-        finest_fitting(rank0, hi.max(rank0), rank0, share, |rank| {
+        finest_fitting(rank0, hi.max(rank0), rank0, share, 0, |rank| {
             trial.code(&l, &base, rank0, rank, prm, &enc, &mut scratch)
         })?
         .rank
@@ -306,15 +324,18 @@ fn requant_to_budget(
         let mut left = SliceBudget::new(budgets[s], &weights[p0..p1]);
         let mut hint = start;
         let mut trial = Trial::default();
+        let mut ranks = Vec::with_capacity(p1 - p0);
         for p in p0..p1 {
             decode_precinct(cs, precincts[p], &l, p, &mut dec, &mut base, false)?;
             let rank0 = rank_of(base.q, base.r, nb as i32);
             st.precincts += 1;
             st.rank_sum += rank0 as i64;
             let share = left.share(weights[p]);
-            let best = finest_fitting(rank0, hi.max(rank0), hint.max(rank0), share, |rank| {
+            let (guess, slack) = if seeded { (prev[p], seed_slack(share)) } else { (hint, 0) };
+            let best = finest_fitting(rank0, hi.max(rank0), guess.max(rank0), share, slack, |rank| {
                 trial.code(&l, &base, rank0, rank, prm, &enc, &mut scratch)
             })?;
+            ranks.push(best.rank as usize);
             if best.rank > rank0 {
                 st.requantized += 1;
             }
@@ -323,9 +344,10 @@ fn requant_to_budget(
             out.extend_from_slice(&best.bytes);
             enc = best.state;
         }
-        *slices[s].lock().unwrap() = (out, st, Vec::new());
+        *slices[s].lock().unwrap() = (out, st, ranks);
         Ok(())
     })?;
-    let (out, stats, _) = join_slices(&header, slices);
+    let (out, stats, ranks) = join_slices(&header, slices);
+    *seed = ranks.into_iter().map(|r| r as i32).collect();
     Ok((out, stats))
 }

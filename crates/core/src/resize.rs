@@ -28,15 +28,24 @@ pub fn plane_taps(src: &Geometry, dst: &Geometry) -> ([Taps; 4], [Taps; 4]) {
 pub trait Resizer: Send + Sync {
     fn name(&self) -> String;
     /// Re-encodes one codestream at the target size. Called concurrently from workers.
-    fn process(&self, cs: &[u8], target: Target) -> Result<Vec<u8>>;
+    /// `seed` carries rate control guesses from the previous frame (see [`encode_target`]).
+    fn process(&self, cs: &[u8], target: Target, seed: &mut Vec<i32>) -> Result<Vec<u8>>;
 }
 
 /// The entropy coding stage of every resizer (CPU and GPU): a uniform rank for a quality
 /// preset, or rate control to the frame budget for a bpp target. It always runs on the
 /// CPU; the GPU backends only do the pixel stages before it.
-pub fn encode_target(h: &TicoHeader, ld: &Layout, coeffs: &[i32], target: Target) -> Result<Vec<u8>> {
+/// `seed` holds the ranks the previous frame of the clip chose (empty for the first) and is
+/// updated for the next.
+pub fn encode_target(
+    h: &TicoHeader,
+    ld: &Layout,
+    coeffs: &[i32],
+    target: Target,
+    seed: &mut Vec<i32>,
+) -> Result<Vec<u8>> {
     match target.budget(ld.width as u32, ld.height as u32) {
-        Some(budget) => encode_frame_budget(h, ld, coeffs, RESIZE_FINEST_RANK, budget),
+        Some(budget) => encode_frame_budget_seeded(h, ld, coeffs, RESIZE_FINEST_RANK, budget, seed),
         None => encode_frame(h, ld, coeffs, encode_rank_for_quality(target.preset())),
     }
 }
@@ -71,12 +80,12 @@ impl Resizer for CpuResizer {
         "CPU".into()
     }
 
-    fn process(&self, cs: &[u8], target: Target) -> Result<Vec<u8>> {
+    fn process(&self, cs: &[u8], target: Target, seed: &mut Vec<i32>) -> Result<Vec<u8>> {
         let (h, ls, ld) = parse_source(cs, &self.src, &self.dst)?;
         let mut coeffs = vec![0i32; Coeffs::len(&ls)];
         decode_frame(cs, &h, &ls, &mut coeffs)?;
         let dc = resize_coeffs(&h, &ls, &ld, coeffs, &self.tx, &self.ty);
-        encode_target(&h, &ld, &dc, target)
+        encode_target(&h, &ld, &dc, target, seed)
     }
 }
 

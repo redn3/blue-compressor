@@ -7,8 +7,8 @@ use std::time::{Duration, Instant};
 
 use crate::bmff::{chunk_order, fourcc, fourcc_str, InputFile, Movie, OutputWriter, WriteOptions};
 use crate::nraw::NrawFrame;
-use crate::quality::{bpp_of, rank_for_quality, source_geometry, target_geometry, Target};
-use crate::requant::{requant_codestream, RequantParams};
+use crate::quality::{movie_bpp, rank_for_quality, source_geometry, target_geometry, Target};
+use crate::requant::{requant_codestream_seeded, RequantParams};
 use crate::resize::{self, Resizer};
 use crate::{Error, Options, Outcome, Result};
 
@@ -38,6 +38,9 @@ fn same_file(input: &Path, out: &Path) -> bool {
     }
 }
 
+/// Frames per run of rate controlled frames (see `transcode`).
+const FRAMES_PER_RUN: usize = 4;
+
 struct Shared {
     done: Vec<Option<Vec<u8>>>,
     next: usize,
@@ -57,15 +60,9 @@ pub fn transcode(opt: &Options, cancel: &AtomicBool, progress: &mut dyn FnMut(f6
     if !is_supported_codec(video.codec) {
         return Err(Error(format!("not a Nikon N-RAW or R3D NE clip (codec {})", fourcc_str(video.codec))));
     }
-    // A bpp target at or above the source's cannot add quality: lossless repack instead.
-    let mut target = Target::new(opt.quality, opt.bpp);
-    if let Some(b) = target.bpp_value() {
-        let video_bytes: u64 = video.samples.iter().map(|s| s.size as u64).sum();
-        let src_bpp = bpp_of(video_bytes as f64 / video.samples.len().max(1) as f64, video.width, video.height);
-        if b >= src_bpp {
-            target = Target::quality(1);
-        }
-    }
+    // Legacy quality steps become a bpp for this clip; a bpp at or above the source's
+    // cannot add anything and gives the lossless repack.
+    let target = Target::new(opt.quality, opt.bpp).resolve(movie_bpp(&movie));
     let quality = target.preset();
     let src = source_geometry(&movie);
     let dst = target_geometry(src, opt.resolution);
@@ -90,23 +87,27 @@ pub fn transcode(opt: &Options, cancel: &AtomicBool, progress: &mut dyn FnMut(f6
     let nframes = video.samples.len();
     // Resize jobs hold whole decoded frames; keep fewer in flight.
     let workers = if resizing { threads.clamp(2, 4) } else { threads.clamp(1, 16) };
-    let max_in_flight = workers * 2;
     let target_rank = rank_for_quality(quality);
     let budget = target.budget(video.width, video.height);
+    // Rate controlled frames go to the workers in fixed runs, coded in order within a run,
+    // so each frame starts its search from the previous one's choices. The runs do not
+    // depend on the thread count, so neither does the output.
+    let run = if budget.is_some() { FRAMES_PER_RUN } else { 1 };
+    let max_in_flight = workers * (run + 1);
 
     let shared = Mutex::new(Shared { done: vec![None; nframes], next: 0, written: 0, stop: false, error: None });
     let cv = Condvar::new();
 
-    let process = |i: usize| -> Result<Vec<u8>> {
+    let process = |i: usize, seed: &mut Vec<i32>| -> Result<Vec<u8>> {
         let s = video.samples[i];
         let sample = input.read(s.offset, s.size as usize)?;
         let frame = NrawFrame::parse(&sample)?;
         let cs = &sample[frame.codestream_offset..];
         if let Some(r) = &resizer {
-            frame.build(&r.process(cs, target)?, Some((dst.width, dst.height)))
+            frame.build(&r.process(cs, target, seed)?, Some((dst.width, dst.height)))
         } else {
             let p = RequantParams { target_rank, budget, ..Default::default() };
-            frame.build(&requant_codestream(cs, &p, 1)?.0, None)
+            frame.build(&requant_codestream_seeded(cs, &p, 1, seed)?.0, None)
         }
     };
 
@@ -115,7 +116,7 @@ pub fn transcode(opt: &Options, cancel: &AtomicBool, progress: &mut dyn FnMut(f6
     let result: Result<()> = std::thread::scope(|scope| {
         for _ in 0..workers {
             scope.spawn(|| loop {
-                let i = {
+                let first = {
                     let mut g = shared.lock().unwrap();
                     while !g.stop && g.next < nframes && g.next >= g.written + max_in_flight {
                         g = cv.wait(g).unwrap();
@@ -123,21 +124,28 @@ pub fn transcode(opt: &Options, cancel: &AtomicBool, progress: &mut dyn FnMut(f6
                     if g.stop || g.next >= nframes {
                         return;
                     }
-                    g.next += 1;
-                    g.next - 1
+                    g.next += run;
+                    g.next - run
                 };
-                let r = process(i);
-                let mut g = shared.lock().unwrap();
-                match r {
-                    Ok(out) => g.done[i] = Some(out),
-                    Err(e) => {
-                        if g.error.is_none() {
-                            g.error = Some(format!("frame {i}: {e}"));
+                let mut seed = Vec::new();
+                for i in first..nframes.min(first + run) {
+                    let r = process(i, &mut seed);
+                    let mut g = shared.lock().unwrap();
+                    let failed = r.is_err();
+                    match r {
+                        Ok(out) => g.done[i] = Some(out),
+                        Err(e) => {
+                            if g.error.is_none() {
+                                g.error = Some(format!("frame {i}: {e}"));
+                            }
+                            g.stop = true;
                         }
-                        g.stop = true;
+                    }
+                    cv.notify_all();
+                    if failed || g.stop {
+                        return;
                     }
                 }
-                cv.notify_all();
             });
         }
 
