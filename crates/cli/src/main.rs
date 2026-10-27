@@ -317,8 +317,8 @@ fn probe_cmd(o: &Cli) -> u8 {
         if o.json {
             println!(
                 "{{\"event\":\"clip\",\"input\":{},\"codec\":{},\"format\":{},\"width\":{},\"height\":{},\
-                 \"frames\":{},\"fps\":{},\"file_bytes\":{},\"video_bytes\":{},\"audio_tracks\":{},\
-                 \"bpp\":{:.3},\"output_6k\":[{w6},{h6}],\"output_4k\":[{w4},{h4}]}}",
+                 \"frames\":{},\"fps\":{},\"file_bytes\":{},\"video_bytes\":{},\"codestream_bytes\":{},\
+                 \"audio_tracks\":{},\"bpp\":{:.3},\"output_6k\":[{w6},{h6}],\"output_4k\":[{w4},{h4}]}}",
                 q(&ps(&p)),
                 q(fourcc(&info)),
                 q(codec_name(&info)),
@@ -328,6 +328,7 @@ fn probe_cmd(o: &Cli) -> u8 {
                 info.fps,
                 info.file_bytes,
                 info.video_bytes,
+                info.codestream_bytes,
                 info.audio_tracks,
                 info.bpp
             );

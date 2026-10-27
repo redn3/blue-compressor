@@ -1,6 +1,6 @@
 //! Quality presets and output geometry.
 
-use crate::bmff::Movie;
+use crate::bmff::{InputFile, Movie};
 use crate::Resolution;
 
 /// Target ranks, measured on Z8 and ZR footage (rank = Q*25 + 25-R,
@@ -127,6 +127,14 @@ impl Target {
         }
     }
 
+    /// [`Target::budget`] for a frame as it is written: codestreams go into the file zero
+    /// padded to whole KiB ([`crate::nraw::CODESTREAM_ALIGN`]), so the budget is rounded down
+    /// to that unit and the padded codestream still fits the target.
+    pub fn frame_budget(&self, width: u32, height: u32) -> Option<usize> {
+        const A: usize = crate::nraw::CODESTREAM_ALIGN;
+        self.budget(width, height).map(|b| if b >= A { b / A * A } else { b })
+    }
+
     /// The quality preset (1 when in bpp mode).
     pub fn preset(&self) -> u8 {
         match *self {
@@ -178,10 +186,30 @@ pub struct Geometry {
     pub active_height: u32,
 }
 
-/// Average bits per pixel of a clip's video frames.
-pub fn movie_bpp(m: &Movie) -> f64 {
+/// Bytes of TICO codestream in a clip's video frames, the numerator of its bits per pixel
+/// (see [`crate::nraw::codestream_bytes`]), and whether it is exact. When the frame headers
+/// cannot be read the whole video samples (headers included) are counted instead, and a
+/// note says so on stderr.
+pub fn source_codestream_bytes(input: &InputFile, m: &Movie) -> (u64, bool) {
+    match crate::nraw::codestream_bytes(input, m) {
+        Ok(b) => (b, true),
+        Err(e) => {
+            let bytes: u64 = m.video().samples.iter().map(|s| s.size as u64).sum();
+            eprintln!(
+                "bluecompress: {}: frame headers not readable ({e}); bits per pixel estimated from whole video samples",
+                input.path().display()
+            );
+            (bytes, false)
+        }
+    }
+}
+
+/// Average bits per pixel of a clip's video frames: 8 x codestream bytes / (frames x Wf x
+/// Hf), as in the HE / HE* reference (container, audio, metadata and frame headers left
+/// out).
+pub fn source_bpp(input: &InputFile, m: &Movie) -> f64 {
     let v = m.video();
-    let bytes: u64 = v.samples.iter().map(|s| s.size as u64).sum();
+    let (bytes, _) = source_codestream_bytes(input, m);
     bpp_of(bytes as f64 / v.samples.len().max(1) as f64, v.width, v.height)
 }
 

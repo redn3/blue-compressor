@@ -54,8 +54,11 @@ settings.
 ## What it does
 
 Compression is set as a size in **bits per pixel** (bpp): the coded size of a frame
-times 8, divided by its width times height. `bluecompress probe` and the app show each
-clip's own rate; Nikon's own HE stills come out at about 3 bpp and HE\* at about 5 (see
+times 8, divided by its width times height. Only the TICO RAW codestream counts: the
+container (headers, audio, metadata, index) and each frame's small NRAW header are left
+out. A clip's own rate is measured from the frame sizes in the container's index less the
+frame header length (read from a few frames, not the whole clip), so scanning a card
+stays fast. `bluecompress probe` and the app show each clip's own rate; Nikon's own HE stills come out at about 3 bpp and HE\* at about 5 (see
 the credit below). Four quick picks set it for you:
 
 | Pick | What happens | Size |
@@ -104,7 +107,9 @@ square-root companding transfer curve. Blue Compressor:
 
 ### Rate control
 
-* Each frame is rate controlled to fit `bpp × width × height / 8` bytes. The first pass
+* Each frame is rate controlled to fit `bpp × width × height / 8` codestream bytes,
+  rounded down to whole KiB because frames are stored KiB padded as the cameras write
+  them, so source and output are measured the same way. The first pass
   is the finest coding allowed (the lossless repack, or the resizer's finest setting);
   if that fits, it is the output. Otherwise the budget is shared over the slices and
   precincts in proportion to their sizes in that pass, each precinct takes the finest
@@ -334,7 +339,8 @@ docker run --rm -v "$PWD":/data ghcr.io/redn3/blue-compressor:latest \
 * `bc_transcode` (synchronous, with a progress and cancel callback; its `quality` field is
   the legacy step: 1 lossless, 2 to 4 are 0.8, 0.6 and 0.4 × the clip's own bits per pixel)
 * `bc_transcode_bpp` (the same with a size in bits per pixel; 0 or less means lossless)
-* `bc_clip_bpp` (a probed clip's own bits per pixel)
+* `bc_clip_bpp` (a probed clip's own bits per pixel, from `codestream_bytes`, which
+  `bc_clip_info` carries next to `video_bytes`)
 * `bc_backend_description`
 * `bc_version`
 

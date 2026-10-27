@@ -20,6 +20,8 @@ pub struct bc_clip_info {
     pub video_bytes: u64,
     pub codec: [c_char; 8],
     pub audio_tracks: c_int,
+    /// TICO codestream bytes of the video frames (video_bytes less frame headers).
+    pub codestream_bytes: u64,
 }
 
 #[repr(C)]
@@ -122,6 +124,7 @@ pub unsafe extern "C" fn bc_probe(
                 out.codec = [0; 8];
                 copy_str(&mut out.codec, if ci.codec == Codec::NRaw { "NRAW" } else { "NR3D" });
                 out.audio_tracks = ci.audio_tracks as c_int;
+                out.codestream_bytes = ci.codestream_bytes;
             }
             0
         }
@@ -181,14 +184,19 @@ pub unsafe extern "C" fn bc_transcode_bpp(
     transcode_with(options, Some(bpp), progress, user, result)
 }
 
-/// Average bits per pixel of a probed clip's video (0 when it has no frames).
+/// Average bits per pixel of a probed clip's video, 8 x codestream bytes / (frames x
+/// width x height) (0 when it has no frames). Falls back to `video_bytes` when
+/// `codestream_bytes` is 0.
 ///
 /// # Safety
 /// `info` may be null or point to a bc_clip_info filled by [`bc_probe`].
 #[no_mangle]
 pub unsafe extern "C" fn bc_clip_bpp(info: *const bc_clip_info) -> f64 {
     match info.as_ref() {
-        Some(i) if i.frames > 0 => crate::bpp_of(i.video_bytes as f64 / i.frames as f64, i.width, i.height),
+        Some(i) if i.frames > 0 => {
+            let bytes = if i.codestream_bytes > 0 { i.codestream_bytes } else { i.video_bytes };
+            crate::bpp_of(bytes as f64 / i.frames as f64, i.width, i.height)
+        }
         _ => 0.0,
     }
 }

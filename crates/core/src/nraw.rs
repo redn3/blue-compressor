@@ -9,7 +9,7 @@
 //!   <TICO RAW codestream: SOC ... EOC>
 //! ```
 
-use crate::bmff::fourcc;
+use crate::bmff::{fourcc, InputFile, Movie, Sample};
 use crate::{Error, Result};
 
 /// Cameras write codestreams in whole 1 KiB units, zero padded before EOC; outputs keep that
@@ -127,4 +127,59 @@ impl NrawFrame {
         }
         Ok(out)
     }
+}
+
+/// Length of the NRAW frame header (everything before the codestream's SOC) of the video
+/// sample `s`, read from the file box by box: a few 8 byte reads, not the frame.
+pub fn sample_header_len(input: &InputFile, s: Sample) -> Result<u64> {
+    let size = s.size as u64;
+    let mut b = [0u8; 8];
+    require(size >= 16, "video sample is not an NRAW frame")?;
+    input.read_into(s.offset, &mut b)?;
+    require(rd32(&b, 4) == fourcc(b"NRAW"), "video sample is not an NRAW frame")?;
+    require(rd32(&b, 0) as u64 == size, "NRAW frame size mismatch")?;
+    let mut at = 8u64;
+    while at + 8 <= size {
+        input.read_into(s.offset + at, &mut b)?;
+        if b[0] == 0xff && b[1] == 0x10 {
+            return Ok(at); // SOC
+        }
+        let len = rd32(&b, 0) as u64;
+        require(len >= 8 && at + len <= size, "bad NRAW child box")?;
+        at += len;
+    }
+    Err(Error("codestream not found in NRAW frame".into()))
+}
+
+/// Frames whose headers [`codestream_bytes`] reads before it takes the header length as
+/// the same for the whole clip.
+const HEADER_PROBES: usize = 8;
+
+/// Total TICO codestream bytes of a clip's video frames: the frame sizes from the sample
+/// table less each frame's NRAW header. Header lengths are read from up to
+/// [`HEADER_PROBES`] frames spread over the clip (first and last included); when they all
+/// agree, as they do in camera files, that length is used for every frame, otherwise every
+/// frame's header is read. Codestream padding (cameras write whole KiB) counts as
+/// codestream, as Lcod does.
+pub fn codestream_bytes(input: &InputFile, m: &Movie) -> Result<u64> {
+    let samples = &m.video().samples;
+    let n = samples.len();
+    let total: u64 = samples.iter().map(|s| s.size as u64).sum();
+    if n == 0 {
+        return Ok(0);
+    }
+    let k = n.min(HEADER_PROBES);
+    let mut lens = Vec::with_capacity(k);
+    for i in 0..k {
+        let at = if k == 1 { 0 } else { i * (n - 1) / (k - 1) };
+        lens.push(sample_header_len(input, samples[at])?);
+    }
+    if lens.iter().all(|&l| l == lens[0]) {
+        return Ok(total - lens[0] * n as u64);
+    }
+    let mut headers = 0u64;
+    for &s in samples {
+        headers += sample_header_len(input, s)?;
+    }
+    Ok(total - headers)
 }

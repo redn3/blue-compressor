@@ -62,9 +62,14 @@ pub struct ClipInfo {
     pub frames: u32,
     pub fps: f64,
     pub file_bytes: u64,
+    /// Video samples as stored (frame headers included).
     pub video_bytes: u64,
+    /// TICO codestream bytes of the video frames: `video_bytes` less the per-frame NRAW
+    /// headers (equal to `video_bytes` when the headers could not be read).
+    pub codestream_bytes: u64,
     pub audio_tracks: u32,
-    /// Average coded bits per Bayer sample of the video frames (8 * bytes / (width * height)).
+    /// Average coded bits per Bayer sample of the video frames:
+    /// 8 * codestream_bytes / (frames * width * height).
     pub bpp: f64,
 }
 
@@ -124,6 +129,7 @@ pub fn probe(path: &std::path::Path) -> Result<ClipInfo> {
         c => return Err(Error(format!("not a Nikon N-RAW or R3D NE clip (codec {})", bmff::fourcc_str(c)))),
     };
     let video_bytes: u64 = v.samples.iter().map(|s| s.size as u64).sum();
+    let (codestream_bytes, _) = quality::source_codestream_bytes(&input, &m);
     let frames = v.samples.len() as u32;
     Ok(ClipInfo {
         codec,
@@ -133,8 +139,9 @@ pub fn probe(path: &std::path::Path) -> Result<ClipInfo> {
         fps: quality::video_frame_rate(&m),
         file_bytes: input.size(),
         video_bytes,
+        codestream_bytes,
         audio_tracks: m.tracks.iter().filter(|t| t.handler == bmff::fourcc(b"soun")).count() as u32,
-        bpp: bpp_of(video_bytes as f64 / frames.max(1) as f64, v.width, v.height),
+        bpp: bpp_of(codestream_bytes as f64 / frames.max(1) as f64, v.width, v.height),
     })
 }
 

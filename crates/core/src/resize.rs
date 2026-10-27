@@ -44,7 +44,7 @@ pub fn encode_target(
     target: Target,
     seed: &mut Vec<i32>,
 ) -> Result<Vec<u8>> {
-    match target.budget(ld.width as u32, ld.height as u32) {
+    match target.frame_budget(ld.width as u32, ld.height as u32) {
         Some(budget) => encode_frame_budget_seeded(h, ld, coeffs, RESIZE_FINEST_RANK, budget, seed),
         None => encode_frame(h, ld, coeffs, encode_rank_for_quality(target.preset())),
     }

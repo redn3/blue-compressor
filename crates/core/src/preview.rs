@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use crate::bmff::{InputFile, Movie};
 use crate::frame::{decode_frame, inverse_star_tetrix, inverse_wavelet, Coeffs, Planes, Transfer};
 use crate::nraw::NrawFrame;
-use crate::quality::{movie_bpp, rank_for_quality, source_geometry, target_geometry, Target};
+use crate::quality::{rank_for_quality, source_bpp, source_geometry, target_geometry, Target};
 use crate::requant::{requant_codestream, RequantParams};
 use crate::tico::{Layout, TicoHeader};
 use crate::transcode::is_supported_codec;
@@ -25,7 +25,8 @@ pub struct Preview {
     pub before_rgba: Vec<u8>,
     /// Same size: the frame after compression (scaled to the same display size when resized).
     pub after_rgba: Vec<u8>,
-    /// This frame's coded size in the source and after compression.
+    /// This frame's TICO codestream bytes in the source and after compression (as written,
+    /// so KiB padded), the measure bits per pixel uses.
     pub source_frame_bytes: u64,
     pub output_frame_bytes: u64,
     /// Frames in the clip.
@@ -166,13 +167,13 @@ fn decode_pair(
     let dst = target_geometry(src, resolution);
     // As in a real run: legacy steps resolved for this clip, a bpp at or above the clip's
     // the lossless repack.
-    let target = target.resolve(movie_bpp(&movie));
+    let target = target.resolve(source_bpp(&input, &movie));
     let out_cs = if dst.width != video.width || dst.height != video.height {
         resize::create(backend, src, dst)?.process(cs, target, &mut Vec::new())?
     } else {
         let p = RequantParams {
             target_rank: rank_for_quality(target.preset()),
-            budget: target.budget(video.width, video.height),
+            budget: target.frame_budget(video.width, video.height),
             ..Default::default()
         };
         requant_codestream(cs, &p, 0)?.0
@@ -181,8 +182,9 @@ fn decode_pair(
         key,
         before: decode_raw(cs)?,
         after: decode_raw(&out_cs)?,
-        source_frame_bytes: s.size as u64,
-        output_frame_bytes: nf.build(&out_cs, None)?.len() as u64,
+        // Codestream bytes, as bits per pixel counts them (the output as written, KiB padded).
+        source_frame_bytes: nf.codestream_size as u64,
+        output_frame_bytes: (nf.build(&out_cs, None)?.len() - nf.codestream_offset) as u64,
         frames: video.samples.len() as u32,
     });
     *CACHE.lock().unwrap() = Some(d.clone());

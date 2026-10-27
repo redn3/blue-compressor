@@ -48,9 +48,10 @@ typedef struct bc_clip_info {
     uint32_t frames;
     double fps;
     uint64_t file_bytes;
-    uint64_t video_bytes;
+    uint64_t video_bytes;       /* video samples as stored, frame headers included */
     char codec[8];              /* "NRAW" (N-RAW) or "NR3D" (R3D NE) */
     int audio_tracks;
+    uint64_t codestream_bytes;  /* TICO codestream bytes of the video frames */
 } bc_clip_info;
 
 typedef struct bc_options {
@@ -79,7 +80,8 @@ BC_API int bc_probe(const char* path, bc_clip_info* info, char* error, size_t er
 /* Output resolution for a source and a requested resolution (0 if not applicable). */
 BC_API void bc_output_size(uint32_t src_w, uint32_t src_h, int resolution, uint32_t* out_w, uint32_t* out_h);
 
-/* Average bits per pixel of a probed clip (0 if it has no frames). */
+/* Average bits per pixel of a probed clip: 8 x codestream_bytes / (frames x width x height)
+ * (0 if it has no frames). */
 BC_API double bc_clip_bpp(const bc_clip_info* info);
 
 /* Runs synchronously; call from a background thread. Returns 0 on success. */

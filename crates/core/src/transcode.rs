@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use crate::bmff::{chunk_order, fourcc, fourcc_str, InputFile, Movie, OutputWriter, WriteOptions};
 use crate::nraw::NrawFrame;
-use crate::quality::{movie_bpp, rank_for_quality, source_geometry, target_geometry, Target};
+use crate::quality::{rank_for_quality, source_bpp, source_geometry, target_geometry, Target};
 use crate::requant::{requant_codestream_seeded, RequantParams};
 use crate::resize::{self, Resizer};
 use crate::{Error, Options, Outcome, Result};
@@ -62,7 +62,7 @@ pub fn transcode(opt: &Options, cancel: &AtomicBool, progress: &mut dyn FnMut(f6
     }
     // Legacy quality steps become a bpp for this clip; a bpp at or above the source's
     // cannot add anything and gives the lossless repack.
-    let target = Target::new(opt.quality, opt.bpp).resolve(movie_bpp(&movie));
+    let target = Target::new(opt.quality, opt.bpp).resolve(source_bpp(&input, &movie));
     let quality = target.preset();
     let src = source_geometry(&movie);
     let dst = target_geometry(src, opt.resolution);
@@ -88,7 +88,7 @@ pub fn transcode(opt: &Options, cancel: &AtomicBool, progress: &mut dyn FnMut(f6
     // Resize jobs hold whole decoded frames; keep fewer in flight.
     let workers = if resizing { threads.clamp(2, 4) } else { threads.clamp(1, 16) };
     let target_rank = rank_for_quality(quality);
-    let budget = target.budget(video.width, video.height);
+    let budget = target.frame_budget(video.width, video.height);
     // Rate controlled frames go to the workers in fixed runs, coded in order within a run,
     // so each frame starts its search from the previous one's choices. The runs do not
     // depend on the thread count, so neither does the output.

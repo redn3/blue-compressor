@@ -17,6 +17,15 @@ mod mock {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::{Duration, Instant};
 
+    /// Stand-in container bytes (audio, metadata, index) and NRAW header bytes per frame.
+    const CONTAINER: u64 = 5_000_000;
+    const FRAME_HEADER: u64 = 4096;
+
+    /// Stand-in codestream bytes: what bits per pixel counts, as the core measures it.
+    fn codestream(file_bytes: u64, frames: u64) -> u64 {
+        file_bytes.saturating_sub(CONTAINER + FRAME_HEADER * frames)
+    }
+
     pub fn probe(path: &Path) -> bluecompress::Result<ClipInfo> {
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
         let file_bytes = std::fs::metadata(path).map(|m| m.len()).unwrap_or(2_601_911_808);
@@ -32,9 +41,10 @@ mod mock {
                 frames: 276,
                 fps: 25.0,
                 file_bytes,
-                video_bytes: file_bytes - 5_000_000,
+                video_bytes: file_bytes - CONTAINER,
+                codestream_bytes: codestream(file_bytes, 276),
                 audio_tracks: 1,
-                bpp: 8.0 * (file_bytes - 5_000_000) as f64 / (276.0 * 6060.0 * 3410.0),
+                bpp: 8.0 * codestream(file_bytes, 276) as f64 / (276.0 * 6060.0 * 3410.0),
             }
         } else {
             ClipInfo {
@@ -44,9 +54,10 @@ mod mock {
                 frames: 360,
                 fps: 25.0,
                 file_bytes,
-                video_bytes: file_bytes - 5_000_000,
+                video_bytes: file_bytes - CONTAINER,
+                codestream_bytes: codestream(file_bytes, 360),
                 audio_tracks: 1,
-                bpp: 8.0 * (file_bytes - 5_000_000) as f64 / (360.0 * 8268.0 * 4652.0),
+                bpp: 8.0 * codestream(file_bytes, 360) as f64 / (360.0 * 8268.0 * 4652.0),
             }
         })
     }
@@ -189,7 +200,7 @@ mod mock {
                 after.push(255);
             }
         }
-        let source = info.video_bytes / u64::from(info.frames.max(1));
+        let source = info.codestream_bytes / u64::from(info.frames.max(1));
         Ok(Preview {
             width: w as u32,
             height: h as u32,

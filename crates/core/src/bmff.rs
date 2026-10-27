@@ -108,6 +108,10 @@ impl InputFile {
         self.size
     }
 
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
     pub fn read_into(&self, offset: u64, dst: &mut [u8]) -> Result<()> {
         if offset + dst.len() as u64 > self.size {
             return fail(format!("read past end of {}", self.path.display()));

@@ -1932,9 +1932,11 @@ function browserStandIn() {
     ["/Volumes/CARD/DCIM/CLIP_0002.NEV", "N-RAW", 8268, 4652, 1210, 8.74e9],
     ["/Volumes/CARD/A001/A001_C001_0101AB.R3D", "R3D NE", 6060, 3410, 276, 2.14e9],
   ];
-  // Bits per pixel from the size, frames and dimensions, as the core measures it (it uses
-  // the video bytes only, a little less than the file).
-  const srcBpp = ([, , w, h, frames, bytes]) => (bytes * 8) / (w * h * frames);
+  // Bits per pixel as the core measures it: 8 x the frames' codestream bytes over frames x
+  // width x height. The stand-in leaves out about 5 MB of container (audio, metadata,
+  // index) and a 4 KiB NRAW header per frame, as the demo engine does.
+  const DEMO_CONTAINER = 5e6, DEMO_FRAME_HEADER = 4096;
+  const srcBpp = ([, , w, h, frames, bytes]) => ((bytes - DEMO_CONTAINER - DEMO_FRAME_HEADER * frames) * 8) / (w * h * frames);
   const hash = (x, y, f) => {
     let h = (x * 374761393 + y * 668265263 + f * 2147483647) | 0;
     h = Math.imul(h ^ (h >>> 13), 1274126177);
