@@ -26,8 +26,8 @@ const LOSSLESS = "lossless";
 const LOSSLESS_KEEP = 0.93; // typical size of the lossless repack: 4 to 10% smaller
 const PICKS = [
   { id: "lossless", label: "Lossless", text: "Identical picture, files only a little smaller." },
-  { id: "light", label: "Light", f: 0.42, text: "Smaller files that keep the most detail. Good for archive copies." },
-  { id: "medium", label: "Medium", f: 0.36, text: "Much smaller files, for everyday storage." },
+  { id: "light", label: "Light", f: 0.42, text: "Keeps the detail. Good for archive copies." },
+  { id: "medium", label: "Medium", f: 0.36, text: "Balanced: a little smaller than Light, still archive quality." },
   { id: "strong", label: "Strong", f: 0.24, text: "Smallest files, for offline edits and reference copies." },
 ];
 const PICK = Object.fromEntries(PICKS.map((x) => [x.id, x]));
@@ -314,18 +314,17 @@ function backendNote() {
 // Compression panel ---------------------------------------------------------------
 //
 // Quick picks (Lossless, Light, Medium, Strong) above a bits per pixel slider and number.
-// The slider runs from 0.5 to the highest source rate in the queue, rounded up to 0.5 (2
-// at least, 6 without clips): above a clip's own rate there is only the lossless repack,
-// which the Lossless pick covers. Whole-number ticks, Nikon's HE and HE* rates marked on
-// the track when in range, and a marker for each clip's own rate.
+// The slider runs from 0 to 5 bpp, with whole-number ticks, Nikon's HE (3) and HE* (5)
+// rates marked above the track and a marker for each clip's own rate. At or above a
+// clip's own rate there is only the lossless repack (the note says so). The thumb glides
+// with the pointer while dragging; the value shown and stored is rounded to 0.1, and the
+// thumb snaps to it on release.
 
-const SLIDER_EMPTY_TOP = 6;
-function sliderTop() {
-  const rates = jobs.filter((j) => j.ok && j.bpp > 0).map((j) => j.bpp);
-  if (!rates.length) return SLIDER_EMPTY_TOP;
-  return Math.min(BPP_MAX, Math.max(2, Math.ceil(Math.max(...rates) * 2 - 1e-9) / 2));
-}
-const sliderPos = (v, top) => `${((Math.min(top, Math.max(BPP_MIN, v)) - BPP_MIN) / (top - BPP_MIN)) * 100}%`;
+const SLIDER_TOP = 5;
+const sliderTop = () => SLIDER_TOP;
+const sliderPos = (v, top) => `${(Math.min(top, Math.max(0, v)) / top) * 100}%`;
+// While the bpp thumb is dragged: renders leave the thumb where the pointer has it.
+let bppDragging = false;
 // Source rates to mark: the previewed clip, else every clip in the queue.
 function sourceMarks() {
   const list = viewer.open && viewer.job ? [viewer.job] : jobs.filter((j) => j.ok && j.bpp > 0);
@@ -360,8 +359,10 @@ function renderCompression() {
   range.max = String(top);
   // A pick sits at what it is for the median clip; the markers show each clip's value.
   const v = isLossless(c) ? top : typeof c === "number" ? c : pickValue(c, ref);
-  if (v != null) range.value = String(Math.min(top, v));
-  range.style.setProperty("--p", v != null ? sliderPos(v, top) : "0%");
+  if (!bppDragging) {
+    if (v != null) range.value = String(Math.min(top, v));
+    range.style.setProperty("--p", v != null ? sliderPos(v, top) : "0%");
+  }
   range.classList.toggle("lossless", isLossless(c));
   // The value box: a number with its unit, or the pick's name when it differs per clip.
   const shown = typeof c === "number" ? c : span && span[0] === span[1] ? span[0] : null;
@@ -400,7 +401,7 @@ function renderCompression() {
   if (over.length && over.length === pending.length) {
     line = pending.length === 1 ? `At or above this clip's ${bppText(pending[0].bpp)} bpp: lossless repack.` : "At or above every clip's rate: lossless repack.";
   } else if (over.length) {
-    line = `${over.length} of ${pending.length} clips already at or below ${bppText(compOf(over[0]))} bpp: lossless repack.`;
+    line = `${over.length} of ${pending.length} clips at or below ${bppText(compOf(over[0]))} bpp: lossless repack.`;
   } else if (pick && !isLossless(c)) {
     const sp = one ? resolvedSpan([viewer.job]) : span;
     line = sp && sp[0] === sp[1] ? `${pick.label}: ${bppText(sp[0])} bpp. ${yours}` : `${pick.label}: ${Math.round(pick.f * 100)}% of each clip's rate.`;
@@ -425,7 +426,7 @@ function fitNum(el) {
 }
 function renderTicks(el, top) {
   let html = "";
-  for (let v = 1; v <= top; v++) html += `<span class="bpp-tick" style="left:${sliderPos(v, top)}"><i></i><b>${v}</b></span>`;
+  for (let v = 0; v <= top; v++) html += `<span class="bpp-tick" style="left:${sliderPos(v, top)}"><i></i><b>${v}</b></span>`;
   el.innerHTML = html;
 }
 let compFrame = 0;
@@ -435,6 +436,72 @@ function setCompression(c) {
   saveSettings();
   cancelAnimationFrame(compFrame);
   compFrame = requestAnimationFrame(() => renderAll());
+}
+
+// The bpp slider. Native range input with step "any" so the thumb follows the pointer
+// smoothly; the value is rounded to 0.1 for display and storage. While dragging only the
+// compression card is redrawn, at most once a frame and only when the rounded value
+// changes; on release the setting is saved, everything is redrawn and the thumb snaps to
+// the rounded value. Arrow keys, Page Up/Down, Home/End and the scroll wheel step it.
+function bindBppSlider() {
+  const range = $("bpp-range");
+  let frame = 0, pending = null;
+  const flush = () => {
+    frame = 0;
+    if (pending == null || pending === settings.compression) return;
+    settings.compression = pending;
+    renderCompression();
+  };
+  const commit = (v) => {
+    bppDragging = false;
+    cancelAnimationFrame(frame);
+    frame = 0;
+    pending = null;
+    if (v == null || running) { renderCompression(); return; }
+    settings.compression = v;
+    saveSettings();
+    renderAll();
+  };
+  range.addEventListener("pointerdown", () => { if (!running) bppDragging = true; });
+  range.addEventListener("input", () => {
+    if (running) return;
+    range.style.setProperty("--p", sliderPos(Number(range.value), SLIDER_TOP));
+    pending = clampBpp(range.value);
+    if (!frame) frame = requestAnimationFrame(flush);
+  });
+  range.addEventListener("change", () => {
+    const v = clampBpp(range.value);
+    // Already committed on pointer release: just make sure the thumb sits on the value.
+    if (!bppDragging && v === settings.compression) renderCompression();
+    else commit(v);
+  });
+  const end = () => { if (bppDragging) commit(clampBpp(range.value)); };
+  range.addEventListener("pointerup", end);
+  range.addEventListener("pointercancel", end);
+  range.addEventListener("lostpointercapture", end);
+  const current = () => {
+    const c = settings.compression;
+    if (typeof c === "number") return c;
+    const v = isLossless(c) ? SLIDER_TOP : pickValue(c, queueRef());
+    return typeof v === "number" ? v : clampBpp(range.value) ?? BPP_MIN;
+  };
+  const step = (d, to) => {
+    if (running) return;
+    const v = clampBpp(to != null ? to : Math.round((current() + d) * 10) / 10);
+    if (v != null) commit(v);
+  };
+  range.addEventListener("keydown", (e) => {
+    const k = e.key;
+    const d = { ArrowRight: 0.1, ArrowUp: 0.1, ArrowLeft: -0.1, ArrowDown: -0.1, PageUp: 1, PageDown: -1 }[k];
+    if (d != null) { e.preventDefault(); step(d); }
+    else if (k === "Home") { e.preventDefault(); step(0, BPP_MIN); }
+    else if (k === "End") { e.preventDefault(); step(0, SLIDER_TOP); }
+  });
+  range.addEventListener("wheel", (e) => {
+    if (running || Math.abs(e.deltaY) < Math.abs(e.deltaX)) return;
+    e.preventDefault();
+    step(e.deltaY < 0 ? 0.1 : -0.1);
+  }, { passive: false });
 }
 
 // Queue ------------------------------------------------------------------------
@@ -1867,7 +1934,7 @@ async function init() {
     saveSettings();
     renderAll();
   });
-  $("bpp-range").addEventListener("input", (e) => { if (!running) setCompression(clampBpp(e.target.value)); });
+  bindBppSlider();
   const bppNum = $("bpp-num");
   const applyNum = () => {
     const v = clampBpp(bppNum.value);

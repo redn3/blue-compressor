@@ -64,13 +64,13 @@ the credit below). Four quick picks set it for you:
 | Pick | What happens | Size |
 | --- | --- | --- |
 | **Lossless** | Repacks the coded data without the camera's padding. Every decoded pixel is identical. | Z8 8K N-RAW 2.60 GB to 2.36 GB (−9%), ZR 6K R3D NE 2.14 GB to 2.05 GB (−4%) |
-| **Light** (default) | 0.42 × each clip's own bits per pixel. Good for archive copies. | about 58% smaller |
-| **Medium** | 0.36 × each clip's own bits per pixel, for everyday storage. | about 64% smaller |
+| **Light** (default) | 0.42 × each clip's own bits per pixel, about what the old Q2 gave. Keeps the detail, good for archive copies. | about 58% smaller |
+| **Medium** | 0.36 × each clip's own bits per pixel. Balanced: a little smaller than Light, still archive quality. | about 64% smaller |
 | **Strong** | 0.24 × each clip's own bits per pixel, for offline edits and reference copies. | about 76% smaller |
 
 Light, Medium and Strong work out a value for each clip from its own rate (rounded to
 0.1, at least 0.5), so a batch of clips recorded at different settings each shrinks by
-the same share; the slider marks the value for each clip. Dragging the slider or typing
+the same share; the slider marks the value for each clip. Dragging the slider (0 to 5) or typing
 a number from 0.5 to 8 sets one bpp for every clip instead. The lossless sizes
 were measured on one sample clip from each camera. The other sizes follow from the target
 because every frame is rate controlled to fit it (see below), so they hold on any footage

@@ -1131,13 +1131,28 @@ body.per-clip .job-settings { display: flex; }
 .bpp-value input:disabled { color: var(--text-3); }
 .bpp-unit { color: var(--text-3); font-weight: 500; }
 .bpp-unit[hidden] { display: none; }
-.bpp-slider { position: relative; display: flex; padding: 14px 0 6px; }
-.bpp-slider .range { min-width: 0; width: 100%; margin: 0; }
-.bpp-slider .range.lossless { background: linear-gradient(90deg, var(--ok) 100%, var(--seg-bg) 100%); }
+/* The bpp slider: a 36px tall input (the whole height is the hit area; clicking anywhere
+   on it jumps the thumb there) drawing a 4px track and a 16px thumb in the middle. */
+.bpp-slider { position: relative; display: flex; padding: 12px 0 0; }
+.bpp-slider .range {
+  min-width: 0;
+  width: 100%;
+  height: 36px;
+  margin: 0;
+  background: transparent;
+  touch-action: none;
+  --track: linear-gradient(90deg, var(--accent) var(--p, 50%), var(--seg-bg) var(--p, 50%));
+}
+.bpp-slider .range.lossless { --track: linear-gradient(90deg, var(--ok) 100%, var(--seg-bg) 100%); }
+.bpp-slider .range::-webkit-slider-runnable-track { height: 4px; border-radius: 999px; background: var(--track); }
+.bpp-slider .range::-webkit-slider-thumb { margin-top: -6px; }
+.bpp-slider .range:active::-webkit-slider-thumb { cursor: grabbing; }
+.bpp-slider .range::-moz-range-track { height: 4px; border-radius: 999px; background: var(--track); }
+.bpp-slider .range:focus-visible::-webkit-slider-thumb { box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45), 0 0 0 5px var(--accent-ring); }
 .bpp-sources { position: absolute; left: 8px; right: 8px; top: 0; bottom: 0; pointer-events: none; }
 .bpp-source {
   position: absolute;
-  top: 14px;
+  top: 22px;
   width: 3px;
   height: 16px;
   margin-left: -1.5px;
@@ -1146,7 +1161,7 @@ body.per-clip .job-settings { display: flex; }
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
   pointer-events: auto;
 }
-.bpp-ticks { position: relative; height: 20px; margin: 0 8px; }
+.bpp-ticks { position: relative; height: 20px; margin: -10px 8px 0; pointer-events: none; }
 .bpp-tick {
   position: absolute;
   top: 0;
@@ -1185,7 +1200,7 @@ body.per-clip .job-settings { display: flex; }
 .watch-controls > * { min-width: 0; }
 .bpp-target {
   position: absolute;
-  top: 17px;
+  top: 25.5px;
   width: 9px;
   height: 9px;
   margin-left: -4.5px;
