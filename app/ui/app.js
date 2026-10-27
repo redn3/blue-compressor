@@ -2073,7 +2073,7 @@ function browserStandIn() {
     onDragDrop: () => {},
     invoke: async (cmd, a) => {
       switch (cmd) {
-        case "app_info": return { version: "0.1.6", gpu: "Metal: Apple GPU", cpu: "CPU (12 threads)", platform: "macos" };
+        case "app_info": return { version: "0.1.7", gpu: "Metal: Apple GPU", cpu: "CPU (12 threads)", platform: "macos" };
         case "is_running": return false;
         case "initial_paths": return location.hash === "#demo" ? ["demo"] : [];
         case "scan": return sample.map(([path, codec, width, height, frames, bytes], i) => ({

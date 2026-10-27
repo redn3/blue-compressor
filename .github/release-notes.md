@@ -1,3 +1,16 @@
+**What's new in 0.1.7**
+- One simple size control: bits per pixel (bpp). It replaces the old Q1 to Q4 quality steps. Four quick picks set it for you, each worked out from every clip's own rate:
+  - **Lossless**: identical picture, files only a little smaller (same as before).
+  - **Light** (default): minimal quality loss, about 25% smaller.
+  - **Medium**: balanced, good for archive copies, about 45% smaller.
+  - **Strong**: smallest files, for reference copies, about 65% smaller.
+- Or drag the slider (0 to 5) or type a value to pick your own bpp for every clip. Nikon's own HE (3 bpp) and HE\* (5 bpp) stills rates are marked on the slider, and yellow marks show your clips' own rates. A value at or above a clip's own rate keeps that clip lossless.
+- Every frame is now fitted to the size you choose, so the sizes above hold on any footage. Sizes will differ from what the old Q2, Q3 and Q4 gave, so compressed copies made with 0.1.6 or earlier will not match new ones.
+- Smoother slider: the handle follows your pointer, is easier to grab, and you can click anywhere on the track. Arrow keys and the scroll wheel step by 0.1.
+- More accurate source rate: a clip's bits per pixel now counts only the coded picture data.
+- Command line, Docker and NAS: new `--bpp`, `--preset light|medium|strong` and `--lossless` options, and `BPP`, `PRESET`, `WATCH_BPP` and `WATCH_PRESET` settings. The watch folder now defaults to Light. Existing scripts keep working: `-q 1` to `-q 4` and `QUALITY` / `WATCH_QUALITY` still work and mean Lossless, Light, Medium and Strong.
+- Thanks to RdWing for the bits per pixel idea and for *Nikon HE and HE\* RAW: Format analysis and decoding reference*, copyright (c) 2026 patrol_taking_9j (RdWing), licensed under CC BY-SA 4.0, where the bpp measure and the HE and HE\* figures come from.
+
 **What's new in 0.1.6**
 - Anamorphic de-squeeze in the quality previewer. A new De-squeeze setting (None, 1.25x, 1.33x, 1.5x, 1.55x, 1.6x, 1.8x, 2x, or a custom factor from 1 to 3) stretches the preview sideways so anamorphic footage shows in its intended shape. It applies to the before/after viewer, the minimap and the queue thumbnails, and the clip details show the resulting on-screen aspect ratio, for example "de-squeezed 1.33x, 2.36:1 on screen". Zoom, pan and the comparison line work as before.
 - Display only: the raw data and the compressed clips are never changed, and size estimates are unaffected. The chosen factor is remembered with your other settings. Works in the desktop app and the Web UI.
