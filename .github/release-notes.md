@@ -1,3 +1,8 @@
+**What's new in 0.2.0**
+- The desktop app now checks for updates by itself and asks before installing one: Update, Later or Skip this version. It downloads, checks the signature, installs and reopens, and never interrupts a batch that is compressing (it offers to update when the queue is done). The check is anonymous: it only asks GitHub for the newest version, nothing about you or your clips is sent. Turn it off with Check for updates in the sidebar, or use Check Now.
+- Docker and NAS: the Web UI shows a banner when a new version is out, with the steps to update on Synology, Docker Compose and Docker. Set `UPDATE_CHECK=false` to turn the check off. The container never updates itself.
+- If you have 0.1.7 or older, install 0.2.0 by hand once. After that, updates are offered automatically.
+
 **What's new in 0.1.7**
 - One simple size control: bits per pixel (bpp). It replaces the old Q1 to Q4 quality steps. Four quick picks set it for you, each worked out from every clip's own rate:
   - **Lossless**: identical picture, files only a little smaller (same as before).

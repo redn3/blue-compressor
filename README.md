@@ -2,19 +2,19 @@
 
 ## Download
 
-**[Latest release (v0.1.7 beta)](https://github.com/redn3/blue-compressor/releases/tag/v0.1.7)**. Pick the file for your computer:
+**[Latest release (v0.2.0 beta)](https://github.com/redn3/blue-compressor/releases/tag/v0.2.0)**. Pick the file for your computer:
 
 | Your computer | Download |
 | --- | --- |
-| Mac with Apple silicon (M1, M2, M3, M4, M5) | [Blue-Compressor_0.1.7_macOS_arm64.dmg](https://github.com/redn3/blue-compressor/releases/download/v0.1.7/Blue-Compressor_0.1.7_macOS_arm64.dmg) |
-| Mac with Intel processor | [Blue-Compressor_0.1.7_macOS_x64.dmg](https://github.com/redn3/blue-compressor/releases/download/v0.1.7/Blue-Compressor_0.1.7_macOS_x64.dmg) |
-| Windows 10 or 11 | [Blue-Compressor_0.1.7_Windows_x64-setup.exe](https://github.com/redn3/blue-compressor/releases/download/v0.1.7/Blue-Compressor_0.1.7_Windows_x64-setup.exe) |
-| Linux (any distribution) | [Blue-Compressor_0.1.7_Linux_x64.AppImage](https://github.com/redn3/blue-compressor/releases/download/v0.1.7/Blue-Compressor_0.1.7_Linux_x64.AppImage) |
+| Mac with Apple silicon (M1, M2, M3, M4, M5) | [Blue-Compressor_0.2.0_macOS_arm64.dmg](https://github.com/redn3/blue-compressor/releases/download/v0.2.0/Blue-Compressor_0.2.0_macOS_arm64.dmg) |
+| Mac with Intel processor | [Blue-Compressor_0.2.0_macOS_x64.dmg](https://github.com/redn3/blue-compressor/releases/download/v0.2.0/Blue-Compressor_0.2.0_macOS_x64.dmg) |
+| Windows 10 or 11 | [Blue-Compressor_0.2.0_Windows_x64-setup.exe](https://github.com/redn3/blue-compressor/releases/download/v0.2.0/Blue-Compressor_0.2.0_Windows_x64-setup.exe) |
+| Linux (any distribution) | [Blue-Compressor_0.2.0_Linux_x64.AppImage](https://github.com/redn3/blue-compressor/releases/download/v0.2.0/Blue-Compressor_0.2.0_Linux_x64.AppImage) |
 | Docker / Synology NAS (`amd64` and `arm64`) | `docker pull ghcr.io/redn3/blue-compressor:latest` ([setup guide](#docker-and-synology-nas)) |
 
 Not sure which Mac you have? Open the Apple menu and choose About This Mac. If it says "Chip", get Apple silicon; if it says "Processor" with Intel, get Intel.
 
-Other formats (Windows `.msi`, Linux `.deb` and `.rpm`) and the command line tool are on the [release page](https://github.com/redn3/blue-compressor/releases/tag/v0.1.7).
+Other formats (Windows `.msi`, Linux `.deb` and `.rpm`) and the command line tool are on the [release page](https://github.com/redn3/blue-compressor/releases/tag/v0.2.0).
 
 Blue Compressor makes Nikon **N-RAW** (`.NEV`, e.g. Z8, Z9, Z6III) and **R3D NE**
 (`.R3D`, e.g. Nikon ZR) clips smaller. It re-encodes the TICO RAW (JPEG XS) data inside
@@ -48,14 +48,14 @@ settings.
 ### Updates
 
 The desktop app checks for a new version a few seconds after it starts and once a day while
-it is open. When there is one it asks **Blue Compressor 0.1.8 is available. Update now?**
+it is open. When there is one it asks **Blue Compressor 0.2.1 is available. Update now?**
 with a few lines on what is new: **Update** downloads it, checks its signature, installs it
 and reopens the app; **Later** asks again next time; **Skip this version** waits for the
 one after. It never updates in the middle of a batch: while the queue is compressing it
 offers to update when the queue has finished. Turn **Check for updates** off in the
 sidebar to stop the daily check, or use **Check Now** at any time. The Linux `.deb` and
 `.rpm` packages cannot replace themselves, so there (and if an install fails) the prompt
-opens the release page instead. Versions before 0.1.8 have no updater: install 0.1.8 once
+opens the release page instead. Versions before 0.2.0 have no updater: install 0.2.0 once
 by hand and later versions can update themselves.
 
 The Docker image and the Web UI never replace themselves. The server checks GitHub every 12
@@ -350,7 +350,7 @@ update:
 1. **Synology Container Manager:** open **Project**, select the Blue Compressor project and
    click **Stop**. Under **Image**, delete the old `ghcr.io/redn3/blue-compressor` image (or
    change the image tag in `docker-compose.yml` to the new version, for example
-   `ghcr.io/redn3/blue-compressor:0.1.8`). Then build or start the project again; it
+   `ghcr.io/redn3/blue-compressor:0.2.0`). Then build or start the project again; it
    downloads the new version.
 2. **Docker Compose:** `docker compose pull`, then `docker compose up -d`.
 3. **Docker:** `docker pull ghcr.io/redn3/blue-compressor:latest`, then remove and recreate

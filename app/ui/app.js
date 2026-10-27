@@ -2256,7 +2256,7 @@ function browserStandIn() {
     onDragDrop: () => {},
     invoke: async (cmd, a) => {
       switch (cmd) {
-        case "app_info": return { version: "0.1.7", gpu: "Metal: Apple GPU", cpu: "CPU (12 threads)", platform: "macos" };
+        case "app_info": return { version: "0.2.0", gpu: "Metal: Apple GPU", cpu: "CPU (12 threads)", platform: "macos" };
         case "is_running": return false;
         case "initial_paths": return location.hash === "#demo" ? ["demo"] : [];
         case "scan": return sample.map(([path, codec, width, height, frames, bytes], i) => ({
@@ -2284,8 +2284,8 @@ function browserStandIn() {
         // Demo of the update prompt (?update) and of the Docker banner (?docker).
         case "update_check": return DEMO_PARAMS.has("update") ? DEMO_UPDATE : null;
         case "update_status": return DEMO_PARAMS.has("docker")
-          ? { enabled: true, current: "0.1.7", latest: "0.1.8", available: true, url: "https://github.com/redn3/blue-compressor/releases/tag/v0.1.8", notes: DEMO_UPDATE.notes, checked: 0 }
-          : { enabled: true, current: "0.1.7", available: false };
+          ? { enabled: true, current: "0.2.0", latest: "0.2.1", available: true, url: "https://github.com/redn3/blue-compressor/releases/tag/v0.2.1", notes: DEMO_UPDATE.notes, checked: 0 }
+          : { enabled: true, current: "0.2.0", available: false };
         case "update_install": {
           const total = 9.4e6;
           for (let got = 0; got <= total; got += total / 25) { await new Promise((r) => setTimeout(r, 60)); emit("update-progress", [got, total]); }
@@ -2323,9 +2323,9 @@ function browserStandIn() {
 
 const DEMO_PARAMS = new URLSearchParams(location.search);
 const DEMO_UPDATE = {
-  version: "0.1.8", current: "0.1.7", can_install: true, test: false, date: null,
-  page: "https://github.com/redn3/blue-compressor/releases/tag/v0.1.8",
-  notes: "What's new in 0.1.8\n- Blue Compressor now tells you when a new version is out and can update itself.\n- Faster scanning of large folders.",
+  version: "0.2.1", current: "0.2.0", can_install: true, test: false, date: null,
+  page: "https://github.com/redn3/blue-compressor/releases/tag/v0.2.1",
+  notes: "What's new in 0.2.1\n- Example notes for the demo update prompt.\n- Faster scanning of large folders.",
 };
 
 // Web UI backend (`bluecompress serve`): HTTP command calls, SSE events, and NAS file browser.
