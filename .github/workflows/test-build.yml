@@ -1,0 +1,51 @@
+name: Test build
+
+# Test builds of the macOS app from a feature branch, uploaded as Actions artifacts only.
+# This workflow never creates a tag or a release.
+on:
+  push:
+    branches: ["feature/advanced-bpp"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    name: ${{ matrix.name }}
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: macOS Apple silicon, target: aarch64-apple-darwin, arch: arm64 }
+          - { name: macOS Intel, target: x86_64-apple-darwin, arch: x64 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - name: Install Tauri CLI
+        uses: taiki-e/install-action@v2
+        with:
+          tool: tauri-cli@2
+      - name: Build desktop app
+        working-directory: app/src-tauri
+        run: cargo tauri build --target ${{ matrix.target }}
+      - name: Collect the dmg
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          sha="$(git rev-parse --short HEAD)"
+          cp target/${{ matrix.target }}/release/bundle/dmg/*.dmg "dist/Blue-Compressor_test-${sha}_macOS_${{ matrix.arch }}.dmg"
+          codesign -dv --verbose=2 target/${{ matrix.target }}/release/bundle/macos/*.app 2>&1 || true
+          ls -l dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Blue-Compressor-macOS-${{ matrix.arch }}
+          path: dist/*.dmg
+          if-no-files-found: error
+          retention-days: 14
