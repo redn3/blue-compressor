@@ -56,14 +56,13 @@
             <div class="comp-readout" id="comp-readout"></div>
             <div class="bpp-head">
               <span class="bpp-title" title="The size of each frame: how many bits are kept for every pixel of the raw image.">Bits per pixel</span>
-              <span class="bpp-value"><input type="number" class="mini-input" id="bpp-num" min="0.5" max="8" step="0.1" inputmode="decimal" aria-label="Bits per pixel"><span>bpp</span></span>
+              <label class="bpp-value" title="Type a value from 0.5 to 8, or use the arrow keys"><input type="text" id="bpp-num" inputmode="decimal" autocomplete="off" spellcheck="false" aria-label="Bits per pixel"><span class="bpp-unit" id="bpp-unit">bpp</span></label>
             </div>
-            <div class="bpp-slider">
+            <div class="bpp-slider" title="Yellow marks: your clips' own rates. At or above a clip's own rate it is only repacked, losslessly.">
               <input type="range" id="bpp-range" class="range" min="0.5" max="8" step="0.1" aria-label="Bits per pixel">
               <div class="bpp-sources" id="bpp-sources" aria-hidden="true"></div>
             </div>
             <div class="bpp-ticks" id="bpp-ticks" aria-hidden="true"></div>
-            <div class="bpp-legend"><span><i class="bpp-source-key"></i>Your clips</span><span id="bpp-target-key" hidden><i class="bpp-target-dot"></i>Target</span><span>HE, HE*: Nikon's own rates</span></div>
             <p class="hint bpp-note" id="bpp-note"></p>
           </div>
         </section>

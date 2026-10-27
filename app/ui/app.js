@@ -314,18 +314,18 @@ function backendNote() {
 // Compression panel ---------------------------------------------------------------
 //
 // Quick picks (Lossless, Light, Medium, Strong) above a bits per pixel slider and number.
-// The slider runs from 0.5 to a little above the highest source rate in the queue (8 at
-// most), with whole-number ticks, Nikon's HE and HE* rates marked, a marker for each
-// clip's own rate and a Lossless end stop.
+// The slider runs from 0.5 to the highest source rate in the queue, rounded up to 0.5 (2
+// at least, 6 without clips): above a clip's own rate there is only the lossless repack,
+// which the Lossless pick covers. Whole-number ticks, Nikon's HE and HE* rates marked on
+// the track when in range, and a marker for each clip's own rate.
 
-const STOP_GAP = 0.6; // slider distance from the top bpp to the Lossless end stop
-function sliderTop(c = settings.compression) {
+const SLIDER_EMPTY_TOP = 6;
+function sliderTop() {
   const rates = jobs.filter((j) => j.ok && j.bpp > 0).map((j) => j.bpp);
-  let top = rates.length ? Math.max(2, Math.ceil(Math.max(...rates)) + 1) : BPP_MAX;
-  if (typeof c === "number") top = Math.max(top, Math.ceil(c));
-  return Math.min(BPP_MAX, top);
+  if (!rates.length) return SLIDER_EMPTY_TOP;
+  return Math.min(BPP_MAX, Math.max(2, Math.ceil(Math.max(...rates) * 2 - 1e-9) / 2));
 }
-const sliderPos = (v, top) => `${((Math.min(top + STOP_GAP, Math.max(BPP_MIN, v)) - BPP_MIN) / (top + STOP_GAP - BPP_MIN)) * 100}%`;
+const sliderPos = (v, top) => `${((Math.min(top, Math.max(BPP_MIN, v)) - BPP_MIN) / (top - BPP_MIN)) * 100}%`;
 // Source rates to mark: the previewed clip, else every clip in the queue.
 function sourceMarks() {
   const list = viewer.open && viewer.job ? [viewer.job] : jobs.filter((j) => j.ok && j.bpp > 0);
@@ -355,23 +355,27 @@ function renderCompression() {
   const span = relative(c) && !isLossless(c) ? resolvedSpan(live.length ? live : jobs) : null;
   setSeg("seg-picks", pick ? pick.id : "", running);
   $("label-compression").textContent = settings.sameForAll ? "Compression" : "Default compression";
-  const top = sliderTop(c);
+  const top = sliderTop();
   const range = $("bpp-range"), num = $("bpp-num");
-  range.max = String(Math.round((top + STOP_GAP) * 10) / 10);
+  range.max = String(top);
   // A pick sits at what it is for the median clip; the markers show each clip's value.
-  const v = isLossless(c) ? top + STOP_GAP : typeof c === "number" ? c : pickValue(c, ref);
-  if (v != null) range.value = String(v);
+  const v = isLossless(c) ? top : typeof c === "number" ? c : pickValue(c, ref);
+  if (v != null) range.value = String(Math.min(top, v));
   range.style.setProperty("--p", v != null ? sliderPos(v, top) : "0%");
   range.classList.toggle("lossless", isLossless(c));
-  if (!num.matches(":focus")) num.value = typeof c === "number" ? bppText(c) : "";
-  num.placeholder = isLossless(c) ? "Lossless" : relative(c) ? "per clip" : "";
+  // The value box: a number with its unit, or the pick's name when it differs per clip.
+  const shown = typeof c === "number" ? c : span && span[0] === span[1] ? span[0] : null;
+  if (!num.matches(":focus")) num.value = shown != null ? bppText(shown) : isLossless(c) ? "Lossless" : pick ? pick.label : "";
+  $("bpp-unit").hidden = shown == null && !num.matches(":focus");
+  fitNum(num);
   num.title = span ? `${pick.label}: ${spanText(span)}, by each clip's own rate` : "Bits per pixel";
   range.disabled = num.disabled = running;
   renderTicks($("bpp-ticks"), top);
-  $("bpp-target-key").hidden = !span;
   $("bpp-sources").innerHTML = sourceMarks().map((m) =>
-    `<span class="bpp-source" style="left:${sliderPos(m.bpp, top)}" title="${esc(`Source ${bppText(m.bpp)} bpp: ${m.names.slice(0, 4).join(", ")}${m.names.length > 4 ? ` and ${m.names.length - 4} more` : ""}`)}"></span>`).join("") +
-    (span ? targetMarks(c).map((t) => `<span class="bpp-target" style="left:${sliderPos(t, top)}" title="${esc(`${pick.label} on a ${bppText(t / pick.f)} bpp clip: ${bppText(t)} bpp`)}"></span>`).join("") : "");
+    `<span class="bpp-source" style="left:${sliderPos(m.bpp, top)}" title="${esc(`Your clip${m.names.length > 1 ? "s" : ""} at ${bppText(m.bpp)} bpp: ${m.names.slice(0, 4).join(", ")}${m.names.length > 4 ? ` and ${m.names.length - 4} more` : ""}`)}"></span>`).join("") +
+    (span ? targetMarks(c).map((t) => `<span class="bpp-target" style="left:${sliderPos(t, top)}" title="${esc(`${pick.label} on a ${bppText(t / pick.f)} bpp clip: ${bppText(t)} bpp`)}"></span>`).join("") : "") +
+    Object.entries(BPP_MARKS).filter(([r]) => Number(r) <= top).map(([r, name]) =>
+      `<span class="bpp-he" style="left:${sliderPos(Number(r), top)}" title="${esc(`${name}: Nikon's own ${r} bpp stills`)}">${name}</span>`).join("");
 
   const sizes = batchSizes();
   const pct = sizes.before > 0 ? Math.round((1 - sizes.after / sizes.before) * 100) : null;
@@ -384,41 +388,46 @@ function renderCompression() {
   } else {
     readout.textContent = jobs.length ? "" : "Add clips to see the sizes.";
   }
+  // One short line under the slider.
   const note = $("bpp-note");
-  const pending = viewer.open && viewer.job ? [viewer.job] : jobs.filter((j) => toCompress(j) && j.bpp > 0);
+  const one = viewer.open && viewer.job;
+  const pending = one ? [viewer.job] : jobs.filter((j) => toCompress(j) && j.bpp > 0);
   const over = pending.filter((j) => repacks(j, compOf(j)));
   const rates = pending.map((j) => j.bpp);
   const srcSpan = rates.length ? spanText([Math.min(...rates), Math.max(...rates)]) : "";
-  const pickSpan = span && !(viewer.open && viewer.job) ? ` ${pick.label} gives ${spanText(span)}, ${pick.f} × each clip's own.` : "";
+  const yours = srcSpan ? `Your clip${pending.length === 1 ? "" : "s"}: ${srcSpan}.` : "";
+  let line = yours;
   if (over.length && over.length === pending.length) {
-    note.textContent = pending.length === 1
-      ? `At or above this clip's ${bppText(pending[0].bpp)} bpp: no gain, lossless repack.`
-      : "At or above the source of every clip: no gain, lossless repack.";
-    note.classList.add("warn");
+    line = pending.length === 1 ? `At or above this clip's ${bppText(pending[0].bpp)} bpp: lossless repack.` : "At or above every clip's rate: lossless repack.";
   } else if (over.length) {
-    note.textContent = `Your clips: ${srcSpan}. ${over.length} ${over.length === 1 ? "is" : "are"} already at or below this: no gain, lossless repack.`;
-    note.classList.add("warn");
-  } else {
-    note.textContent = srcSpan ? `Your clips: ${srcSpan}.${pickSpan}` : "";
-    note.classList.remove("warn");
+    line = `${over.length} of ${pending.length} clips already at or below ${bppText(compOf(over[0]))} bpp: lossless repack.`;
+  } else if (pick && !isLossless(c)) {
+    const sp = one ? resolvedSpan([viewer.job]) : span;
+    line = sp && sp[0] === sp[1] ? `${pick.label}: ${bppText(sp[0])} bpp. ${yours}` : `${pick.label}: ${Math.round(pick.f * 100)}% of each clip's rate.`;
   }
+  note.textContent = line.trim();
+  note.title = srcSpan && line !== yours ? yours : "";
+  note.classList.toggle("warn", over.length > 0);
 }
 // Distinct values a relative pick takes over the clips (16 at most).
 function targetMarks(c) {
   const list = viewer.open && viewer.job ? [viewer.job] : jobs.filter((j) => j.ok && j.bpp > 0);
   return [...new Set(list.map((j) => pickValue(c, j.bpp)).filter((x) => typeof x === "number"))].slice(0, 16);
 }
+// Sizes the value box's input to its text, so names and numbers both sit snug.
+let fitCanvas = null;
+function fitNum(el) {
+  fitCanvas ||= document.createElement("canvas").getContext("2d");
+  const cs = getComputedStyle(el);
+  fitCanvas.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+  const w = fitCanvas.measureText(el.value || "0.0").width;
+  el.style.width = `${Math.ceil(w) + 2}px`;
+}
 function renderTicks(el, top) {
   let html = "";
-  for (let v = 1; v <= top; v++) {
-    const mark = BPP_MARKS[v];
-    html += `<span class="bpp-tick${mark ? " marked" : ""}" style="left:${sliderPos(v, top)}"><i></i><b>${v}</b>${mark ? `<em>${mark}</em>` : ""}</span>`;
-  }
-  html += `<span class="bpp-tick stop" style="left:${sliderPos(top + STOP_GAP, top)}"><i></i><b>Lossless</b></span>`;
+  for (let v = 1; v <= top; v++) html += `<span class="bpp-tick" style="left:${sliderPos(v, top)}"><i></i><b>${v}</b></span>`;
   el.innerHTML = html;
 }
-// The slider: past the top bpp is the Lossless end stop.
-const sliderValue = (v) => (Number(v) > sliderTop() + 0.05 ? LOSSLESS : clampBpp(v));
 let compFrame = 0;
 function setCompression(c) {
   if (c == null || c === settings.compression) return;
@@ -1858,7 +1867,7 @@ async function init() {
     saveSettings();
     renderAll();
   });
-  $("bpp-range").addEventListener("input", (e) => { if (!running) setCompression(sliderValue(e.target.value)); });
+  $("bpp-range").addEventListener("input", (e) => { if (!running) setCompression(clampBpp(e.target.value)); });
   const bppNum = $("bpp-num");
   const applyNum = () => {
     const v = clampBpp(bppNum.value);
@@ -1867,7 +1876,25 @@ async function init() {
   };
   bppNum.addEventListener("change", applyNum);
   bppNum.addEventListener("blur", applyNum);
-  bppNum.addEventListener("keydown", (e) => { if (e.key === "Enter") bppNum.blur(); });
+  // Arrow keys and the scroll wheel step by 0.1 from the value shown.
+  const stepNum = (d) => {
+    if (running) return;
+    const cur = Number(bppNum.value);
+    const base = Number.isFinite(cur) && bppNum.value !== "" ? cur : Number($("bpp-range").value);
+    const v = clampBpp(Math.round((base + d) * 10) / 10);
+    if (v != null) { bppNum.value = bppText(v); fitNum(bppNum); setCompression(v); }
+  };
+  bppNum.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") bppNum.blur();
+    else if (e.key === "ArrowUp" || e.key === "ArrowDown") { e.preventDefault(); stepNum(e.key === "ArrowUp" ? 0.1 : -0.1); }
+  });
+  bppNum.addEventListener("wheel", (e) => { if (bppNum.matches(":focus")) { e.preventDefault(); stepNum(e.deltaY < 0 ? 0.1 : -0.1); } }, { passive: false });
+  bppNum.addEventListener("focus", () => {
+    if (!/^[0-9.]+$/.test(bppNum.value)) { bppNum.value = ""; fitNum(bppNum); }
+    $("bpp-unit").hidden = false;
+    bppNum.select();
+  });
+  bppNum.addEventListener("input", () => { fitNum(bppNum); });
   $("same-all").addEventListener("change", async (e) => {
     settings.sameForAll = e.target.checked;
     // Each clip starts from the settings it was getting until now.
