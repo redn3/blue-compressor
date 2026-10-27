@@ -64,7 +64,12 @@ jobs:
       - name: Build desktop app
         working-directory: app/src-tauri
         shell: bash
-        run: cargo tauri build --target ${{ matrix.target }}
+        # Updater artifacts: the macOS .app.tar.gz and a .sig next to every installer the app
+        # can update itself from, signed with the updater key (see tauri.conf.json).
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: cargo tauri build --target ${{ matrix.target }} --config '{"bundle":{"createUpdaterArtifacts":true}}'
 
       - name: Build command line tool
         shell: bash
@@ -85,13 +90,18 @@ jobs:
           case "${{ runner.os }}" in
             macOS)
               cp "$b"/dmg/*.dmg "$out/Blue-Compressor_${v}_macOS_${{ matrix.arch }}.dmg"
+              cp "$b"/macos/*.app.tar.gz "$out/Blue-Compressor_${v}_macOS_${{ matrix.arch }}.app.tar.gz"
+              cp "$b"/macos/*.app.tar.gz.sig "$out/Blue-Compressor_${v}_macOS_${{ matrix.arch }}.app.tar.gz.sig"
               ;;
             Windows)
               cp "$b"/nsis/*.exe "$out/Blue-Compressor_${v}_Windows_${{ matrix.arch }}-setup.exe"
+              cp "$b"/nsis/*.exe.sig "$out/Blue-Compressor_${v}_Windows_${{ matrix.arch }}-setup.exe.sig"
               cp "$b"/msi/*.msi "$out/Blue-Compressor_${v}_Windows_${{ matrix.arch }}.msi"
+              cp "$b"/msi/*.msi.sig "$out/Blue-Compressor_${v}_Windows_${{ matrix.arch }}.msi.sig"
               ;;
             Linux)
               cp "$b"/appimage/*.AppImage "$out/Blue-Compressor_${v}_Linux_${{ matrix.arch }}.AppImage"
+              cp "$b"/appimage/*.AppImage.sig "$out/Blue-Compressor_${v}_Linux_${{ matrix.arch }}.AppImage.sig"
               cp "$b"/deb/*.deb "$out/Blue-Compressor_${v}_Linux_${{ matrix.arch }}.deb"
               cp "$b"/rpm/*.rpm "$out/Blue-Compressor_${v}_Linux_${{ matrix.arch }}.rpm"
               ;;
@@ -118,3 +128,24 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: gh release upload "$TAG" dist/* --clobber
+
+  # latest.json for the in-app updater, from the signatures the builds uploaded. The app
+  # reads it from the newest published release, so a draft changes nothing until it is
+  # published.
+  updater-manifest:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - name: Write and upload latest.json
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p sigs
+          gh release download "$TAG" --pattern '*.sig' --dir sigs
+          python3 .github/scripts/updater-manifest.py "$TAG" \
+            "https://github.com/${{ github.repository }}/releases/download/$TAG" sigs .github/release-notes.md latest.json
+          gh release upload "$TAG" latest.json --clobber

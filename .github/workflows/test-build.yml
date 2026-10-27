@@ -1,10 +1,12 @@
 name: Test build
 
 # Test builds of the macOS app from a feature branch, uploaded as Actions artifacts only.
-# This workflow never creates a tag or a release.
+# This workflow never creates a tag or a release. Builds from feature/updater read a test
+# update manifest (the updater-test-1 pre-release) instead of the real one, and include the
+# signed .app.tar.gz the updater installs.
 on:
   push:
-    branches: ["feature/advanced-bpp"]
+    branches: ["feature/advanced-bpp", "feature/updater"]
   workflow_dispatch:
 
 permissions:
@@ -34,18 +36,24 @@ jobs:
           tool: tauri-cli@2
       - name: Build desktop app
         working-directory: app/src-tauri
-        run: cargo tauri build --target ${{ matrix.target }}
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          BC_UPDATER_TEST_ENDPOINT: ${{ github.ref_name == 'feature/updater' && 'https://github.com/redn3/blue-compressor/releases/download/updater-test-1/latest.json' || '' }}
+        run: cargo tauri build --target ${{ matrix.target }} --config '{"bundle":{"createUpdaterArtifacts":true}}'
       - name: Collect the dmg
         run: |
           set -euo pipefail
           mkdir -p dist
           sha="$(git rev-parse --short HEAD)"
           cp target/${{ matrix.target }}/release/bundle/dmg/*.dmg "dist/Blue-Compressor_test-${sha}_macOS_${{ matrix.arch }}.dmg"
+          cp target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz "dist/Blue-Compressor_test-${sha}_macOS_${{ matrix.arch }}.app.tar.gz"
+          cp target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz.sig "dist/Blue-Compressor_test-${sha}_macOS_${{ matrix.arch }}.app.tar.gz.sig"
           codesign -dv --verbose=2 target/${{ matrix.target }}/release/bundle/macos/*.app 2>&1 || true
           ls -l dist
       - uses: actions/upload-artifact@v4
         with:
           name: Blue-Compressor-macOS-${{ matrix.arch }}
-          path: dist/*.dmg
+          path: dist/*
           if-no-files-found: error
           retention-days: 14
