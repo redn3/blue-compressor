@@ -39,7 +39,7 @@ const resizes = (j, r) => r !== "original" && !(r === "6k" && j.width <= 6060) &
 const settingLabel = (q, r) => `Q${q} ${QUALITY[q].title}${r !== "original" ? " · " + RES_LABEL[r] : ""}`;
 
 const settings = Object.assign(
-  { resolution: "original", quality: 2, backend: "gpu", outputFolder: null, dest: "next", sameForAll: true },
+  { resolution: "original", quality: 2, backend: "gpu", outputFolder: null, dest: "next", sameForAll: true, squeeze: 1 },
   readSettings(),
 );
 let jobs = [];
@@ -59,6 +59,19 @@ function readSettings() {
 function saveSettings() {
   try { localStorage.setItem("settings", JSON.stringify(settings)); } catch { /* private mode */ }
 }
+
+// Anamorphic de-squeeze: a horizontal stretch of what is shown (viewer and thumbnails).
+// Display only: the raw data and the compressed output are never touched.
+const SQUEEZE_PRESETS = [1, 1.25, 1.33, 1.5, 1.55, 1.6, 1.8, 2];
+const SQUEEZE_MIN = 1, SQUEEZE_MAX = 3;
+function clampSqueeze(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return 1;
+  return Math.round(Math.min(SQUEEZE_MAX, Math.max(SQUEEZE_MIN, n)) * 100) / 100;
+}
+settings.squeeze = clampSqueeze(settings.squeeze);
+const squeeze = () => settings.squeeze;
+const squeezeLabel = (v) => `${Number(v.toFixed(2))}x`;
 
 // Effective settings of a job: its own when settings are per clip, else the global ones.
 const qualityOf = (j) => (settings.sameForAll ? settings.quality : j.quality);
@@ -312,10 +325,13 @@ function drawThumb(j) {
   const c = jobCard(j).querySelector(".job-thumb-img");
   const t = thumbs.get(j.path);
   if (!(t instanceof ImageBitmap)) { c.classList.remove("ready"); return; }
-  if (c.drawn === t) return;
-  c.width = t.width; c.height = t.height;
-  c.getContext("2d").drawImage(t, 0, 0);
+  if (c.drawn === t && c.drawnSqueeze === squeeze()) return;
+  c.width = Math.round(t.width * squeeze()); c.height = t.height;
+  const ctx = c.getContext("2d");
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(t, 0, 0, c.width, c.height);
   c.drawn = t;
+  c.drawnSqueeze = squeeze();
   c.classList.add("ready");
 }
 
@@ -894,7 +910,9 @@ Output: ${w.outputDir}`;
 //
 // Coordinates: the frame is a grid of QW x QH CFA quads (half the sensor size), and `scale`
 // is device pixels per quad, so 100% shows one quad per screen pixel. (cx, cy) is the frame
-// point at the centre of the stage, in fractions of the frame.
+// point at the centre of the stage, in fractions of the frame. With an anamorphic
+// de-squeeze the frame is shown dispW() = QW * squeeze wide: renders are still requested in
+// quads and only stretched sideways when drawn.
 //
 // Two layers are drawn, each as before everywhere and after right of the split line:
 // a fit-size "base" image of the whole frame, and when zoomed in a "region" image rendered
@@ -918,6 +936,7 @@ const settingsKey = (j, f, q, r) => `${j.path}|${f}|${q}|${r}`;
 const currentKey = () => settingsKey(viewer.job, viewer.frame, viewer.quality, viewer.resolution);
 const quadW = () => Math.max(1, Math.floor(viewer.job.width / 2));
 const quadH = () => Math.max(1, Math.floor(viewer.job.height / 2));
+const dispW = () => quadW() * squeeze();
 const dpr = () => window.devicePixelRatio || 1;
 
 function lruSet(map, key, value, limit) {
@@ -950,7 +969,6 @@ function openViewer(j) {
   range.max = String(Math.max(0, j.frames - 1));
   range.value = String(viewer.frame);
   $("v-name").textContent = j.name;
-  $("v-meta").textContent = `${j.codec} · ${j.width} × ${j.height} · ${j.frames} frames · ${j.fps.toFixed(j.fps % 1 ? 3 : 0)} fps · ${gb(j.bytes)}`;
   $("v-error").classList.remove("show");
   const hint = $("v-hint");
   hint.classList.remove("hide");
@@ -985,6 +1003,7 @@ function renderViewerControls() {
     b.title = b.disabled ? "This clip is already at or below this size" : "";
   }
   renderZoomControls();
+  renderSqueezeControls();
   renderFrameLabel();
   const shown = viewer.region || viewer.base;
   const q = shown ? shown.quality : viewer.quality, r = shown ? shown.resolution : viewer.resolution;
@@ -1002,6 +1021,38 @@ function renderFrameLabel(frame = viewer.frame) {
   $("v-frame").style.setProperty("--p", `${(frame / Math.max(1, j.frames - 1)) * 100}%`);
   $("v-frame-label").textContent = `Frame ${frame + 1} of ${j.frames}`;
   $("v-tc").textContent = timecode(frame, j.fps);
+}
+
+function renderSqueezeControls() {
+  const sel = $("v-squeeze"), custom = $("v-squeeze-custom");
+  const preset = SQUEEZE_PRESETS.includes(squeeze());
+  if (!custom.matches(":focus")) custom.value = String(squeeze());
+  sel.value = preset && !sel.customOpen ? String(squeeze()) : "custom";
+  custom.hidden = sel.value !== "custom";
+  $("v-squeeze-group").classList.toggle("on", squeeze() !== 1);
+  const j = viewer.job;
+  $("v-meta").textContent = `${j.codec} · ${j.width} × ${j.height} · ${j.frames} frames · ${j.fps.toFixed(j.fps % 1 ? 3 : 0)} fps · ${gb(j.bytes)}`
+    + (squeeze() !== 1 ? ` · de-squeezed ${squeezeLabel(squeeze())}, ${((j.width * squeeze()) / j.height).toFixed(2)}:1 on screen` : "");
+}
+
+// A new de-squeeze changes the frame's shape on screen: refit (or keep the zoom and centre
+// when zoomed in), redraw, and stretch the queue thumbnails too.
+function setSqueeze(v) {
+  const next = clampSqueeze(v);
+  if (next === settings.squeeze) { renderViewerControls(); return; }
+  settings.squeeze = next;
+  saveSettings();
+  if (viewer.open) {
+    if (viewer.fit) viewer.scale = fitScale();
+    else viewer.scale = Math.max(viewer.scale, fitScale());
+    clampView();
+    $("v-mini-canvas").drawn = null;
+    syncLayers();
+    renderViewerControls();
+    draw();
+    pump();
+  }
+  for (const x of jobs) if (els.has(x.id)) drawThumb(x);
 }
 
 function renderZoomControls() {
@@ -1048,12 +1099,12 @@ function sizeCanvas() {
 
 function fitScale() {
   const c = $("v-canvas");
-  return Math.min(c.width / quadW(), c.height / quadH());
+  return Math.min(c.width / dispW(), c.height / quadH());
 }
 
 function clampView() {
   const c = $("v-canvas");
-  const fw = quadW() * viewer.scale, fh = quadH() * viewer.scale;
+  const fw = dispW() * viewer.scale, fh = quadH() * viewer.scale;
   const hx = c.width / 2 / fw, hy = c.height / 2 / fh;
   viewer.cx = hx >= 0.5 ? 0.5 : Math.min(1 - hx, Math.max(hx, viewer.cx));
   viewer.cy = hy >= 0.5 ? 0.5 : Math.min(1 - hy, Math.max(hy, viewer.cy));
@@ -1062,7 +1113,7 @@ function clampView() {
 // The frame's rectangle on the canvas in device pixels.
 function frameRect() {
   const c = $("v-canvas");
-  const w = quadW() * viewer.scale, h = quadH() * viewer.scale;
+  const w = dispW() * viewer.scale, h = quadH() * viewer.scale;
   return { x: c.width / 2 - viewer.cx * w, y: c.height / 2 - viewer.cy * h, w, h };
 }
 
@@ -1095,7 +1146,7 @@ function zoomTo(scale, anchor) {
     viewer.scale = fs;
     viewer.cx = viewer.cy = 0.5;
   } else {
-    viewer.cx = (c.width / 2 - (ax - u * quadW() * scale)) / (quadW() * scale);
+    viewer.cx = (c.width / 2 - (ax - u * dispW() * scale)) / (dispW() * scale);
     viewer.cy = (c.height / 2 - (ay - v * quadH() * scale)) / (quadH() * scale);
     clampView();
   }
@@ -1128,8 +1179,10 @@ function draw() {
       layers.push({ l: viewer.region, x: f.x + x * f.w, y: f.y + y * f.h, w: w * f.w, h: h * f.h });
     }
     for (const { l, x, y, w, h } of layers) {
-      // Magnified renders show quads as crisp blocks; the base is only a soft stand-in.
-      ctx.imageSmoothingEnabled = l === viewer.base ? true : w < l.w * 0.999;
+      // Magnified renders show quads as crisp blocks; the base is only a soft stand-in. A
+      // de-squeeze stretch is smoothed until quads are 2 px wide, so odd ratios like 1.33x
+      // do not show uneven columns.
+      ctx.imageSmoothingEnabled = l === viewer.base || h < l.h * 0.999 || (h <= l.h * 1.001 && viewer.scale * squeeze() < 2);
       ctx.imageSmoothingQuality = "high";
       ctx.save();
       ctx.beginPath();
@@ -1151,7 +1204,7 @@ function draw() {
 function drawMinimap() {
   const mini = $("v-mini-canvas");
   if (viewer.fit || !viewer.base) return;
-  const w = 168 * dpr(), h = Math.round(w * quadH() / quadW());
+  const w = 168 * dpr(), h = Math.round(w * quadH() / dispW());
   if (mini.width !== w || mini.height !== h) { mini.width = w; mini.height = h; mini.drawn = null; }
   const ctx = mini.getContext("2d");
   if (mini.drawn !== viewer.base) {
@@ -1176,7 +1229,7 @@ function nextRequest() {
   const key = currentKey();
   const common = { job: j, frame: viewer.frame, quality: viewer.quality, resolution: viewer.resolution, key };
   const c = $("v-canvas");
-  const baseReq = baseCache.has(key) ? null : { ...common, kind: "base", crop: [0, 0, 1, 1], width: Math.round(Math.min(quadW(), quadW() * fitScale(), c.width)) };
+  const baseReq = baseCache.has(key) ? null : { ...common, kind: "base", crop: [0, 0, 1, 1], width: Math.round(Math.min(quadW(), quadW() * fitScale(), c.width / squeeze())) };
   let regionReq = null;
   if (!viewer.fit) {
     const rk = regionKey();
@@ -1285,7 +1338,7 @@ function bindStage() {
       viewer.split = Math.min(1, Math.max(0, p.x / st.clientWidth));
       draw();
     } else if (!viewer.fit) {
-      viewer.cx -= (dx * dpr()) / (quadW() * viewer.scale);
+      viewer.cx -= (dx * dpr()) / (dispW() * viewer.scale);
       viewer.cy -= (dy * dpr()) / (quadH() * viewer.scale);
       clampView();
       draw();
@@ -1323,7 +1376,7 @@ function bindStage() {
     } else if (notch) {
       zoomTo(viewer.scale * (e.deltaY > 0 ? 1 / 1.25 : 1.25), local(e));
     } else if (!viewer.fit) {
-      viewer.cx += (e.deltaX * dpr()) / (quadW() * viewer.scale);
+      viewer.cx += (e.deltaX * dpr()) / (dispW() * viewer.scale);
       viewer.cy += (e.deltaY * dpr()) / (quadH() * viewer.scale);
       clampView();
       syncLayers();
@@ -1382,6 +1435,28 @@ function bindViewer() {
     const b = e.target.closest("button"); if (!b) return;
     zoomTo(b.dataset.value === "fit" ? 0 : Number(b.dataset.value), null);
   });
+  const sqSel = $("v-squeeze"), sqCustom = $("v-squeeze-custom");
+  sqSel.addEventListener("change", () => {
+    sqSel.customOpen = sqSel.value === "custom";
+    if (sqSel.customOpen) {
+      renderSqueezeControls();
+      sqCustom.focus();
+      sqCustom.select();
+    } else {
+      setSqueeze(Number(sqSel.value));
+    }
+  });
+  const applyCustom = () => { if (sqCustom.value !== "") setSqueeze(sqCustom.value); };
+  sqCustom.addEventListener("input", () => {
+    const n = Number(sqCustom.value);
+    if (Number.isFinite(n) && n >= SQUEEZE_MIN && n <= SQUEEZE_MAX) setSqueeze(n);
+  });
+  sqCustom.addEventListener("change", applyCustom);
+  sqCustom.addEventListener("blur", () => { applyCustom(); renderSqueezeControls(); });
+  sqCustom.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if (e.key === "Enter" || e.key === "Escape") sqCustom.blur();
+  });
 
   // The scrubber updates its label at once and asks for the frame when it settles.
   const range = $("v-frame");
@@ -1421,7 +1496,7 @@ function bindViewer() {
   });
 
   document.addEventListener("keydown", (e) => {
-    if (!viewer.open || e.target.tagName === "SELECT" || e.metaKey || e.ctrlKey) return;
+    if (!viewer.open || e.target.tagName === "SELECT" || e.target.tagName === "INPUT" || e.metaKey || e.ctrlKey) return;
     const k = e.key.toLowerCase();
     if (e.key === "Escape") closeViewer();
     else if (e.key === "ArrowLeft") { e.preventDefault(); goFrame(Number(range.value) - (e.shiftKey ? 10 : 1), 90); }

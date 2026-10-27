@@ -194,6 +194,22 @@
               <button data-value="original">Original</button><button data-value="6k">6K</button><button data-value="4k">4K</button>
             </div>
           </div>
+          <div class="v-group" id="v-squeeze-group" title="Anamorphic de-squeeze: stretches the preview sideways. Display only, the compressed clip is not changed."><span class="v-group-label">De-squeeze</span>
+            <div class="v-squeeze">
+              <select class="mini-select" id="v-squeeze" aria-label="Anamorphic de-squeeze">
+                <option value="1">None (1x)</option>
+                <option value="1.25">1.25x</option>
+                <option value="1.33">1.33x</option>
+                <option value="1.5">1.5x</option>
+                <option value="1.55">1.55x</option>
+                <option value="1.6">1.6x</option>
+                <option value="1.8">1.8x</option>
+                <option value="2">2x</option>
+                <option value="custom">Custom</option>
+              </select>
+              <input type="number" class="mini-input" id="v-squeeze-custom" min="1" max="3" step="0.01" inputmode="decimal" aria-label="Custom de-squeeze factor" hidden>
+            </div>
+          </div>
           <div class="v-group"><span class="v-group-label">Zoom</span>
             <div class="seg seg-sm" id="v-zoom">
               <button data-value="fit">Fit</button><button data-value="1">100%</button><button data-value="2">200%</button>

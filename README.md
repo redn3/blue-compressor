@@ -39,6 +39,12 @@ on such a clip to force a new version. While a queue runs, the footer shows the 
 so far by this batch (finished clips exactly, the clip in progress estimated) and how many
 clips are done; clips that were already done are counted separately in the queue header.
 
+For anamorphic footage, the previewer has a **De-squeeze** setting (None, 1.25x, 1.33x, 1.5x,
+1.55x, 1.6x, 1.8x, 2x or a custom factor from 1 to 3) that stretches the preview and the queue
+thumbnails sideways so the image shows in its intended shape. It is display only: the raw
+data and the compressed clips are never changed. The choice is remembered with the other
+settings.
+
 ![Blue Compressor desktop app](docs/screenshot.png)
 
 > **Status: early and experimental.** It has been tested on one Z8 clip and one ZR clip,

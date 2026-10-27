@@ -659,6 +659,24 @@ body.per-clip .job-settings { display: flex; }
 .v-group-label { font-size: 10px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); padding-left: 2px; }
 .seg-sm { padding: 2px; border-radius: 8px; }
 .seg-sm button { height: 26px; padding: 0 10px; font-size: 12px; border-radius: 6px; }
+.v-squeeze { display: flex; gap: 6px; align-items: center; height: 30px; }
+.v-squeeze .mini-select { height: 30px; border-radius: 8px; font-size: 12px; }
+#v-squeeze-group.on .mini-select { border-color: var(--accent-ring); color: var(--accent); }
+.mini-input {
+  width: 64px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 550;
+  font-variant-numeric: tabular-nums;
+}
+.mini-input:focus { outline: none; box-shadow: 0 0 0 3px var(--accent-soft); border-color: var(--accent-ring); }
+.mini-input[hidden] { display: none; }
 
 .stage {
   position: relative;
