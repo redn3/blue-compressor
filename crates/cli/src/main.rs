@@ -14,6 +14,7 @@
 //! Exit codes: 0 success, 1 at least one clip failed, 2 usage error, 3 cancelled.
 
 mod serve;
+mod update;
 mod watch;
 
 use std::io::Write;
@@ -685,6 +686,7 @@ fn watch_cmd(o: &Cli) -> u8 {
         once: o.once,
     };
     let state = Arc::new(Mutex::new(watch::WatchSnapshot::default()));
+    update::spawn(update::initial_status(), true);
     watch::run_watch(cfg, &CANCEL, state, None, None)
 }
 

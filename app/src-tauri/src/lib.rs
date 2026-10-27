@@ -3,12 +3,15 @@
 //! progress with events.
 //!
 //! Commands: app_info, scan, plan_output, preview, thumbnail, check_existing, start, cancel,
-//! set_paused, is_running, pick_clips, pick_folder, reveal, initial_paths, confirm_quit.
+//! set_paused, is_running, pick_clips, pick_folder, reveal, initial_paths, confirm_quit,
+//! update_check, update_install, open_release_page.
 //! Events: job-start {id, output}, job-progress {id, fraction, fps},
 //! job-done {id, skipped, ...outcome}, job-error {id, error, cancelled}, queue-finished {},
-//! queue-paused {paused}, open-paths [paths], quit-requested {}.
+//! queue-paused {paused}, open-paths [paths], quit-requested {}, update-progress
+//! [downloaded, total], update-installing {}.
 
 mod engine;
+mod updater;
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -586,6 +589,8 @@ pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(updater::Pending::default())
         .manage(Runner { initial: Mutex::new(args), ..Default::default() })
         .invoke_handler(tauri::generate_handler![
             app_info,
@@ -602,7 +607,10 @@ pub fn run() {
             pick_folder,
             reveal,
             initial_paths,
-            confirm_quit
+            confirm_quit,
+            updater::update_check,
+            updater::update_install,
+            updater::open_release_page
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {

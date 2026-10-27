@@ -55,6 +55,8 @@ struct ServerState {
     sse_clients: Arc<Mutex<Vec<TcpStream>>>,
     watch_state: Arc<Mutex<WatchSnapshot>>,
     transcode_lock: Arc<Mutex<()>>,
+    /// Newest release seen by the update check (see [`crate::update`]).
+    update: Arc<Mutex<crate::update::UpdateStatus>>,
 }
 
 #[derive(Serialize, Clone)]
@@ -931,6 +933,10 @@ fn invoke_command(state: &Arc<ServerState>, cmd: &str, body: &[u8]) -> HttpRespo
             };
             HttpResponse::json(200, &info)
         }
+        "update_status" => {
+            let s = state.update.lock().unwrap().clone();
+            HttpResponse::json(200, &s)
+        }
         "watch_status" => {
             let snap = state.watch_state.lock().unwrap().clone();
             HttpResponse::json(200, &snap)
@@ -1363,7 +1369,9 @@ pub fn run_serve(cfg: ServeConfig, cancel: &'static AtomicBool) -> u8 {
         sse_clients: Arc::new(Mutex::new(Vec::new())),
         watch_state: Arc::new(Mutex::new(initial_watch)),
         transcode_lock: Arc::new(Mutex::new(())),
+        update: crate::update::initial_status(),
     });
+    crate::update::spawn(state.update.clone(), true);
 
     println!("Blue Compressor {} web UI listening on http://{}", bluecompress::VERSION, cfg.listen);
     let _ = std::io::stdout().flush();

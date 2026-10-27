@@ -68,5 +68,16 @@
       "../../NOTICE": "licenses/NOTICE",
       "../../LICENSES/rawmakase-MIT.txt": "licenses/rawmakase-MIT.txt"
     }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDk1QkM0RjdEQTMzMzdGRDcKUldUWGZ6T2pmVSs4bFNTT25NcUUraHBBeWNSa3dWR3lla0lLQUk5WVJhcHhRVkt0UmpXU3VnL3kK",
+      "endpoints": [
+        "https://github.com/redn3/blue-compressor/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

@@ -121,6 +121,21 @@
           </div>
         </section>
 
+        <section class="field" id="updates-section">
+          <div class="field-label">Updates</div>
+          <label class="switch-row" id="auto-update-row">
+            <span class="switch-text">
+              <span class="switch-title">Check for updates</span>
+              <span class="switch-sub">Once a day. Only asks GitHub for the newest version; nothing about you or your clips is sent.</span>
+            </span>
+            <input type="checkbox" id="auto-update" class="switch" checked>
+          </label>
+          <div class="update-row">
+            <button class="btn ghost" id="btn-check-update">Check Now</button>
+            <span class="hint update-status" id="update-status"></span>
+          </div>
+        </section>
+
         <div class="beta-note">
           <svg viewBox="0 0 16 16" class="ico-sm"><path d="M8 5.2v3.3m0 2.2v.1M7 2.3 1.6 11.6c-.5.8.1 1.9 1.1 1.9h10.6c1 0 1.6-1.1 1.1-1.9L9 2.3c-.4-.8-1.6-.8-2 0Z"/></svg>
           <span><b>Beta software.</b> Keep your digital negatives (the original clips) until you have checked the compressed copies yourself.</span>
@@ -141,6 +156,26 @@
               <svg viewBox="0 0 16 16" class="ico-sm"><path d="M1.8 4.2c0-.7.5-1.2 1.2-1.2h3l1.4 1.6h5.6c.7 0 1.2.5 1.2 1.2v6.2c0 .7-.5 1.2-1.2 1.2H3c-.7 0-1.2-.5-1.2-1.2V4.2Z"/></svg>Add Folder
             </button>
             <button class="btn ghost" id="btn-clear">Clear List</button>
+          </div>
+        </div>
+
+        <div class="update-banner" id="update-banner" role="status" hidden>
+          <div class="update-banner-main">
+            <svg viewBox="0 0 16 16" class="ico-sm"><path d="M8 2.5v7.5m0 0L5 7m3 3 3-3M3 12.5h10"/></svg>
+            <span id="update-banner-text">A new version is available</span>
+            <button class="link-btn" id="update-banner-how">How to update</button>
+            <button class="icon-btn" id="update-banner-close" title="Hide until the next version" aria-label="Hide">
+              <svg viewBox="0 0 16 16" class="ico-sm"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+            </button>
+          </div>
+          <div class="update-banner-steps" id="update-banner-steps" hidden>
+            <p>This server runs in a container, which does not update itself. To update it:</p>
+            <ol>
+              <li><b>Synology Container Manager:</b> open Project, select the Blue Compressor project and click Stop. Under Image, delete the old <code>ghcr.io/redn3/blue-compressor</code> image (or set the image tag in <code>docker-compose.yml</code> to <code id="update-banner-tag">the new version</code>). Then build or start the project again; it downloads the new version.</li>
+              <li><b>Docker Compose:</b> <code>docker compose pull</code>, then <code>docker compose up -d</code>.</li>
+              <li><b>Docker:</b> <code>docker pull ghcr.io/redn3/blue-compressor:latest</code>, then remove and recreate the container with the same settings.</li>
+            </ol>
+            <p>Your settings, watch folders and compressed clips stay as they are. <a id="update-banner-link" href="https://github.com/redn3/blue-compressor/releases/latest" target="_blank" rel="noopener">What's new</a>. Set <code>UPDATE_CHECK=false</code> to turn these checks off.</p>
           </div>
         </div>
 
@@ -298,6 +333,24 @@
       <div class="modal-buttons">
         <button class="btn primary" id="beta-ok">I understand</button>
       </div>
+    </div>
+  </div>
+
+  <div class="modal" id="update-modal" role="dialog" aria-modal="true" aria-labelledby="update-title">
+    <div class="modal-card update-card">
+      <div class="modal-icon update-icon">
+        <svg viewBox="0 0 24 24"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 19.5h14"/></svg>
+      </div>
+      <h3 id="update-title">Blue Compressor is available</h3>
+      <p id="update-sub">Update now?</p>
+      <div class="update-notes" id="update-notes"></div>
+      <div class="update-progress" id="update-progress" hidden><div class="update-bar"><i id="update-bar"></i></div><span id="update-progress-text">Downloading</span></div>
+      <p class="update-msg" id="update-msg" hidden></p>
+      <div class="modal-buttons" id="update-buttons">
+        <button class="btn ghost" id="update-later">Later</button>
+        <button class="btn primary" id="update-now">Update</button>
+      </div>
+      <button class="link-btn update-skip" id="update-skip">Skip this version</button>
     </div>
   </div>
 

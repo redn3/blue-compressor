@@ -80,7 +80,7 @@ const resizes = (j, r) => r !== "original" && !(r === "6k" && j.width <= 6060) &
 const settingLabel = (c, r) => `${compText(c)}${r !== "original" ? " · " + RES_LABEL[r] : ""}`;
 
 const settings = Object.assign(
-  { resolution: "original", compression: "light", backend: "gpu", outputFolder: null, dest: "next", sameForAll: true, squeeze: 1 },
+  { resolution: "original", compression: "light", backend: "gpu", outputFolder: null, dest: "next", sameForAll: true, squeeze: 1, autoUpdate: true, skipVersion: null },
   migrateSettings(readSettings()),
 );
 let jobs = [];
@@ -2010,6 +2010,189 @@ async function init() {
   await restoreQueue();
   renderAll();
   addPaths(await api.invoke("initial_paths"));
+  initUpdates();
+}
+
+// Updates ------------------------------------------------------------------------
+//
+// Desktop app: quietly asks for a newer version a few seconds after start and once a day
+// while open (unless turned off), and shows a prompt: Update, Later or Skip this version.
+// Updating downloads, installs and relaunches; it never runs while the queue is
+// compressing (the prompt then offers to update when the queue finishes). Where the app
+// cannot replace itself (Linux .deb or .rpm, or a failed install) it offers the release
+// page instead. Offline or GitHub errors are silent unless the check was asked for.
+// Web UI (Docker, NAS): the server checks; a dismissible banner says how to update.
+
+const UPDATE_EVERY = 24 * 3600 * 1000;
+const update = { info: null, busy: false, whenDone: false, timer: 0 };
+
+// Release notes as a short list: the bullet lines of the first section.
+function updateNotesHtml(notes) {
+  const lines = String(notes || "").split("\n").map((l) => l.trim()).filter(Boolean);
+  const items = lines.filter((l) => /^[-*] /.test(l)).map((l) => l.replace(/^[-*] /, "").replace(/\*\*/g, "").replace(/\\/g, ""));
+  return items.length ? `<ul>${items.slice(0, 6).map((t) => `<li>${esc(t)}</li>`).join("")}</ul>` : "";
+}
+
+function setUpdateStatus(text) {
+  const el = $("update-status");
+  if (el) el.textContent = text || "";
+}
+
+function renderUpdatePrompt() {
+  const u = update.info;
+  if (!u) return;
+  $("update-title").textContent = `Blue Compressor ${u.version} is available${u.test ? " (test update)" : ""}`;
+  $("update-notes").innerHTML = updateNotesHtml(u.notes);
+  const now = $("update-now"), later = $("update-later"), sub = $("update-sub");
+  $("update-progress").hidden = true;
+  $("update-msg").hidden = true;
+  $("update-buttons").hidden = false;
+  $("update-skip").hidden = false;
+  later.textContent = "Later";
+  if (!u.can_install) {
+    sub.textContent = `You have ${u.current}. Download the new version from the release page.`;
+    now.textContent = "Download";
+  } else if (running) {
+    sub.textContent = update.whenDone
+      ? "It will update when the queue has finished."
+      : `You have ${u.current}. The queue is compressing, so it can update when it has finished.`;
+    now.textContent = update.whenDone ? "OK" : "Update When the Queue Finishes";
+  } else {
+    sub.textContent = `You have ${u.current}. Update now? It takes a moment and reopens the app.`;
+    now.textContent = "Update";
+  }
+}
+
+function showUpdatePrompt(u) {
+  update.info = u;
+  renderUpdatePrompt();
+  $("update-modal").classList.add("show");
+}
+
+function hideUpdatePrompt() {
+  if (update.busy) return;
+  $("update-modal").classList.remove("show");
+}
+
+async function checkForUpdates(manual) {
+  if (info.web) return;
+  if (manual) setUpdateStatus("Checking...");
+  let u = null;
+  try {
+    u = await api.invoke("update_check");
+  } catch {
+    if (manual) setUpdateStatus("Could not check right now. Try again later.");
+    return;
+  }
+  if (!u) {
+    if (manual) setUpdateStatus(`You have the newest version${info.version ? ` (${info.version})` : ""}.`);
+    return;
+  }
+  setUpdateStatus(`Version ${u.version} is available.`);
+  if (manual || u.version !== settings.skipVersion) showUpdatePrompt(u);
+}
+
+async function installUpdate() {
+  const u = update.info;
+  if (!u || update.busy) return;
+  if (running) { update.whenDone = true; renderUpdatePrompt(); hideUpdatePrompt(); setUpdateStatus(`Updates to ${u.version} when the queue finishes.`); return; }
+  update.busy = true;
+  update.whenDone = false;
+  $("update-modal").classList.add("show");
+  $("update-buttons").hidden = true;
+  $("update-skip").hidden = true;
+  $("update-msg").hidden = true;
+  $("update-progress").hidden = false;
+  $("update-bar").style.width = "0%";
+  $("update-progress-text").textContent = "Downloading...";
+  $("update-sub").textContent = `Updating to ${u.version}. Please keep the app open.`;
+  try {
+    await api.invoke("update_install");
+    // The app relaunches; nothing more to do here.
+  } catch (e) {
+    update.busy = false;
+    $("update-progress").hidden = true;
+    $("update-msg").hidden = false;
+    $("update-msg").textContent = "The update could not be installed here. You can download it from the release page instead.";
+    $("update-buttons").hidden = false;
+    $("update-now").textContent = "Download";
+    $("update-later").textContent = "Close";
+    update.info = { ...u, can_install: false };
+  }
+}
+
+function initUpdates() {
+  if (info.web || DEMO_PARAMS.has("docker")) { initUpdateBanner(); return; }
+  const auto = $("auto-update");
+  auto.checked = settings.autoUpdate !== false;
+  auto.addEventListener("change", () => {
+    settings.autoUpdate = auto.checked;
+    saveSettings();
+    setUpdateStatus(auto.checked ? "" : "Automatic checks are off.");
+  });
+  if (!auto.checked) setUpdateStatus("Automatic checks are off.");
+  $("btn-check-update").addEventListener("click", () => checkForUpdates(true));
+  $("update-later").addEventListener("click", hideUpdatePrompt);
+  $("update-skip").addEventListener("click", () => {
+    if (update.info) { settings.skipVersion = update.info.version; saveSettings(); }
+    setUpdateStatus(update.info ? `Skipped version ${update.info.version}.` : "");
+    hideUpdatePrompt();
+  });
+  $("update-now").addEventListener("click", () => {
+    const u = update.info;
+    if (!u) return;
+    if (!u.can_install) { api.invoke("open_release_page", { url: u.page }).catch(() => {}); hideUpdatePrompt(); return; }
+    if (running && update.whenDone) { hideUpdatePrompt(); return; }
+    installUpdate();
+  });
+  api.listen("update-progress", (p) => {
+    const [got, total] = Array.isArray(p) ? p : [0, null];
+    const mb = (b) => (b / 1e6).toFixed(1);
+    if (total) $("update-bar").style.width = `${Math.min(100, (got / total) * 100)}%`;
+    $("update-progress-text").textContent = total ? `Downloading ${mb(got)} of ${mb(total)} MB` : `Downloading ${mb(got)} MB`;
+  });
+  api.listen("update-installing", () => {
+    $("update-bar").style.width = "100%";
+    $("update-progress-text").textContent = "Installing. The app reopens by itself.";
+  });
+  api.listen("queue-finished", () => {
+    if (update.whenDone && update.info) setTimeout(installUpdate, 800);
+  });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") hideUpdatePrompt(); });
+  const quiet = () => { if (settings.autoUpdate !== false) checkForUpdates(false); };
+  setTimeout(quiet, 4000);
+  update.timer = setInterval(quiet, UPDATE_EVERY);
+}
+
+// The Web UI banner: the server's last check (it checks every 12 hours).
+function initUpdateBanner() {
+  const banner = $("update-banner");
+  let shown = "";
+  const dismissedKey = "update-dismissed";
+  const refresh = async () => {
+    let s = null;
+    try { s = await api.invoke("update_status"); } catch { return; }
+    if (!s || !s.available || !s.latest) { banner.hidden = true; return; }
+    let dismissed = "";
+    try { dismissed = localStorage.getItem(dismissedKey) || ""; } catch { /* ignore */ }
+    if (dismissed === s.latest) { banner.hidden = true; return; }
+    shown = s.latest;
+    $("update-banner-text").textContent = `Blue Compressor ${s.latest} is available (this server runs ${s.current}).`;
+    $("update-banner-tag").textContent = s.latest;
+    if (s.url) $("update-banner-link").href = s.url;
+    banner.hidden = false;
+  };
+  $("update-banner-how").addEventListener("click", () => {
+    const steps = $("update-banner-steps");
+    steps.hidden = !steps.hidden;
+    $("update-banner-how").textContent = steps.hidden ? "How to update" : "Hide steps";
+  });
+  $("update-banner-close").addEventListener("click", () => {
+    banner.hidden = true;
+    try { localStorage.setItem(dismissedKey, shown); } catch { /* ignore */ }
+  });
+  refresh();
+  setInterval(refresh, 3600 * 1000);
 }
 
 init();
@@ -2098,6 +2281,19 @@ function browserStandIn() {
         case "pick_folder": return "/Volumes/Archive/Compressed";
         case "cancel": cancel = true; paused = false; return;
         case "set_paused": paused = !!a.paused; emit("queue-paused", { paused }); return { paused };
+        // Demo of the update prompt (?update) and of the Docker banner (?docker).
+        case "update_check": return DEMO_PARAMS.has("update") ? DEMO_UPDATE : null;
+        case "update_status": return DEMO_PARAMS.has("docker")
+          ? { enabled: true, current: "0.1.7", latest: "0.1.8", available: true, url: "https://github.com/redn3/blue-compressor/releases/tag/v0.1.8", notes: DEMO_UPDATE.notes, checked: 0 }
+          : { enabled: true, current: "0.1.7", available: false };
+        case "update_install": {
+          const total = 9.4e6;
+          for (let got = 0; got <= total; got += total / 25) { await new Promise((r) => setTimeout(r, 60)); emit("update-progress", [got, total]); }
+          emit("update-installing", null);
+          await new Promise((r) => setTimeout(r, 600));
+          throw new Error("demo: nothing to install");
+        }
+        case "open_release_page": window.open(a.url, "_blank"); return null;
         case "start": {
           cancel = false;
           paused = false;
@@ -2124,6 +2320,13 @@ function browserStandIn() {
     },
   };
 }
+
+const DEMO_PARAMS = new URLSearchParams(location.search);
+const DEMO_UPDATE = {
+  version: "0.1.8", current: "0.1.7", can_install: true, test: false, date: null,
+  page: "https://github.com/redn3/blue-compressor/releases/tag/v0.1.8",
+  notes: "What's new in 0.1.8\n- Blue Compressor now tells you when a new version is out and can update itself.\n- Faster scanning of large folders.",
+};
 
 // Web UI backend (`bluecompress serve`): HTTP command calls, SSE events, and NAS file browser.
 function webApi() {
