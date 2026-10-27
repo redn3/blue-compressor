@@ -17,7 +17,7 @@ const api = T ? {
 // Compression is set in bits per pixel (bpp): a frame's coded size times 8 over its width
 // times height, the measure RdWing uses for Nikon's HE (about 3) and HE* (about 5) stills.
 // What is stored is a quick pick ("lossless", "light", "medium", "strong") or a bpp value.
-// Light, Medium and Strong go by each clip's own rate (0.42, 0.36 and 0.24 times it), like
+// Light, Medium and Strong go by each clip's own rate (0.75, 0.55 and 0.35 times it), like
 // the watch folder and the legacy -q steps; a bpp value from the slider or the number
 // field applies to every clip as it is.
 const BPP_MIN = 0.5, BPP_MAX = 8;
@@ -26,9 +26,9 @@ const LOSSLESS = "lossless";
 const LOSSLESS_KEEP = 0.93; // typical size of the lossless repack: 4 to 10% smaller
 const PICKS = [
   { id: "lossless", label: "Lossless", text: "Identical picture, files only a little smaller." },
-  { id: "light", label: "Light", f: 0.42, text: "Keeps the detail. Good for archive copies." },
-  { id: "medium", label: "Medium", f: 0.36, text: "Balanced: a little smaller than Light, still archive quality." },
-  { id: "strong", label: "Strong", f: 0.24, text: "Smallest files, for offline edits and reference copies." },
+  { id: "light", label: "Light", f: 0.75, text: "Minimal quality loss, about a quarter smaller." },
+  { id: "medium", label: "Medium", f: 0.55, text: "Balanced, good for archive copies, about half the size." },
+  { id: "strong", label: "Strong", f: 0.35, text: "Smallest files, for reference copies." },
 ];
 const PICK = Object.fromEntries(PICKS.map((x) => [x.id, x]));
 // Quality steps of earlier versions: Q1 is Lossless, Q2 to Q4 the Light, Medium and Strong picks.

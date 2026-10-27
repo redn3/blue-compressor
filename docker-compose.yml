@@ -9,7 +9,7 @@ services:
       - PORT=9847
       - BROWSE_ROOT=/
       # Compression: PRESET and WATCH_PRESET are lossless, light, medium or strong
-      # (light, medium and strong are 0.42, 0.36 and 0.24 x each clip's own bits per pixel).
+      # (light, medium and strong are 0.75, 0.55 and 0.35 x each clip's own bits per pixel).
       # Set BPP or WATCH_BPP instead for a fixed size in bits per pixel, for example 1.8.
       # The older QUALITY and WATCH_QUALITY (1 to 4) still work.
       - PRESET=light

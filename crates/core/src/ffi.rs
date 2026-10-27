@@ -153,7 +153,7 @@ pub unsafe extern "C" fn bc_output_size(w: u32, h: u32, res: c_int, out_w: *mut 
 }
 
 /// Runs synchronously; call from a background thread. Returns 0 on success. `quality` 1
-/// is the lossless repack; the legacy steps 2 to 4 are 0.42, 0.36 and 0.24 times each clip's
+/// is the lossless repack; the legacy steps 2 to 4 are 0.75, 0.55 and 0.35 times each clip's
 /// own bits per pixel.
 ///
 /// # Safety

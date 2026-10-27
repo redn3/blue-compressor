@@ -25,14 +25,13 @@ pub const BPP_MIN: f64 = 0.5;
 pub const BPP_MAX: f64 = 8.0;
 
 /// What the legacy quality steps 2, 3 and 4 mean now: these fractions of each clip's own
-/// bits per pixel. Light is matched to what the old Q2 (fixed rank 135) gave on 161 Nikon
-/// ZR R3D NE clips: 918 GB to 384 GB, 0.419 of the source. Strong keeps the ratio the old
-/// Q4 (rank 160) had to Q2 on the ZR and Z8 sample clips (about 0.57 of Q2's size).
-/// Medium is set as the balanced pick, 0.86 of Light, gentler than the old Q3 (rank 140,
-/// about 0.77 of Q2, so 0.32). Medium and Strong are derived, not measured on that set.
-/// `bluecompress calibrate` measures all of them on any clips. Quality 1 is the lossless
-/// repack.
-pub const LEGACY_FRACTIONS: [f64; 3] = [0.42, 0.36, 0.24];
+/// bits per pixel, set to the size each pick is meant to give: Light about a quarter
+/// smaller (20 to 30%) with minimal quality loss, Medium about half the size (40 to 50%)
+/// for archive copies, Strong about two thirds smaller (60 to 70%) for reference copies.
+/// Every frame is rate controlled to its target, so these hold on any footage unless the
+/// 0.5 bpp floor comes first. `bluecompress calibrate` compares them with the old fixed
+/// Q2 to Q4 ranks on real clips. Quality 1 is the lossless repack.
+pub const LEGACY_FRACTIONS: [f64; 3] = [0.75, 0.55, 0.35];
 
 /// The bpp a legacy quality step stands for on a clip of `source_bpp`: None for quality 1
 /// (lossless), else the step's fraction of the source rounded to 0.1, at least

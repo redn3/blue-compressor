@@ -206,12 +206,14 @@ fn bpp_targets_round_and_clamp() {
 fn legacy_steps_map_to_fractions_of_the_source() {
     use bluecompress::legacy_bpp;
     assert_eq!(legacy_bpp(1, 2.9), None);
-    assert_eq!(legacy_bpp(2, 2.9), Some(1.2));
-    assert_eq!(legacy_bpp(3, 2.9), Some(1.0));
-    assert_eq!(legacy_bpp(4, 2.9), Some(0.7));
+    assert_eq!(legacy_bpp(2, 2.9), Some(2.2));
+    assert_eq!(legacy_bpp(3, 2.9), Some(1.6));
+    assert_eq!(legacy_bpp(4, 2.9), Some(1.0));
     assert_eq!(legacy_bpp(4, 1.0), Some(0.5), "never below the 0.5 bpp floor");
     assert_eq!(Target::quality(1).resolve(2.9), Target::lossless());
-    assert_eq!(Target::quality(3).resolve(2.9), Target::bpp(1.0));
+    assert_eq!(Target::quality(3).resolve(2.9), Target::bpp(1.6));
+    // A Z8 clip at about 1.5 bpp: Light 1.1, Medium 0.8, Strong at the 0.5 floor.
+    assert_eq!((legacy_bpp(2, 1.5), legacy_bpp(3, 1.5), legacy_bpp(4, 1.5)), (Some(1.1), Some(0.8), Some(0.5)));
     // A bpp at or above the source is the lossless repack.
     assert_eq!(Target::bpp(3.0).resolve(2.9), Target::lossless());
     assert_eq!(Target::bpp(2.8).resolve(2.9), Target::bpp(2.8));
