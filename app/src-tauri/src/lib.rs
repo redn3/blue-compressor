@@ -104,6 +104,9 @@ struct JobRequest {
     /// Write the exposure .RMD next to an R3D NE output (on unless turned off).
     #[serde(default = "yes")]
     rmd: bool,
+    /// Exposure in the .RMD in stops (None: +1 for the ZR, +0.5 for other cameras).
+    #[serde(default)]
+    rmd_ev: Option<f64>,
 }
 
 fn yes() -> bool {
@@ -537,7 +540,13 @@ fn start(app: AppHandle, state: State<'_, Runner>, jobs: Vec<JobRequest>, settin
                     last = Instant::now() - std::time::Duration::from_secs(1);
                 }
             };
-            let conv = bluecompress::Convert { to_r3d: job.r3d, to_nev: job.to_nev, rewrap: job.rewrap, rmd: job.rmd };
+            let conv = bluecompress::Convert {
+                to_r3d: job.r3d,
+                to_nev: job.to_nev,
+                rewrap: job.rewrap,
+                rmd: job.rmd,
+                exposure_ev: job.rmd_ev,
+            };
             if job.rewrap {
                 // Rewrap only: the conversion is the job's output.
                 let r = engine::r3d_job(&options, &conv, &cancel, &mut |fraction, _| {

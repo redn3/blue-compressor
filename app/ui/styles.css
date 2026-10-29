@@ -1265,3 +1265,4 @@ body.web #updates-section { display: none; }
 
 .badge-exp { display: inline-block; padding: 0 6px; border-radius: 4px; font-size: 0.85em; background: rgba(255, 170, 0, 0.18); color: #c77d00; }
 .switch-row.dim { opacity: 0.5; }
+.select-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 0 8px; }

@@ -80,7 +80,7 @@ const resizes = (j, r) => r !== "original" && !(r === "6k" && j.width <= 6060) &
 const settingLabel = (c, r) => `${compText(c)}${r !== "original" ? " · " + RES_LABEL[r] : ""}`;
 
 const settings = Object.assign(
-  { resolution: "original", compression: "light", backend: "gpu", outputFolder: null, dest: "next", sameForAll: true, squeeze: 1, autoUpdate: true, skipVersion: null, proxies: false, r3d: false, cbr: false, toNev: false, rewrap: false, rmd: true },
+  { resolution: "original", compression: "light", backend: "gpu", outputFolder: null, dest: "next", sameForAll: true, squeeze: 1, autoUpdate: true, skipVersion: null, proxies: false, r3d: false, cbr: false, toNev: false, rewrap: false, rmd: true, rmdEv: null },
   migrateSettings(readSettings()),
 );
 let jobs = [];
@@ -146,7 +146,7 @@ function resolvedSpan(list, c = settings.compression) {
   return v.length ? [Math.min(...v), Math.max(...v)] : null;
 }
 const spanText = (sp) => (!sp ? "" : sp[0] === sp[1] ? `${bppText(sp[0])} bpp` : `${bppText(sp[0])} to ${bppText(sp[1])} bpp`);
-const settingOf = (j) => ({ compression: compOf(j), resolution: resolutionOf(j), proxy: !!settings.proxies, r3d: !!settings.r3d && isNev(j), cbr: !!settings.cbr, toNev: !!settings.toNev && isR3d(j), rewrap: !!settings.rewrap, rmd: settings.rmd !== false });
+const settingOf = (j) => ({ compression: compOf(j), resolution: resolutionOf(j), proxy: !!settings.proxies, r3d: !!settings.r3d && isNev(j), cbr: !!settings.cbr, toNev: !!settings.toNev && isR3d(j), rewrap: !!settings.rewrap, rmd: settings.rmd !== false, rmdEv: settings.rmdEv ?? null });
 // The R3D NE toggle only acts on .nev clips, the N-RAW one on .R3D clips.
 function isR3d(j) { return /\.r3d$/i.test((j && j.path) || ""); }
 function isNev(j) { return /\.nev$/i.test((j && j.path) || ""); }
@@ -1002,6 +1002,7 @@ const jobRequest = (j) => ({
   to_nev: !!(j.ran && j.ran.toNev),
   rewrap: !!(j.ran && j.ran.rewrap),
   rmd: !(j.ran && j.ran.rmd === false),
+  rmd_ev: (j.ran && j.ran.rmdEv) ?? null,
   clip: { name: j.name, codec: j.codec, width: j.width, height: j.height, frames: j.frames, fps: j.fps, bytes: j.bytes, bpp: j.bpp },
   existing: j.alreadyRef || null,
 });
@@ -1087,7 +1088,7 @@ function fromServer(s) {
     path: s.path, name: c.name || s.name, ok: true, codec: c.codec || "", width: c.width || 0, height: c.height || 0,
     frames: c.frames || 0, fps: c.fps || 0, bytes: c.bytes || s.bytes, bpp: c.bpp || 0, error: s.error,
     id: s.id, state: s.state, fraction: s.fraction, rate: s.fps, target: null, force: s.force,
-    resolution: s.resolution, compression: comp, ran: { compression: comp, resolution: s.resolution, proxy: !!s.proxy, r3d: !!s.r3d, cbr: !!s.cbr, toNev: !!s.toNev, rewrap: !!s.rewrap, rmd: s.rmd !== false },
+    resolution: s.resolution, compression: comp, ran: { compression: comp, resolution: s.resolution, proxy: !!s.proxy, r3d: !!s.r3d, cbr: !!s.cbr, toNev: !!s.toNev, rewrap: !!s.rewrap, rmd: s.rmd !== false, rmdEv: s.rmdEv ?? null },
     output: s.output, result: s.result, onServer: true,
   };
 }
@@ -2171,7 +2172,17 @@ function initR3d() {
     // Rewrap only needs a conversion to run; the sidecar only applies to R3D NE.
     const rmd = $("rmd-row");
     if (rmd) rmd.classList.toggle("dim", !settings.r3d);
+    const ev = $("rmd-ev-row");
+    if (ev) ev.hidden = !settings.r3d || settings.rmd === false;
   };
+  const ev = $("rmd-ev");
+  if (ev) {
+    ev.value = settings.rmdEv == null ? "" : String(settings.rmdEv);
+    ev.addEventListener("change", () => {
+      settings.rmdEv = ev.value === "" ? null : Number(ev.value);
+      saveSettings();
+    });
+  }
   for (const [id, key, dflt] of toggles) {
     const box = $(id);
     if (!box) continue;

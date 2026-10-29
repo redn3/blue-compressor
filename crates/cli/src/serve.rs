@@ -169,6 +169,9 @@ struct JobRequest {
     /// Write the exposure .RMD next to an R3D NE output (on unless turned off).
     #[serde(default = "yes")]
     rmd: bool,
+    /// Exposure in the .RMD in stops (None: +1 for the ZR, +0.5 for other cameras).
+    #[serde(default)]
+    rmd_ev: Option<f64>,
     /// Clip details the UI shows on the card (name, codec, size, frames, fps), kept as is so
     /// a reloaded page can rebuild its queue.
     #[serde(default)]
@@ -209,6 +212,7 @@ struct QueueJob {
     to_nev: bool,
     rewrap: bool,
     rmd: bool,
+    rmd_ev: Option<f64>,
     clip: Option<serde_json::Value>,
     /// waiting, running, done, failed or cancelled.
     state: String,
@@ -797,6 +801,7 @@ fn start_queue(state: &Arc<ServerState>, args: StartArgs) -> Result<(), String> 
                 to_nev: job.to_nev,
                 rewrap: job.rewrap,
                 rmd: job.rmd,
+                rmd_ev: job.rmd_ev,
                 clip: job.clip,
                 state: state_name.into(),
                 fraction,
@@ -963,7 +968,13 @@ fn run_job(st: &Arc<ServerState>, job: &QueueJob, settings: &Settings) {
             last = Instant::now() - Duration::from_secs(1);
         }
     };
-    let conv = bluecompress::Convert { to_r3d: job.r3d, to_nev: job.to_nev, rewrap: job.rewrap, rmd: job.rmd };
+    let conv = bluecompress::Convert {
+        to_r3d: job.r3d,
+        to_nev: job.to_nev,
+        rewrap: job.rewrap,
+        rmd: job.rmd,
+        exposure_ev: job.rmd_ev,
+    };
     if job.rewrap {
         // Rewrap only: the conversion is the job's output, with its progress as the job's.
         let mut last = Instant::now() - Duration::from_secs(1);

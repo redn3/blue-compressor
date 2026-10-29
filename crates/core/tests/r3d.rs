@@ -327,11 +327,18 @@ fn compress_path_writes_constant_r3d_ne() {
         threads: 2,
         cbr: false,
     };
-    let r =
-        r3d::convert_compressed(&job, &R3dOptions::new(&src, &out), &AtomicBool::new(false), &mut |_, _| {}).unwrap();
+    let r = r3d::convert_compressed(
+        &job,
+        &R3dOptions { exposure_ev: Some(1.5), ..R3dOptions::new(&src, &out) },
+        &AtomicBool::new(false),
+        &mut |_, _| {},
+    )
+    .unwrap();
     assert!(r.frame_bytes > 0, "R3D NE frames always the same size");
     assert_r3d_tags(&out, "A001_C004_0101AB");
     assert_eq!(codestreams(&out), cs);
+    let rmd = std::fs::read_to_string(r.rmd.expect("sidecar")).unwrap();
+    assert!(rmd.contains("<exposure_adjust>1.500</exposure_adjust>"), "adjustable exposure");
     let _ = std::fs::remove_dir_all(d);
 }
 

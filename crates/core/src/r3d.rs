@@ -807,6 +807,8 @@ pub struct Convert {
     /// Rewrap only: no compressed copy; the conversion is the job's only output and copies
     /// the image data as it is.
     pub rewrap: bool,
+    /// Exposure in the .RMD, in stops; None for the camera default (+1 ZR, +0.5 others).
+    pub exposure_ev: Option<f64>,
     /// Write the exposure .RMD next to R3D NE outputs.
     pub rmd: bool,
 }
@@ -843,7 +845,7 @@ pub fn convert_job(
     if let Err(e) = check(src) {
         return Ok(R3dJob::Skipped(e.0));
     }
-    let o = R3dOptions { rmd: c.rmd, ..R3dOptions::new(src, &out) };
+    let o = R3dOptions { rmd: c.rmd, exposure_ev: c.exposure_ev, ..R3dOptions::new(src, &out) };
     let plain = c.rewrap
         || is_r3d(src)
         || (job.quality <= 1 && job.bpp.is_none() && job.resolution == crate::Resolution::Original);

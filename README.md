@@ -215,7 +215,8 @@ metadata, the camera matrix and a few constants. The image data is copied as it 
 - **Exposure sidecar** (on by default; `--no-rmd`, `RMD=false`): R3D NE records about one
   stop brighter than N-RAW at the same ISO. The ISO tag is left as it is; instead an `.RMD`
   sidecar next to the `.R3D` asks RED decoders for +1 stop of exposure on ZR clips (+0.5
-  for other cameras, a first guess). The sidecar layout follows the public outline of
+  for other cameras, a first guess). Choose another value in the app, or with `--rmd-ev`
+  or `RMD_EV`. The sidecar layout follows the public outline of
   the format (an XML `REDXIF` document); its element names are not verified against
   real RED software yet, so check that your decoder picks it up.
 
@@ -420,6 +421,7 @@ services:
 | `NEV` / `WATCH_NEV` | `false` | Set to `true` to turn on **R3D NE to N-RAW** for Web UI jobs / the watch folder (see R3D NE and N-RAW above). |
 | `REWRAP` | `false` | Set to `true` to turn on **Rewrap only** for new Web UI jobs. |
 | `RMD` / `WATCH_RMD` | `true` | Set to `false` for no exposure `.RMD` sidecar next to R3D NE outputs. |
+| `RMD_EV` / `WATCH_RMD_EV` | | Exposure in the `.RMD` in stops (-4 to 4) instead of +1 (ZR) or +0.5 (other cameras). |
 | `UPDATE_CHECK` | `true` | Set to `false` to stop the update check (an anonymous request to the GitHub releases API at start and every 12 hours; the Web UI then shows no update banner). |
 
 ### Updating the container

@@ -194,6 +194,8 @@ struct Cli {
     to_nev: Option<bool>,
     rewrap: Option<bool>,
     rmd: Option<bool>,
+    /// --rmd-ev; None reads RMD_EV (watch: WATCH_RMD_EV first).
+    rmd_ev: Option<f64>,
 }
 
 fn usage() -> String {
@@ -691,7 +693,17 @@ pub(crate) fn env_convert(o: &Cli, watch: bool) -> bluecompress::Convert {
         to_nev: env_flag(o.to_nev, watch, "WATCH_NEV", "NEV", false),
         rewrap: env_flag(o.rewrap, watch, "WATCH_REWRAP", "REWRAP", false),
         rmd: env_flag(o.rmd, watch, "WATCH_RMD", "RMD", true),
+        exposure_ev: o.rmd_ev.or_else(|| {
+            (if watch { env_nonempty("WATCH_RMD_EV") } else { None })
+                .or_else(|| env_nonempty("RMD_EV"))
+                .and_then(|v| parse_ev(&v))
+        }),
     }
+}
+
+/// Stops of exposure for the .RMD, from -4 to 4.
+fn parse_ev(v: &str) -> Option<f64> {
+    v.trim().trim_start_matches('+').parse::<f64>().ok().filter(|x| x.is_finite() && (-4.0..=4.0).contains(x))
 }
 
 /// Runs the conversion step of the job `job` (see [`bluecompress::r3d::convert_job`]).
@@ -717,7 +729,8 @@ pub(crate) fn write_r3d(job: &Options, conv: &bluecompress::Convert, json: bool,
             println!("{{\"event\":\"r3d_progress\",\"input\":{},\"fraction\":{fraction:.3}}}", q(&ins));
             let _ = std::io::stdout().flush();
         } else if !quiet {
-            eprint!("\r  R3D NE {:5.1}%  {mbs:6.0} MB/s", fraction * 100.0);
+            let kind = if bluecompress::r3d::is_nev(source) { "R3D NE" } else { "N-RAW" };
+            eprint!("\r  {kind} {:5.1}%  {mbs:6.0} MB/s", fraction * 100.0);
         }
     });
     match r {
@@ -902,6 +915,7 @@ fn watch_cmd(o: &Cli) -> u8 {
         cbr: env_cbr(o.cbr, true),
         to_nev: env_convert(o, true).to_nev,
         rmd: env_convert(o, true).rmd,
+        rmd_ev: env_convert(o, true).exposure_ev,
         json: o.json,
         quiet: o.quiet,
         once: o.once,
@@ -970,6 +984,7 @@ fn serve_cmd(o: &Cli) -> u8 {
             cbr: env_cbr(o.cbr, true),
             to_nev: env_convert(o, true).to_nev,
             rmd: env_convert(o, true).rmd,
+            rmd_ev: env_convert(o, true).exposure_ev,
             json: o.json,
             quiet: o.quiet,
             once: false,
@@ -990,6 +1005,7 @@ fn serve_cmd(o: &Cli) -> u8 {
             cbr: env_cbr(o.cbr, true),
             to_nev: env_convert(o, true).to_nev,
             rmd: env_convert(o, true).rmd,
+            rmd_ev: env_convert(o, true).exposure_ev,
             json: o.json,
             quiet: o.quiet,
             once: false,
@@ -1202,6 +1218,7 @@ fn main() -> ExitCode {
         to_nev: None,
         rewrap: None,
         rmd: None,
+        rmd_ev: None,
     };
     let args: Vec<String> = std::env::args_os().skip(1).map(|a| a.to_string_lossy().into_owned()).collect();
     if args.first().map(String::as_str) == Some("calibrate") {
@@ -1310,6 +1327,10 @@ fn main() -> ExitCode {
             "--no-rewrap" => o.rewrap = Some(false),
             "--rmd" => o.rmd = Some(true),
             "--no-rmd" => o.rmd = Some(false),
+            "--rmd-ev" => match it.next().and_then(|v| parse_ev(&v)) {
+                Some(v) => o.rmd_ev = Some(v),
+                None => return bad("rmd-ev must be a number of stops from -4 to 4"),
+            },
             "--cbr" => o.cbr = Some(true),
             "--no-cbr" | "--vbr" => o.cbr = Some(false),
             "--suffix" => match it.next() {
@@ -1611,6 +1632,7 @@ mod tests {
                 to_nev: None,
                 rewrap: None,
                 rmd: None,
+                rmd_ev: None,
             };
             assert_eq!(compress_cmd(&o), 0);
             let f = bluecompress::bmff::InputFile::open(&out.join("A001_C001.NEV")).unwrap();
@@ -1670,6 +1692,7 @@ mod tests {
             to_nev: None,
             rewrap: None,
             rmd: None,
+            rmd_ev: None,
         };
         assert_eq!(compress_cmd(&o), 0);
         assert!(out_dir.join("A001_C001.NEV").is_file());
@@ -1718,6 +1741,7 @@ mod tests {
             to_nev: None,
             rewrap: None,
             rmd: None,
+            rmd_ev: None,
         };
         assert_eq!(compress_cmd(&o), 0);
         let proxy = out_dir.join("Proxies").join("A001_C001.mov");
@@ -1775,6 +1799,7 @@ mod tests {
                 cbr: false,
                 to_nev: false,
                 rmd: true,
+                rmd_ev: None,
                 json: false,
                 quiet: true,
                 once: true,
@@ -1846,6 +1871,7 @@ mod tests {
                 cbr: false,
                 to_nev: false,
                 rmd: true,
+                rmd_ev: None,
                 json: false,
                 quiet: true,
                 once: false,
