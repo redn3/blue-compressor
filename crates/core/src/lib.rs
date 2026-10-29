@@ -15,6 +15,7 @@ mod bitio;
 pub mod bmff;
 #[doc(hidden)]
 pub mod calibrate;
+pub mod develop;
 pub mod ffi;
 pub mod frame;
 mod gpu;

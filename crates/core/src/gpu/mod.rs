@@ -7,6 +7,26 @@ use crate::Backend;
 #[cfg(all(target_os = "macos", feature = "metal"))]
 pub mod metal;
 
+#[cfg(all(target_os = "macos", feature = "metal"))]
+mod develop_metal;
+
+/// The Develop pass on Metal (None when there is no Metal device).
+#[cfg(all(target_os = "macos", feature = "metal"))]
+pub fn develop_metal(
+    pl: &crate::develop::RawPlanes,
+    s: &crate::develop::Shade,
+    crop: [f32; 4],
+    ow: usize,
+    oh: usize,
+) -> Option<Vec<u16>> {
+    develop_metal::render(pl, s, crop, ow, oh)
+}
+
+#[cfg(all(target_os = "macos", feature = "metal"))]
+pub fn develop_metal_name() -> Option<String> {
+    develop_metal::name()
+}
+
 #[cfg(feature = "cuda")]
 pub mod cuda;
 

@@ -6,7 +6,7 @@ name: Test build
 # signed .app.tar.gz the updater installs.
 on:
   push:
-    branches: ["feature/advanced-bpp", "feature/updater", "feature/proxies", "feature/r3d"]
+    branches: ["feature/advanced-bpp", "feature/updater", "feature/proxies", "feature/r3d", "feature/develop"]
   workflow_dispatch:
 
 permissions:

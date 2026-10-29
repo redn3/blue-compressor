@@ -1304,3 +1304,51 @@ html:lang(zh-Hant) body { font-family: -apple-system, "PingFang TC", "Microsoft 
   .v-est-main, .v-est-sub { white-space: normal; }
   .v-apply-wrap, #v-apply { grid-row: 1; grid-column: 2; }
 }
+
+/* Develop ------------------------------------------------------------------ */
+
+.tabs { width: 220px; flex: none; }
+.tabs button { height: 26px; }
+.develop {
+  position: absolute;
+  top: var(--titlebar-h);
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg);
+}
+.develop[hidden] { display: none; }
+.dev-intro { margin: 0; padding: 10px 18px; color: var(--text-2); font-size: 12.5px; border-bottom: 1px solid var(--border); }
+.dev-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: var(--text-2); }
+.dev-empty[hidden], .dev-work[hidden] { display: none; }
+.dev-work { flex: 1; min-height: 0; display: grid; grid-template-columns: 210px minmax(0, 1fr) 320px; }
+.dev-list { overflow: auto; border-right: 1px solid var(--border); padding: 8px; display: flex; flex-direction: column; gap: 4px; }
+.dev-clip { text-align: left; border: 1px solid transparent; background: transparent; color: var(--text); border-radius: 8px; padding: 7px 9px; display: flex; flex-direction: column; gap: 2px; }
+.dev-clip:hover { background: var(--surface-hover); }
+.dev-clip.on { background: var(--accent-soft); border-color: var(--accent-ring); }
+.dev-clip-name { font-size: 12.5px; font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dev-clip-sub { font-size: 11px; color: var(--text-3); }
+.dev-center { min-width: 0; min-height: 0; display: flex; flex-direction: column; padding: 10px 14px; gap: 8px; }
+.dev-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.dev-top .v-title { min-width: 0; }
+.dev-top .v-name, .dev-top .v-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dev-stage { position: relative; flex: 1; min-height: 120px; display: flex; align-items: center; justify-content: center; overflow: hidden; background: rgba(127, 127, 127, 0.14); border-radius: 8px; }
+.dev-stage canvas { display: block; max-width: 100%; max-height: 100%; }
+.dev-stage .v-loading[hidden], .dev-stage .v-error[hidden] { display: none; }
+.dev-panel { overflow: auto; border-left: 1px solid var(--border); padding: 12px 14px 18px; display: flex; flex-direction: column; gap: 6px; }
+.dev-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.dev-actions .btn { flex: 1; }
+.dev-sec { margin-top: 10px; font-size: 11px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); }
+.dev-row { display: flex; flex-direction: column; gap: 3px; }
+.dev-row.off { opacity: 0.45; }
+.dev-row-head { display: flex; align-items: center; gap: 6px; }
+.dev-label { flex: 1; font-size: 12.5px; color: var(--text-2); }
+.dev-num { width: 72px; text-align: right; }
+.dev-unit { width: 30px; font-size: 11px; color: var(--text-3); }
+.dev-select { width: 100%; }
+.dev-check { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-2); }
+body.tab-develop .viewer { display: none; }

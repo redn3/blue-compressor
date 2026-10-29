@@ -206,6 +206,18 @@ the ZR camera matrix. The Z6III shares the ZR's sensor, so its matrix should be 
 the Z8 and Z9 it is an approximation and colours may be off. This has only been tested on
 synthetic clips so far and needs checking with real ones. The app marks it Experimental.
 
+## Develop
+
+The Develop tab is a quick turnaround with basic tools for developing your digital negatives (the RAW files). It is not for full grading.
+
+- Every clip starts from what it recorded (white balance, ISO) and keeps its own settings; **Reset to as shot** goes back.
+- R3D NE: ISO, Exposure Adjust, Color Temp, Tint, Contrast, Highlight Roll Off and Output Tone Map.
+- N-RAW: White Balance presets (Temperature and Tint unlock on Custom), Exposure, Highlights, Shadows, Saturation, Color Boost and Sharpness (20 leaves the image as it is).
+- **Auto exposure** sets exposure so the frame averages middle gray.
+- Output: the clip's own log (Log3G10 / REDWideGamutRGB or N-Log / Rec.2020) or Rec.709. The preview can show log through a Rec.709 view.
+- Export: 10-bit HEVC MOV (VideoToolbox on a Mac, else the first ffmpeg HEVC encoder that works, libx265 last), 100 Mb/s at UHD by default, optional constant bitrate, audio as 32-bit float PCM. Files go to a `Developed` folder next to each clip.
+- Command line: `bluecompress develop <clip> [--rec709] [--exposure EV] [--kelvin K] [--tint T] [--iso N] [--auto] [--width 3840|1920] [--kbps N] [--cbr] [-o file.mov]`.
+
 ## Languages
 
 The app and the Web UI are in English, Svenska, Deutsch, Français, Español, Português

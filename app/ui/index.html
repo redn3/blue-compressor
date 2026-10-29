@@ -17,6 +17,9 @@
           <span class="brand-sub" data-i18n="Raw video recompression for Nikon N-RAW and R3D NE">Raw video recompression for Nikon N-RAW and R3D NE</span>
         </div>
       </div>
+      <div class="seg tabs" id="tabs" role="radiogroup" aria-label="View" data-i18n-aria-label="View">
+        <button data-value="compress" role="radio" aria-checked="true" class="active" data-i18n="Compress">Compress</button><button data-value="develop" role="radio" aria-checked="false" data-i18n="Develop">Develop</button>
+      </div>
       <div class="titlebar-right" data-tauri-drag-region>
         <label class="lang-pick">
           <svg viewBox="0 0 16 16" class="ico-sm" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M2 8h12M8 2c1.8 1.7 2.6 3.7 2.6 6S9.8 12.3 8 14M8 2C6.2 3.7 5.4 5.7 5.4 8S6.2 12.3 8 14"/></svg>
@@ -231,6 +234,44 @@
         </div>
       </main>
     </div>
+
+    <section class="develop" id="develop" aria-label="Develop" data-i18n-aria-label="Develop" hidden>
+      <p class="dev-intro" data-i18n="Quick turnaround with basic tools for developing your digital negatives (the RAW files). Not for full grading.">Quick turnaround with basic tools for developing your digital negatives (the RAW files). Not for full grading.</p>
+      <div class="dev-empty" id="dev-empty">
+        <p data-i18n="Add N-RAW or R3D NE clips to the queue to develop them.">Add N-RAW or R3D NE clips to the queue to develop them.</p>
+        <button class="btn primary-soft" id="dev-add" data-i18n="Choose Clips">Choose Clips</button>
+      </div>
+      <div class="dev-work" id="dev-work" hidden>
+        <nav class="dev-list" id="dev-list" aria-label="Clips" data-i18n-aria-label="Clips"></nav>
+        <div class="dev-center">
+          <div class="dev-top">
+            <div class="v-title"><div class="v-name" id="dev-name"></div><div class="v-meta" id="dev-meta"></div></div>
+            <label class="dev-check" title="Shows log output as Rec.709 on screen. The export stays log." data-i18n-title="Shows log output as Rec.709 on screen. The export stays log."><input type="checkbox" id="dev-view" class="switch"><span data-i18n="Rec.709 view">Rec.709 view</span></label>
+          </div>
+          <div class="dev-stage" id="dev-stage">
+            <canvas id="dev-canvas"></canvas>
+            <div class="v-loading" id="dev-loading" hidden><span class="spinner"></span></div>
+            <div class="v-error" id="dev-error" hidden></div>
+          </div>
+          <div class="scrub"><input type="range" id="dev-frame" min="0" max="0" value="0" class="range" aria-label="Frame" data-i18n-aria-label="Frame"></div>
+        </div>
+        <aside class="dev-panel">
+          <div class="dev-actions">
+            <button class="btn ghost" id="dev-reset" data-i18n="Reset to as shot">Reset to as shot</button>
+            <button class="btn ghost" id="dev-auto" title="Sets exposure so the frame averages middle gray" data-i18n-title="Sets exposure so the frame averages middle gray" data-i18n="Auto exposure">Auto exposure</button>
+          </div>
+          <div id="dev-controls"></div>
+          <div class="dev-sec" data-i18n="Export">Export</div>
+          <div id="dev-export"></div>
+          <div class="dev-actions">
+            <button class="btn primary" id="dev-export-one" data-i18n="Export Clip">Export Clip</button>
+            <button class="btn ghost" id="dev-export-all" data-i18n="Export All">Export All</button>
+            <button class="btn ghost" id="dev-cancel" data-i18n="Stop" hidden>Stop</button>
+          </div>
+          <p class="hint" id="dev-status" role="status"></p>
+        </aside>
+      </div>
+    </section>
 
     <section class="viewer" id="viewer" aria-label="Quality preview" data-i18n-aria-label="Quality preview">
       <div class="viewer-top">
@@ -468,5 +509,6 @@
   <script src="locales.js"></script>
   <script src="i18n.js"></script>
   <script src="app.js"></script>
+  <script src="develop.js"></script>
 </body>
 </html>

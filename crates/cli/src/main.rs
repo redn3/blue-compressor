@@ -961,6 +961,156 @@ fn bad(what: &str) -> ExitCode {
 /// quality ranks (Q2 135, Q3 140, Q4 160) and with the Light, Medium and Strong picks and
 /// prints the sizes, to match the picks to the old steps on real footage. Reads only the
 /// container index, a few frame headers and the sampled frames.
+/// `bluecompress develop <clip> [--rec709] [--exposure EV] [--kelvin K] [--tint T] [--iso N]
+/// [--width W] [--kbps N] [--cbr] [--auto] [--stats] [-o FILE]`: develops a clip to 10-bit
+/// HEVC. `--stats` renders one frame on the CPU and the GPU and prints only numbers.
+fn develop_cmd(args: Vec<String>) -> ExitCode {
+    use bluecompress::develop::{self, Export, Output, Params};
+    use std::time::Instant;
+    let mut input = None;
+    let (mut rec709, mut auto, mut stats, mut cbr) = (false, false, false, false);
+    let (mut exposure, mut kelvin, mut tint, mut iso) = (None, None, None, None);
+    let (mut width, mut kbps, mut out, mut frame) = (3840u32, None, None, 0usize);
+    let mut it = args.into_iter();
+    while let Some(a) = it.next() {
+        let num = |v: Option<String>| v.and_then(|v| v.parse::<f32>().ok());
+        match a.as_str() {
+            "--rec709" => rec709 = true,
+            "--auto" => auto = true,
+            "--stats" => stats = true,
+            "--cbr" => cbr = true,
+            "--exposure" => exposure = num(it.next()),
+            "--kelvin" => kelvin = num(it.next()),
+            "--tint" => tint = num(it.next()),
+            "--iso" => iso = num(it.next()),
+            "--frame" => frame = num(it.next()).unwrap_or(0.0) as usize,
+            "--width" => width = num(it.next()).unwrap_or(3840.0) as u32,
+            "--kbps" => kbps = num(it.next()).map(|v| v as u32),
+            "-o" | "--output" => out = it.next().map(PathBuf::from),
+            _ if !a.starts_with('-') && input.is_none() => input = Some(PathBuf::from(a)),
+            _ => return bad(&format!("unknown develop option {a}")),
+        }
+    }
+    let Some(input) = input else { return bad("develop needs a clip") };
+    let info = match develop::clip_info(&input) {
+        Ok(i) => i,
+        Err(e) => return bad(&e.to_string()),
+    };
+    let mut p = Params::as_shot(&info);
+    if rec709 {
+        p.output = Output::Rec709;
+    }
+    if let Some(v) = kelvin {
+        p.kelvin = v;
+    }
+    if let Some(v) = tint {
+        p.tint = v;
+    }
+    if let Some(v) = iso {
+        p.iso = v;
+    }
+    if let Some(v) = exposure {
+        p.exposure = v;
+    }
+    println!(
+        "clip: r3d={} {}x{} frames={} fps={:.3} iso={} kelvin={} wb={:.4},{:.4} audio={}",
+        info.r3d,
+        info.width,
+        info.height,
+        info.frames,
+        info.fps,
+        info.iso,
+        info.kelvin,
+        info.wb[0],
+        info.wb[1],
+        info.has_audio
+    );
+    println!("matrix: {:?}", info.matrix);
+    if auto {
+        match develop::auto_exposure_for(&input, frame, &p) {
+            Ok(ev) => {
+                println!("auto exposure: {ev:+.1}");
+                p.exposure = ev;
+            }
+            Err(e) => return bad(&e.to_string()),
+        }
+    }
+    if stats {
+        let input_file = match bluecompress::bmff::InputFile::open(&input) {
+            Ok(f) => f,
+            Err(e) => return bad(&e.to_string()),
+        };
+        let movie = match bluecompress::bmff::Movie::parse(&input_file) {
+            Ok(m) => m,
+            Err(e) => return bad(&e.to_string()),
+        };
+        let pl = match develop::decode_planes(&input_file, &movie, frame) {
+            Ok(p) => p,
+            Err(e) => return bad(&e.to_string()),
+        };
+        for view in [false, true] {
+            let s = develop::shade(&info, &p, pl.black, pl.white, view);
+            let (ow, oh) = (960, (960 * info.height / info.width) as usize);
+            let t = Instant::now();
+            let cpu = develop::render_cpu(&pl, &s, [0.0, 0.0, 1.0, 1.0], ow, oh);
+            let tc = t.elapsed().as_secs_f64();
+            let t = Instant::now();
+            let gpu = develop::render(&pl, &s, [0.0, 0.0, 1.0, 1.0], ow, oh);
+            let tg = t.elapsed().as_secs_f64();
+            let mut maxd = 0i32;
+            let mut sum = [0f64; 3];
+            let (mut mn, mut mx) = ([u16::MAX; 3], [0u16; 3]);
+            let mut hist = [0u32; 8];
+            for (i, (a, b)) in cpu.iter().zip(&gpu).enumerate() {
+                maxd = maxd.max((*a as i32 - *b as i32).abs());
+                let c = i % 3;
+                sum[c] += *b as f64;
+                mn[c] = mn[c].min(*b);
+                mx[c] = mx[c].max(*b);
+                if c == 1 {
+                    hist[(*b as usize * 8) >> 16] += 1;
+                }
+            }
+            let n = (ow * oh) as f64;
+            println!(
+                "render view709={view} output={:?} {}x{}: cpu {:.3}s, {} {:.3}s, max |cpu-gpu| {} of 65535; mean {:.4} {:.4} {:.4}; min {:?} max {:?}; G histogram (8 bins) {:?}",
+                p.output, ow, oh, tc, develop::renderer_name(), tg, maxd,
+                sum[0] / n / 65535.0, sum[1] / n / 65535.0, sum[2] / n / 65535.0, mn, mx, hist
+            );
+        }
+        return ExitCode::SUCCESS;
+    }
+    let output = out.unwrap_or_else(|| develop::export_path(&input, p.output));
+    let (w, h) = develop::output_size(&info, width);
+    let kbps = kbps.unwrap_or_else(|| develop::default_kbps(w, h, info.fps));
+    let e = Export { input, output, params: p, width, kbps, cbr, encoder: None };
+    let mut last = -1i64;
+    match develop::export(&e, &CANCEL, &mut |f, fps| {
+        let pc = (f * 100.0) as i64;
+        if pc / 10 != last / 10 {
+            last = pc;
+            eprintln!("  {pc}% ({fps:.1} fps)");
+        }
+    }) {
+        Ok(d) => {
+            println!(
+                "developed {} {}x{} frames={} encoder={} renderer={} {:.1}s ({:.1} fps) {} bytes",
+                d.output.display(),
+                d.width,
+                d.height,
+                d.frames,
+                d.encoder,
+                d.renderer,
+                d.seconds,
+                d.frames as f64 / d.seconds.max(1e-6),
+                d.output_bytes
+            );
+            ExitCode::SUCCESS
+        }
+        Err(e) => bad(&e.to_string()),
+    }
+}
+
 fn calibrate_cmd(args: Vec<String>) -> ExitCode {
     let (mut n, mut spread, mut json, mut threads) = (24usize, false, false, 0usize);
     let mut inputs = Vec::new();
@@ -1131,6 +1281,9 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args_os().skip(1).map(|a| a.to_string_lossy().into_owned()).collect();
     if args.first().map(String::as_str) == Some("calibrate") {
         return calibrate_cmd(args[1..].to_vec());
+    }
+    if args.first().map(String::as_str) == Some("develop") {
+        return develop_cmd(args[1..].to_vec());
     }
     let mut it = args.into_iter().peekable();
     let cmd = match it.peek().map(String::as_str) {

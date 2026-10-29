@@ -7,7 +7,7 @@ import vm from "node:vm";
 
 const dir = dirname(fileURLToPath(import.meta.url));
 const read = (f) => readFileSync(join(dir, "ui", f), "utf8");
-const js = read("app.js") + read("i18n.js");
+const js = read("app.js") + read("i18n.js") + read("develop.js");
 const html = read("index.html");
 const ctx = { window: {} };
 vm.runInNewContext(read("locales.js"), ctx);
@@ -17,7 +17,7 @@ const unq = (s) => JSON.parse(`"${s}"`);
 const unesc = (s) => s.replace(/&quot;/g, '"').replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
 const keys = new Set();
 const lit = '"((?:[^"\\\\]|\\\\.)*)"';
-for (const m of js.matchAll(new RegExp(`\\btr\\(\\s*${lit}`, "g"))) keys.add(unq(m[1]));
+for (const m of js.matchAll(new RegExp(`\\b(?:tr|N_)\\(\\s*${lit}`, "g"))) keys.add(unq(m[1]));
 for (const m of js.matchAll(new RegExp(`\\btp\\(\\s*${lit}\\s*,\\s*${lit}`, "g"))) { keys.add(unq(m[1])); keys.add(unq(m[2])); }
 for (const m of html.matchAll(/data-i18n(?:-(?:title|aria-label|placeholder|html))?="([^"]*)"/g)) keys.add(unesc(m[1]));
 

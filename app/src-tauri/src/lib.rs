@@ -10,6 +10,7 @@
 //! queue-paused {paused}, open-paths [paths], quit-requested {}, update-progress
 //! [downloaded, total], update-installing {}.
 
+mod develop_cmd;
 mod engine;
 mod menu;
 mod updater;
@@ -716,6 +717,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(updater::Pending::default())
+        .manage(develop_cmd::Exporting::default())
         .manage(Runner { initial: Mutex::new(args), ..Default::default() })
         .invoke_handler(tauri::generate_handler![
             app_info,
@@ -736,7 +738,13 @@ pub fn run() {
             updater::update_check,
             updater::update_install,
             updater::open_release_page,
-            menu::set_menu_labels
+            menu::set_menu_labels,
+            develop_cmd::develop_info,
+            develop_cmd::develop_preview,
+            develop_cmd::develop_auto_exposure,
+            develop_cmd::develop_default_kbps,
+            develop_cmd::develop_export,
+            develop_cmd::develop_cancel
         ])
         .setup(|app| {
             menu::install(app.handle())?;

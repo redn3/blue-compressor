@@ -15,7 +15,7 @@ const api = T ? {
 } : WEB ? webApi() : browserStandIn();
 
 // Compression is set in bits per pixel (bpp): a frame's coded size times 8 over its width
-// times height, the measure RdWing uses for Nikon's HE (about 3) and HE* (about 5) stills.
+// times height, the measure commonly used for Nikon's HE (about 3) and HE* (about 5) stills.
 // What is stored is a quick pick ("lossless", "light", "medium", "strong") or a bpp value.
 // Light, Medium and Strong go by each clip's own rate (0.75, 0.55 and 0.35 times it), like
 // the watch folder and the legacy -q steps; a bpp value from the slider or the number
@@ -869,6 +869,7 @@ function renderAll() {
   }
   renderFooter();
   renderSettings();
+  if (typeof devQueueChanged === "function") devQueueChanged();
 }
 
 // Expected output/input size ratio of a clip being compressed, before any clip of the

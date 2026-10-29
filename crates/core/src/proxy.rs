@@ -99,7 +99,7 @@ pub fn find_ffmpeg() -> Option<PathBuf> {
     std::env::split_paths(&path).chain(extra).map(|d| d.join(exe_name)).find(|p| p.is_file())
 }
 
-fn quiet(cmd: &mut Command) -> &mut Command {
+pub(crate) fn quiet(cmd: &mut Command) -> &mut Command {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -121,7 +121,7 @@ pub fn cbr_kbps(width: usize, height: usize, fps: f64) -> u32 {
 /// Encoder specific constant bitrate arguments at `kbps`: average, minimum and maximum
 /// rate equal with a one second buffer, plus the encoder's own CBR mode where it has one
 /// (x265 strict CBR adds filler so the rate never dips).
-fn cbr_args(encoder: &str, kbps: u32) -> Vec<String> {
+pub(crate) fn cbr_args(encoder: &str, kbps: u32) -> Vec<String> {
     let r = format!("{kbps}k");
     let mut a: Vec<String> = vec!["-c:v".into(), encoder.into(), "-profile:v".into(), "main10".into()];
     let rate = |a: &mut Vec<String>| {
@@ -366,7 +366,7 @@ fn to_rgb48(rgb: &[[f32; 3]], grade: &Grade, out: &mut Vec<u8>) {
 }
 
 /// Whether ffmpeg can read an audio track from the clip.
-fn has_readable_audio(ffmpeg: &Path, clip: &Path) -> bool {
+pub(crate) fn has_readable_audio(ffmpeg: &Path, clip: &Path) -> bool {
     let mut cmd = Command::new(ffmpeg);
     cmd.args(["-hide_banner", "-v", "error", "-i"])
         .arg(clip)

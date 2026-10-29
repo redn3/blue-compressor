@@ -449,6 +449,20 @@ fn frame_values(dir: Direction, red_len: usize) -> [(u32, Vec<u8>); 3] {
 /// The NRMT boxes of a frame header: (key, value offset, value length) inside `h`, and the
 /// NRFH box (offset, length).
 /// NRMT (tag, value offset, value length) entries, and the NRTI (offset, length).
+/// The NRMT tags of a frame sample header: (tag, value bytes).
+pub fn frame_tags(sample: &[u8]) -> Vec<(u32, &[u8])> {
+    frame_nrmts(sample).0.into_iter().map(|(t, at, len)| (t, &sample[at..at + len])).collect()
+}
+
+/// The N-RAW camera to XYZ matrix, row major (for frames that carry none).
+pub fn default_camera_matrix() -> [f32; 9] {
+    let mut m = [0f32; 9];
+    for (i, c) in NEV_MATRIX[1..].chunks(4).enumerate() {
+        m[i] = f32::from_be_bytes(c.try_into().unwrap());
+    }
+    m
+}
+
 type FrameNrmts = (Vec<(u32, usize, usize)>, Option<(usize, usize)>);
 
 fn frame_nrmts(h: &[u8]) -> FrameNrmts {
