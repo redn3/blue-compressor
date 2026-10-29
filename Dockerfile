@@ -12,7 +12,7 @@ LABEL org.opencontainers.image.description="Blue Compressor: Web UI, watch-folde
 LABEL org.opencontainers.image.licenses="Apache-2.0"
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates ocl-icd-libopencl1 \
+    && apt-get install -y --no-install-recommends ca-certificates ocl-icd-libopencl1 ffmpeg \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /media /watch/in /watch/out
 
@@ -22,6 +22,9 @@ ENV PORT=9847
 ENV BROWSE_ROOT=/
 ENV WATCH_INPUT=/watch/in
 ENV WATCH_OUTPUT=/watch/out
+# 1 = also write a 10-bit H.265 proxy to Proxies/ next to every output (libx265 on the CPU,
+# or NVENC / Quick Sync when a GPU and its driver are passed through).
+ENV PROXIES=0
 
 EXPOSE 9847
 

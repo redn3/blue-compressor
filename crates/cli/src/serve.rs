@@ -35,6 +35,8 @@ pub struct ServeConfig {
     pub default_bpp: Option<f64>,
     pub default_resolution: Resolution,
     pub default_backend: Backend,
+    /// Proxies toggle for new clips (PROXIES or --proxies).
+    pub default_proxies: bool,
     pub threads: usize,
     pub watch: Option<WatchConfig>,
 }
@@ -45,6 +47,7 @@ struct ServerState {
     default_bpp: Option<f64>,
     default_resolution: Resolution,
     default_backend: Backend,
+    default_proxies: bool,
     threads: usize,
     running: Arc<AtomicBool>,
     cancel: Arc<AtomicBool>,
@@ -87,6 +90,9 @@ struct AppInfo {
     default_quality: u8,
     default_bpp: Option<f64>,
     default_resolution: String,
+    default_proxies: bool,
+    /// The encoder proxies use here ("hevc_nvenc (GPU)", "libx265 (CPU)") or why none.
+    proxy_encoder: String,
     watch: WatchSnapshot,
 }
 
@@ -127,6 +133,9 @@ struct JobRequest {
     /// Compress even when a compressed copy already exists ("Compress again").
     #[serde(default)]
     force: bool,
+    /// Also write a 10-bit H.265 proxy to Proxies/ next to the output.
+    #[serde(default)]
+    proxy: bool,
     /// Clip details the UI shows on the card (name, codec, size, frames, fps), kept as is so
     /// a reloaded page can rebuild its queue.
     #[serde(default)]
@@ -157,6 +166,7 @@ struct QueueJob {
     lossless: bool,
     resolution: String,
     force: bool,
+    proxy: bool,
     clip: Option<serde_json::Value>,
     /// waiting, running, done, failed or cancelled.
     state: String,
@@ -311,6 +321,11 @@ struct JobDone {
     seconds: f64,
     fps: f64,
     backend: String,
+    /// The proxy written for this clip, if one was asked for and made.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    proxy: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    proxy_error: Option<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -705,6 +720,8 @@ fn start_queue(state: &Arc<ServerState>, args: StartArgs) -> Result<(), String> 
                         seconds: 0.0,
                         fps: 0.0,
                         backend: String::new(),
+                        proxy: None,
+                        proxy_error: None,
                     }),
                 ),
                 None => ("waiting", 0.0, None, None),
@@ -721,6 +738,7 @@ fn start_queue(state: &Arc<ServerState>, args: StartArgs) -> Result<(), String> 
                 lossless: target.is_lossless(),
                 resolution: job.resolution,
                 force: job.force,
+                proxy: job.proxy,
                 clip: job.clip,
                 state: state_name.into(),
                 fraction,
@@ -804,6 +822,8 @@ fn run_job(st: &Arc<ServerState>, job: &QueueJob, settings: &Settings) {
                 seconds: 0.0,
                 fps: 0.0,
                 backend: String::new(),
+                proxy: None,
+                proxy_error: None,
             };
             update_job(st, job.id, |j| {
                 j.state = "done".into();
@@ -882,10 +902,37 @@ fn run_job(st: &Arc<ServerState>, job: &QueueJob, settings: &Settings) {
         }
     };
     let result = bluecompress::transcode_staged(&options, &st.cancel, &mut on_progress);
+    // The proxy (from the source, next to the output) runs under the same lock.
+    let proxy = match &result {
+        Ok(_) if job.proxy && !st.cancel.load(Ordering::SeqCst) => {
+            let target = bluecompress::proxy_path(&options.output);
+            broadcast_event(&st.sse_clients, "job-proxy", JobProgress { id: job.id, fraction: 0.0, fps: 0.0 });
+            let mut last = Instant::now() - Duration::from_secs(1);
+            let clients = st.sse_clients.clone();
+            let r = bluecompress::make_proxy(
+                &bluecompress::ProxyOptions::new(&options.input, &target),
+                &st.cancel,
+                &mut |fraction, fps| {
+                    if fraction >= 1.0 || last.elapsed().as_millis() >= 100 {
+                        last = Instant::now();
+                        broadcast_event(&clients, "job-proxy", JobProgress { id: job.id, fraction, fps });
+                    }
+                },
+            );
+            match r {
+                Ok(p) => (Some(ps(&p.output)), None),
+                Err(_) if st.cancel.load(Ordering::SeqCst) => (None, None),
+                Err(e) => (None, Some(e.0)),
+            }
+        }
+        _ => (None, None),
+    };
     drop(guard);
     match result {
         Ok(o) => {
             let done = JobDone {
+                proxy: proxy.0,
+                proxy_error: proxy.1,
                 id: job.id,
                 skipped: false,
                 output: out_s,
@@ -929,6 +976,8 @@ fn invoke_command(state: &Arc<ServerState>, cmd: &str, body: &[u8]) -> HttpRespo
                 default_quality: state.default_quality,
                 default_bpp: state.default_bpp,
                 default_resolution: resolution_name(state.default_resolution).into(),
+                default_proxies: state.default_proxies,
+                proxy_encoder: bluecompress::proxy::encoder_description(),
                 watch: state.watch_state.lock().unwrap().clone(),
             };
             HttpResponse::json(200, &info)
@@ -1359,6 +1408,7 @@ pub fn run_serve(cfg: ServeConfig, cancel: &'static AtomicBool) -> u8 {
         default_bpp: cfg.default_bpp,
         default_resolution: cfg.default_resolution,
         default_backend: cfg.default_backend,
+        default_proxies: cfg.default_proxies,
         threads: cfg.threads,
         running: Arc::new(AtomicBool::new(false)),
         cancel: Arc::new(AtomicBool::new(false)),

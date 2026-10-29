@@ -153,6 +153,23 @@ Format analysis and decoding reference* (sections 2.1 and 2.2), copyright (c) 20
 patrol_taking_9j (RdWing), licensed under
 [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
 
+### Proxies
+
+Turn on **Make H.265 proxies** (or pass `--proxies`, or set `PROXIES` / `WATCH_PROXIES`
+in Docker) to also write an editing proxy of each clip to a `Proxies` folder next to its
+output, as `Proxies/<clip name>.mov`, so editors that relink proxies by name find them.
+Each proxy is 10-bit H.265 (HEVC Main10, 4:2:0) in Rec.709, up to 1920 wide (half the
+sensor resolution at most), with the clip's first audio track as AAC. The picture is
+debayered at half resolution (one pixel per 2x2 sensor block) with a simple display
+grade (white balance and exposure measured once per clip), so it is meant for cutting,
+not for judging color.
+
+Encoding runs in a separate `ffmpeg`, on the GPU when one of its encoders works
+(VideoToolbox on a Mac, NVENC, Quick Sync or AMF elsewhere) and with libx265 on the CPU
+otherwise, which is what a NAS without a GPU uses. The Docker image includes ffmpeg; on
+a computer, Blue Compressor uses an `ffmpeg` next to itself, the one in
+`BLUECOMPRESS_FFMPEG`, or one on the PATH (Homebrew's folders included).
+
 ## Repository layout
 
 ```
@@ -339,6 +356,8 @@ services:
 | `WATCH_RESOLUTION` | `original` | Output resolution for watch-folder jobs (`original`, `6k`, `4k`), also adjustable live in the Web UI. |
 | `WATCH_POLL_SECONDS` | `5` | Seconds between watch-folder scans and file-copy stability checks. |
 | `WATCH_CLEAR` | `false` | Set to `true` (or toggle **Clear watch folder after process** in the Web UI) to delete source clips from `WATCH_INPUT` once compression succeeds. |
+| `PROXIES` | `false` | Set to `true` to turn on **Make H.265 proxies** for new Web UI jobs (see Proxies above). |
+| `WATCH_PROXIES` | `false` | Set to `true` to also write a proxy of every watch-folder clip. A proxy that fails keeps the source even with `WATCH_CLEAR`. |
 | `UPDATE_CHECK` | `true` | Set to `false` to stop the update check (an anonymous request to the GitHub releases API at start and every 12 hours; the Web UI then shows no update banner). |
 
 ### Updating the container

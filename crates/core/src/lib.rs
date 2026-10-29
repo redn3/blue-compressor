@@ -20,6 +20,7 @@ pub mod frame;
 mod gpu;
 pub mod nraw;
 mod preview;
+pub mod proxy;
 pub mod quality;
 mod rate;
 pub mod requant;
@@ -30,6 +31,7 @@ mod transcode;
 mod util;
 
 pub use preview::{Preview, Thumbnail};
+pub use proxy::{make_proxy, proxy_path, ProxyOptions, ProxyOutcome};
 pub use quality::{bpp_of, bpp_tag, legacy_bpp, Target, BPP_MAX, BPP_MIN, LEGACY_FRACTIONS};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

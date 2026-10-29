@@ -51,11 +51,14 @@ struct Clip {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct AppInfo {
     version: String,
     gpu: String,
     cpu: String,
     platform: String,
+    /// The encoder proxies use ("hevc_videotoolbox (GPU)", "libx265 (CPU)") or why none.
+    proxy_encoder: String,
 }
 
 /// Queue-wide settings; quality and resolution travel with each job.
@@ -83,6 +86,9 @@ struct JobRequest {
     /// Compress even when a compressed copy already exists ("Compress again").
     #[serde(default)]
     force: bool,
+    /// Also write a 10-bit H.265 proxy to Proxies/ next to the output.
+    #[serde(default)]
+    proxy: bool,
 }
 
 #[derive(Serialize, Clone)]
@@ -116,6 +122,11 @@ struct JobDone {
     seconds: f64,
     fps: f64,
     backend: String,
+    /// The proxy written for this clip, if one was asked for and made.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    proxy: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    proxy_error: Option<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -245,6 +256,7 @@ fn app_info() -> AppInfo {
         gpu: engine::backend_description(Backend::Auto),
         cpu: engine::backend_description(Backend::Cpu),
         platform: std::env::consts::OS.into(),
+        proxy_encoder: engine::proxy_encoder(),
     }
 }
 
@@ -440,6 +452,8 @@ fn start(app: AppHandle, state: State<'_, Runner>, jobs: Vec<JobRequest>, settin
                             seconds: 0.0,
                             fps: 0.0,
                             backend: String::new(),
+                            proxy: None,
+                            proxy_error: None,
                         },
                     );
                     continue;
@@ -485,7 +499,35 @@ fn start(app: AppHandle, state: State<'_, Runner>, jobs: Vec<JobRequest>, settin
                     last = Instant::now() - std::time::Duration::from_secs(1);
                 }
             };
-            match engine::transcode_staged(&options, &cancel, &mut on_progress) {
+            let result = engine::transcode_staged(&options, &cancel, &mut on_progress);
+            // The proxy is made from the source and written to Proxies/ next to the output.
+            let (proxy, proxy_error) = match &result {
+                Ok(_) if job.proxy && !cancel.load(Ordering::SeqCst) => {
+                    let target = bluecompress::proxy_path(&options.output);
+                    let _ = app.emit("job-proxy", JobProgress { id: job.id, fraction: 0.0, fps: 0.0 });
+                    let mut last = Instant::now() - std::time::Duration::from_secs(1);
+                    let r = engine::make_proxy(
+                        &bluecompress::ProxyOptions::new(&options.input, &target),
+                        &cancel,
+                        &mut |fraction, fps| {
+                            if fraction >= 1.0 || last.elapsed().as_millis() >= 100 {
+                                last = Instant::now();
+                                let _ = app.emit("job-proxy", JobProgress { id: job.id, fraction, fps });
+                            }
+                            if paused.load(Ordering::SeqCst) {
+                                wait_while_paused(&paused, &cancel);
+                            }
+                        },
+                    );
+                    match r {
+                        Ok(p) => (Some(p.output.to_string_lossy().into_owned()), None),
+                        Err(_) if cancel.load(Ordering::SeqCst) => (None, None),
+                        Err(e) => (None, Some(e.0)),
+                    }
+                }
+                _ => (None, None),
+            };
+            match result {
                 Ok(o) => {
                     let _ = app.emit(
                         "job-done",
@@ -499,6 +541,8 @@ fn start(app: AppHandle, state: State<'_, Runner>, jobs: Vec<JobRequest>, settin
                             seconds: active_seconds(o.seconds, paused_for),
                             fps: active_fps(o.frames, o.seconds, o.fps, paused_for),
                             backend: o.backend,
+                            proxy,
+                            proxy_error,
                         },
                     );
                 }

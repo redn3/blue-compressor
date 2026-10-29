@@ -184,6 +184,8 @@ struct Cli {
     overwrite: bool,
     skip_existing: bool,
     once: bool,
+    /// --proxies / --no-proxies; None reads PROXIES (watch: WATCH_PROXIES first).
+    proxies: Option<bool>,
 }
 
 fn usage() -> String {
@@ -218,6 +220,11 @@ options:
       --suffix S          append S to output file names (before the extension)
       --overwrite         replace existing outputs (default: fail)
       --skip-existing     skip clips whose output already exists
+      --proxies           also write a 10-bit H.265 (Main10) Rec.709 proxy of each clip to
+                          Proxies/<name>.mov next to its output, up to 1920 wide, encoded on
+                          the GPU when ffmpeg has a working encoder (VideoToolbox, NVENC,
+                          Quick Sync, AMF), else libx265. Needs ffmpeg (next to bluecompress,
+                          on the PATH, or BLUECOMPRESS_FFMPEG). Default: PROXIES, else off
       --json              JSON lines on stdout (start, progress, done, skipped, error, summary)
       --quiet             no progress on stderr
 
@@ -232,7 +239,8 @@ serve and watch options:
       --once              watch: run one scan pass on stable files and exit
                           watch and serve also read WATCH_BPP (or BPP), WATCH_PRESET (or
                           PRESET), or the legacy WATCH_QUALITY (or QUALITY) with the
-                          meaning of -q; the watch folder defaults to light
+                          meaning of -q; the watch folder defaults to light. WATCH_PROXIES
+                          (or PROXIES) = 1 also writes proxies
 
 Folders are searched recursively for .nev and .r3d files. Originals are never modified;
 outputs are written to <name>.partial and renamed when complete.
@@ -576,6 +584,12 @@ fn compress_cmd(o: &Cli) -> u8 {
             );
         }
         let _ = stdout.flush();
+        if env_proxies(o.proxies, false)
+            && !CANCEL.load(Ordering::Relaxed)
+            && !write_proxy(input, &out, o.json, o.quiet)
+        {
+            failed += 1;
+        }
     }
     let cancelled = CANCEL.load(Ordering::Relaxed);
     if o.json {
@@ -598,6 +612,75 @@ fn compress_cmd(o: &Cli) -> u8 {
         1
     } else {
         0
+    }
+}
+
+/// Proxies on: the command line, else WATCH_PROXIES (watch only), else PROXIES, else off.
+pub(crate) fn env_proxies(cli: Option<bool>, watch: bool) -> bool {
+    cli.or_else(|| if watch { env_nonempty("WATCH_PROXIES").and_then(|v| parse_bool(&v)) } else { None })
+        .or_else(|| env_nonempty("PROXIES").and_then(|v| parse_bool(&v)))
+        .unwrap_or(false)
+}
+
+/// Writes the proxy of `source` next to its output `out` (see [`bluecompress::proxy_path`]),
+/// reporting like a compress job. Returns false on failure (cancel is not a failure).
+pub(crate) fn write_proxy(source: &Path, out: &Path, json: bool, quiet: bool) -> bool {
+    let target = bluecompress::proxy_path(out);
+    let (ins, outs) = (ps(source), ps(&target));
+    if json {
+        println!("{{\"event\":\"proxy_start\",\"input\":{},\"output\":{}}}", q(&ins), q(&outs));
+    } else if !quiet {
+        eprintln!("{ins}: proxy -> {outs} [{}]", bluecompress::proxy::encoder_description());
+    }
+    let opts = bluecompress::ProxyOptions::new(source, &target);
+    let mut last = -1i64;
+    let r = bluecompress::make_proxy(&opts, &CANCEL, &mut |fraction, fps| {
+        let pm = (fraction * 100.0) as i64;
+        if pm == last {
+            return;
+        }
+        last = pm;
+        if json {
+            println!(
+                "{{\"event\":\"proxy_progress\",\"input\":{},\"fraction\":{fraction:.3},\"fps\":{fps:.2}}}",
+                q(&ins)
+            );
+            let _ = std::io::stdout().flush();
+        } else if !quiet {
+            eprint!("\r  proxy {:5.1}%  {fps:6.1} fps", fraction * 100.0);
+        }
+    });
+    if !json && !quiet {
+        eprintln!();
+    }
+    match r {
+        Ok(p) => {
+            if json {
+                println!(
+                    "{{\"event\":\"proxy_done\",\"input\":{},\"output\":{},\"width\":{},\"height\":{},\"frames\":{},\"output_bytes\":{},\"seconds\":{:.3},\"encoder\":{}}}",
+                    q(&ins), q(&outs), p.width, p.height, p.frames, p.output_bytes, p.seconds, q(&p.encoder)
+                );
+            } else if !quiet {
+                eprintln!(
+                    "proxy: {}x{}, {:.1} MB in {:.1} s [{}]",
+                    p.width,
+                    p.height,
+                    p.output_bytes as f64 / 1e6,
+                    p.seconds,
+                    p.encoder
+                );
+            }
+            true
+        }
+        Err(_) if CANCEL.load(Ordering::Relaxed) => true,
+        Err(e) => {
+            if json {
+                println!("{{\"event\":\"proxy_error\",\"input\":{},\"error\":{}}}", q(&ins), q(&e.0));
+            } else {
+                eprintln!("{ins}: proxy error: {e}");
+            }
+            false
+        }
     }
 }
 
@@ -681,6 +764,7 @@ fn watch_cmd(o: &Cli) -> u8 {
         threads: o.threads,
         poll_seconds: env_watch_poll(o.poll_seconds),
         clear_after_process: env_watch_clear(o.clear_watch),
+        proxies: env_proxies(o.proxies, true),
         json: o.json,
         quiet: o.quiet,
         once: o.once,
@@ -744,6 +828,7 @@ fn serve_cmd(o: &Cli) -> u8 {
             threads: o.threads,
             poll_seconds: env_watch_poll(o.poll_seconds),
             clear_after_process: env_watch_clear(o.clear_watch),
+            proxies: env_proxies(o.proxies, true),
             json: o.json,
             quiet: o.quiet,
             once: false,
@@ -759,6 +844,7 @@ fn serve_cmd(o: &Cli) -> u8 {
             threads: o.threads,
             poll_seconds: env_watch_poll(o.poll_seconds),
             clear_after_process: env_watch_clear(o.clear_watch),
+            proxies: env_proxies(o.proxies, true),
             json: o.json,
             quiet: o.quiet,
             once: false,
@@ -783,6 +869,7 @@ fn serve_cmd(o: &Cli) -> u8 {
         default_bpp,
         default_resolution,
         default_backend: env_watch_backend(o.backend),
+        default_proxies: env_proxies(o.proxies, false),
         threads: o.threads,
         watch: watch_cfg,
     };
@@ -959,6 +1046,7 @@ fn main() -> ExitCode {
         overwrite: false,
         skip_existing: false,
         once: false,
+        proxies: None,
     };
     let args: Vec<String> = std::env::args_os().skip(1).map(|a| a.to_string_lossy().into_owned()).collect();
     if args.first().map(String::as_str) == Some("calibrate") {
@@ -1057,6 +1145,8 @@ fn main() -> ExitCode {
             "--clear-watch" | "--delete-source" => o.clear_watch = Some(true),
             "--no-clear-watch" | "--keep-source" => o.clear_watch = Some(false),
             "--once" => o.once = true,
+            "--proxies" | "--proxy" => o.proxies = Some(true),
+            "--no-proxies" | "--no-proxy" => o.proxies = Some(false),
             "--suffix" => match it.next() {
                 Some(v) => o.suffix = v,
                 None => return bad("--suffix needs a value"),
@@ -1315,6 +1405,60 @@ mod tests {
     }
 
     #[test]
+    fn compress_with_proxies() {
+        let Ok((ffmpeg, _)) = bluecompress::proxy::default_encoder() else {
+            eprintln!("no ffmpeg, skipped");
+            return;
+        };
+        let base = std::env::temp_dir().join(format!("bluecomp_proxy_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let clip = base.join("A001_C001.NEV");
+        make_synthetic_nev(&clip, 128, 64, 3);
+        let out_dir = base.join("out");
+        let o = Cli {
+            quality: Some(1),
+            bpp: None,
+            legacy_q: false,
+            resolution: None,
+            backend: Some(Backend::Cpu),
+            threads: 2,
+            inputs: vec![clip.to_string_lossy().into_owned()],
+            input_dir: None,
+            output_dir: Some(out_dir.to_string_lossy().into_owned()),
+            output_file: None,
+            watch_input: None,
+            watch_output: None,
+            listen: None,
+            browse_root: None,
+            poll_seconds: None,
+            clear_watch: None,
+            suffix: String::new(),
+            json: false,
+            quiet: true,
+            overwrite: false,
+            skip_existing: false,
+            once: false,
+            proxies: Some(true),
+        };
+        assert_eq!(compress_cmd(&o), 0);
+        let proxy = out_dir.join("Proxies").join("A001_C001.mov");
+        let probe = ffmpeg.with_file_name("ffprobe");
+        let info = std::process::Command::new(probe)
+            .args(["-v", "error", "-select_streams", "v:0", "-show_entries"])
+            .arg("stream=codec_name,profile,pix_fmt,width,height,nb_frames")
+            .args(["-of", "default=nw=1"])
+            .arg(&proxy)
+            .output()
+            .unwrap();
+        let info = String::from_utf8_lossy(&info.stdout);
+        for want in ["codec_name=hevc", "profile=Main 10", "width=64", "height=32", "nb_frames=3"] {
+            assert!(info.contains(want), "{want} missing in:\n{info}");
+        }
+        let _ = std::fs::remove_dir_all(base);
+    }
+
+    #[test]
     fn watch_and_serve_end_to_end() {
         let base = std::env::temp_dir().join(format!("bluecomp_test_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
@@ -1331,6 +1475,9 @@ mod tests {
         let bad_path = watch_in.join("CORRUPT.NEV");
         std::fs::write(&bad_path, b"not a valid nev clip").unwrap();
 
+        // Proxies go along when this machine has ffmpeg (with libx265 at least).
+        let have_ffmpeg = bluecompress::proxy::default_encoder().is_ok();
+
         // 1. Test watch --once (with 1s stability check and clear_after_process = true).
         let state = Arc::new(Mutex::new(watch::WatchSnapshot::default()));
         let cancel = AtomicBool::new(false);
@@ -1345,6 +1492,7 @@ mod tests {
                 threads: 2,
                 poll_seconds: 1,
                 clear_after_process: true,
+                proxies: have_ffmpeg,
                 json: false,
                 quiet: true,
                 once: true,
@@ -1358,6 +1506,13 @@ mod tests {
         assert_eq!(rc, 1);
         let expected_out = watch_out.join("Day1").join("A001").join("CLIP_0001.NEV");
         assert!(expected_out.is_file(), "watch output clip should exist at relative path");
+        if have_ffmpeg {
+            let proxy = watch_out.join("Day1").join("A001").join("Proxies").join("CLIP_0001.mov");
+            assert!(
+                std::fs::metadata(&proxy).map(|m| m.len() > 0).unwrap_or(false),
+                "proxy should exist next to the output"
+            );
+        }
         assert!(!clip_path.exists(), "source clip should be deleted when clear_after_process is true");
         assert!(!sub_in.exists(), "empty parent subfolder should be cleaned up after source deletion");
         assert!(watch_in.is_dir(), "watch_in root folder itself must never be removed");
@@ -1387,6 +1542,7 @@ mod tests {
             default_bpp: None,
             default_resolution: Resolution::Original,
             default_backend: Backend::Cpu,
+            default_proxies: false,
             threads: 2,
             watch: Some(watch::WatchConfig {
                 input_dir: watch_in.clone(),
@@ -1398,6 +1554,7 @@ mod tests {
                 threads: 2,
                 poll_seconds: 60,
                 clear_after_process: false,
+                proxies: false,
                 json: false,
                 quiet: true,
                 once: false,

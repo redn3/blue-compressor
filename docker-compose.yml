@@ -23,6 +23,11 @@ services:
       # Set to true (or toggle "Clear watch folder after process" in the Web UI)
       # to delete source clips from /watch/in once compression succeeds:
       - WATCH_CLEAR=false
+      # true also writes a 10-bit H.265 Rec.709 proxy (up to 1920 wide) of every clip to a
+      # Proxies folder next to its output; on a NAS without a GPU it encodes with libx265
+      # on the CPU. PROXIES sets the Web UI toggle's default, WATCH_PROXIES the watch folder:
+      - PROXIES=false
+      - WATCH_PROXIES=false
       # Checks GitHub for a new version at start and every 12 hours (an anonymous request,
       # nothing else is sent) and shows a banner in the Web UI. The container never updates
       # itself. Set to false to turn the check off:

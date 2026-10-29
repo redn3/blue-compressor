@@ -19,3 +19,6 @@ app/src-tauri/gen/
 .idea/
 .vscode/
 *.swp
+
+# ffmpeg fetched for app bundles by CI
+app/src-tauri/bin/

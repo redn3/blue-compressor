@@ -6,7 +6,7 @@ name: Test build
 # signed .app.tar.gz the updater installs.
 on:
   push:
-    branches: ["feature/advanced-bpp", "feature/updater"]
+    branches: ["feature/advanced-bpp", "feature/updater", "feature/proxies"]
   workflow_dispatch:
 
 permissions:
@@ -20,8 +20,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: macOS Apple silicon, target: aarch64-apple-darwin, arch: arm64 }
-          - { name: macOS Intel, target: x86_64-apple-darwin, arch: x64 }
+          - { name: macOS Apple silicon, target: aarch64-apple-darwin, arch: arm64, ffmpeg: "https://ffmpeg.martin-riedl.de/download/macos/arm64/1789931890_9.0.2/ffmpeg.zip" }
+          - { name: macOS Intel, target: x86_64-apple-darwin, arch: x64, ffmpeg: "https://ffmpeg.martin-riedl.de/download/macos/amd64/1789931006_9.0.2/ffmpeg.zip" }
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -34,13 +34,25 @@ jobs:
         uses: taiki-e/install-action@v2
         with:
           tool: tauri-cli@2
+      # The proxy encoder: a static ffmpeg 9.0.2 (Martin Riedl's build server, GPL, with
+      # VideoToolbox and libx265) bundled in Contents/Resources for test builds.
+      - name: Fetch ffmpeg for proxies
+        run: |
+          set -euo pipefail
+          mkdir -p app/src-tauri/bin
+          curl -fsSL -o /tmp/ffmpeg.zip "${{ matrix.ffmpeg }}"
+          unzip -o -q /tmp/ffmpeg.zip -d /tmp/ffmpeg
+          mv /tmp/ffmpeg/ffmpeg app/src-tauri/bin/ffmpeg
+          chmod +x app/src-tauri/bin/ffmpeg
+          app/src-tauri/bin/ffmpeg -hide_banner -version | head -1
+          app/src-tauri/bin/ffmpeg -hide_banner -encoders | grep -E "hevc_videotoolbox|libx265"
       - name: Build desktop app
         working-directory: app/src-tauri
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           BC_UPDATER_TEST_ENDPOINT: ${{ github.ref_name == 'feature/updater' && 'https://github.com/redn3/blue-compressor/releases/download/updater-test-1/latest.json' || '' }}
-        run: cargo tauri build --target ${{ matrix.target }} --config '{"bundle":{"createUpdaterArtifacts":true}}'
+        run: cargo tauri build --target ${{ matrix.target }} --config '{"bundle":{"createUpdaterArtifacts":true,"resources":{"bin/ffmpeg":"ffmpeg"}}}'
       - name: Collect the dmg
         run: |
           set -euo pipefail
@@ -50,6 +62,7 @@ jobs:
           cp target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz "dist/Blue-Compressor_test-${sha}_macOS_${{ matrix.arch }}.app.tar.gz"
           cp target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz.sig "dist/Blue-Compressor_test-${sha}_macOS_${{ matrix.arch }}.app.tar.gz.sig"
           codesign -dv --verbose=2 target/${{ matrix.target }}/release/bundle/macos/*.app 2>&1 || true
+          ls -l target/${{ matrix.target }}/release/bundle/macos/*.app/Contents/Resources/ffmpeg
           ls -l dist
       - uses: actions/upload-artifact@v4
         with:

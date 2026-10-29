@@ -80,7 +80,7 @@ const resizes = (j, r) => r !== "original" && !(r === "6k" && j.width <= 6060) &
 const settingLabel = (c, r) => `${compText(c)}${r !== "original" ? " · " + RES_LABEL[r] : ""}`;
 
 const settings = Object.assign(
-  { resolution: "original", compression: "light", backend: "gpu", outputFolder: null, dest: "next", sameForAll: true, squeeze: 1, autoUpdate: true, skipVersion: null },
+  { resolution: "original", compression: "light", backend: "gpu", outputFolder: null, dest: "next", sameForAll: true, squeeze: 1, autoUpdate: true, skipVersion: null, proxies: false },
   migrateSettings(readSettings()),
 );
 let jobs = [];
@@ -146,7 +146,7 @@ function resolvedSpan(list, c = settings.compression) {
   return v.length ? [Math.min(...v), Math.max(...v)] : null;
 }
 const spanText = (sp) => (!sp ? "" : sp[0] === sp[1] ? `${bppText(sp[0])} bpp` : `${bppText(sp[0])} to ${bppText(sp[1])} bpp`);
-const settingOf = (j) => ({ compression: compOf(j), resolution: resolutionOf(j) });
+const settingOf = (j) => ({ compression: compOf(j), resolution: resolutionOf(j), proxy: !!settings.proxies });
 const ranComp = (j) => (j.ran ? j.ran.compression : compOf(j));
 // Key of a setting for measured size ratios.
 const measureKey = (path, c, r) => `${path}|${String(c)}|${r}`;
@@ -667,7 +667,7 @@ function updateCard(j) {
   el.title = j.ok ? `${j.path}\nClick to preview the quality` : j.path;
 
   const pill = el.querySelector(".job-pill");
-  const pills = { waiting: "Waiting", running: "Compressing", done: "Done", failed: "Failed", cancelled: "Cancelled" };
+  const pills = { waiting: "Waiting", running: j.proxyPhase ? "Proxy" : "Compressing", done: "Done", failed: "Failed", cancelled: "Cancelled" };
   const skipped = j.state === "done" && j.result && j.result.skipped;
   pill.textContent = j.state === "failed" && !j.ok ? "Unreadable" : isPaused ? "Paused" : skipped || already ? "Already done" : pills[j.state];
   pill.className = `job-pill ${isPaused ? "paused" : already ? "done" : j.state}`;
@@ -703,6 +703,9 @@ function updateCard(j) {
       const folder = j.output ? j.output.split(/[\\/]/).slice(-2, -1)[0] : "";
       info.innerHTML = `${esc(settingLabel(j.ran.compression, j.ran.resolution))}<span class="sep">·</span>` +
         `<span class="job-out" title="${esc(j.output || "")}">${esc(folder)}/</span>`;
+      const r = j.result || {};
+      if (r.proxy) info.innerHTML += `<span class="sep">·</span><span class="job-out" title="${esc(r.proxy)}">Proxy</span>`;
+      else if (r.proxyError) info.innerHTML += `<span class="sep">·</span><span class="job-proxy-error" title="${esc(r.proxyError)}">Proxy failed</span>`;
     } else {
       info.textContent = j.ran ? settingLabel(j.ran.compression, j.ran.resolution) : "";
     }
@@ -987,6 +990,7 @@ function renderFooter() {
 
 const jobRequest = (j) => ({
   id: j.id, path: j.path, ...compFields(j.ran.compression), resolution: j.ran.resolution, force: !!j.force,
+  proxy: !!(j.ran && j.ran.proxy),
   clip: { name: j.name, codec: j.codec, width: j.width, height: j.height, frames: j.frames, fps: j.fps, bytes: j.bytes, bpp: j.bpp },
   existing: j.alreadyRef || null,
 });
@@ -1072,7 +1076,7 @@ function fromServer(s) {
     path: s.path, name: c.name || s.name, ok: true, codec: c.codec || "", width: c.width || 0, height: c.height || 0,
     frames: c.frames || 0, fps: c.fps || 0, bytes: c.bytes || s.bytes, bpp: c.bpp || 0, error: s.error,
     id: s.id, state: s.state, fraction: s.fraction, rate: s.fps, target: null, force: s.force,
-    resolution: s.resolution, compression: comp, ran: { compression: comp, resolution: s.resolution },
+    resolution: s.resolution, compression: comp, ran: { compression: comp, resolution: s.resolution, proxy: !!s.proxy },
     output: s.output, result: s.result, onServer: true,
   };
 }
@@ -1126,7 +1130,12 @@ function onEvents() {
   });
   api.listen("job-progress", (p) => {
     const j = find(p.id); if (!j) return;
-    j.fraction = p.fraction; j.rate = p.fps;
+    j.fraction = p.fraction; j.rate = p.fps; j.proxyPhase = false;
+    updateCard(j); renderFooter();
+  });
+  api.listen("job-proxy", (p) => {
+    const j = find(p.id); if (!j) return;
+    j.fraction = p.fraction; j.rate = p.fps; j.proxyPhase = true;
     updateCard(j); renderFooter();
   });
   api.listen("job-done", (p) => {
@@ -1134,7 +1143,7 @@ function onEvents() {
     if (p.skipped) batch.skipped++;
     else { batch.inputBytes += p.inputBytes; batch.outputBytes += p.outputBytes; }
     const j = find(p.id); if (!j) { renderFooter(); return; }
-    j.state = "done"; j.result = p; j.output = p.output; j.resultTarget = j.target; j.existKey = null;
+    j.state = "done"; j.result = p; j.output = p.output; j.resultTarget = j.target; j.existKey = null; j.proxyPhase = false;
     updateCard(j); renderFooter();
   });
   api.listen("job-error", (p) => {
@@ -1895,6 +1904,7 @@ async function init() {
       if (info.defaultBpp != null && clampBpp(info.defaultBpp) != null) settings.compression = clampBpp(info.defaultBpp);
       else if (LEGACY_PICK[info.defaultQuality]) settings.compression = LEGACY_PICK[info.defaultQuality];
       if (RES_LABEL[info.defaultResolution]) settings.resolution = info.defaultResolution;
+      if (info.defaultProxies) settings.proxies = true;
     }
     if ($("watch-clear")) {
       $("watch-clear").addEventListener("change", (e) => {
@@ -2010,6 +2020,7 @@ async function init() {
   await restoreQueue();
   renderAll();
   addPaths(await api.invoke("initial_paths"));
+  initProxies();
   initUpdates();
 }
 
@@ -2119,6 +2130,20 @@ async function installUpdate() {
     $("update-later").textContent = "Close";
     update.info = { ...u, can_install: false };
   }
+}
+
+function initProxies() {
+  const box = $("proxies"), sub = $("proxies-sub");
+  if (!box) return;
+  box.checked = !!settings.proxies;
+  const enc = (info && info.proxyEncoder) || "";
+  const usable = enc && !/ffmpeg|no working/i.test(enc);
+  sub.textContent = "10-bit Rec.709, up to 1920 wide, in a Proxies folder next to each output." +
+    (enc ? (usable ? ` Encoder: ${enc}.` : ` ${enc}.`) : "");
+  box.addEventListener("change", () => {
+    settings.proxies = box.checked;
+    saveSettings();
+  });
 }
 
 function initUpdates() {
@@ -2256,7 +2281,7 @@ function browserStandIn() {
     onDragDrop: () => {},
     invoke: async (cmd, a) => {
       switch (cmd) {
-        case "app_info": return { version: "0.2.0", gpu: "Metal: Apple GPU", cpu: "CPU (12 threads)", platform: "macos" };
+        case "app_info": return { version: "0.2.0", gpu: "Metal: Apple GPU", cpu: "CPU (12 threads)", platform: "macos", proxyEncoder: "hevc_videotoolbox (GPU)" };
         case "is_running": return false;
         case "initial_paths": return location.hash === "#demo" ? ["demo"] : [];
         case "scan": return sample.map(([path, codec, width, height, frames, bytes], i) => ({
