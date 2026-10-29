@@ -50,6 +50,8 @@ struct Clip {
     bytes: u64,
     /// Average coded bits per Bayer sample of the clip.
     bpp: f64,
+    /// Exposure offset from the clip's `.RMD` sidecar (R3D NE).
+    rmd_ev: Option<f32>,
 }
 
 #[derive(Serialize)]
@@ -211,6 +213,7 @@ fn describe(path: &Path) -> Clip {
         fps: 0.0,
         bytes: std::fs::metadata(path).map(|m| m.len()).unwrap_or(0),
         bpp: 0.0,
+        rmd_ev: None,
     };
     match engine::probe(path) {
         Ok(i) => Clip {
@@ -225,6 +228,11 @@ fn describe(path: &Path) -> Clip {
             fps: i.fps,
             bytes: i.file_bytes,
             bpp: i.bpp,
+            rmd_ev: if i.codec == Codec::R3dNe {
+                bluecompress::develop::read_sidecar(path).and_then(|s| s.exposure)
+            } else {
+                None
+            },
             ..base
         },
         Err(e) => Clip { error: Some(e.to_string()), ..base },

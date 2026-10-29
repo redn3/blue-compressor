@@ -79,8 +79,9 @@ async function devStandIn(cmd, a) {
       return {
         r3d, camera: r3d ? "R3D NE" : "NIKON ZR", width: j.width, height: j.height, frames: j.frames || 300, fps: 25,
         iso: 800, kelvin: k, hasAudio: true, renderer: "Metal (Apple GPU)",
+        sidecar: r3d ? { name: a.path.split("/").pop().replace(/\.[^.]+$/, ".RMD"), exposure: 1, iso: 800, kelvin: null, tint: null } : null,
         outputPath: a.path.replace(/[^/]+$/, "Developed/") + a.path.split("/").pop().replace(/\.[^.]+$/, r3d ? "_Log3G10.mov" : "_NLog.mov"),
-        asShot: { output: r3d ? "log3g10" : "nlog", kelvin: k, tint: 0, exposure: 0, iso: 800, rollOff: "medium", toneMap: "medium", contrast: 0, highlights: 0, shadows: 0, saturation: 0, colorBoost: 0, sharpness: 20 },
+        asShot: { output: r3d ? "log3g10" : "nlog", kelvin: k, tint: 0, exposure: r3d ? 1 : 0, iso: 800, rollOff: "medium", toneMap: "medium", contrast: 0, highlights: 0, shadows: 0, saturation: 0, colorBoost: 0, sharpness: 20 },
       };
     }
     case "develop_preview": {
@@ -202,10 +203,19 @@ const posToSlider = (p, mn, mx, lg, step) => {
   return Math.round(v / step) * step;
 };
 
+// The tooltip of a control, with a note when its as shot value came from the RMD sidecar.
+function devTip(c, key) {
+  const sc = c.info.sidecar;
+  const tip = SLIDER_TIPS[key] ? tr(SLIDER_TIPS[key]) : "";
+  const from = { exposure: "exposure", iso: "iso", kelvin: "kelvin", tint: "tint" }[key];
+  if (!sc || !from || sc[from] == null || !c.info.r3d) return tip;
+  return [tip, tr("Starts at {0} from the sidecar {1}.", num(sc[from], 0, 2), sc.name)].filter(Boolean).join(" ");
+}
+
 function devSlider(c, [key, label, mn, mx, step, lg, unit, dig], disabled = false) {
   const row = document.createElement("div");
   row.className = "dev-row" + (disabled ? " off" : "");
-  row.innerHTML = `<div class="dev-row-head"><span class="dev-label">${esc(tr(label))}</span>${SLIDER_TIPS[key] ? `<span class="info" tabindex="0" role="img" aria-label="${esc(tr(SLIDER_TIPS[key]))}">i</span>` : ""}<input class="mini-input dev-num" type="text" inputmode="decimal" aria-label="${esc(tr(label))}"><span class="dev-unit">${esc(unit)}</span></div><input type="range" class="range dev-range" min="0" max="1000" step="any" aria-label="${esc(tr(label))}">`;
+  row.innerHTML = `<div class="dev-row-head"><span class="dev-label">${esc(tr(label))}</span>${devTip(c, key) ? `<span class="info" tabindex="0" role="img" aria-label="${esc(devTip(c, key))}">i</span>` : ""}<input class="mini-input dev-num" type="text" inputmode="decimal" aria-label="${esc(tr(label))}"><span class="dev-unit">${esc(unit)}</span></div><input type="range" class="range dev-range" min="0" max="1000" step="any" aria-label="${esc(tr(label))}">`;
   const range = row.querySelector(".dev-range"), numEl = row.querySelector(".dev-num");
   const show = () => {
     range.value = sliderToPos(c.s[key], mn, mx, lg);

@@ -61,6 +61,95 @@ pub struct ClipInfo {
     /// Camera to XYZ (D65), row major, for white balanced sensor RGB.
     pub matrix: [f32; 9],
     pub has_audio: bool,
+    /// The `.RMD` sidecar next to the clip, if any (R3D NE only).
+    pub sidecar: Option<Sidecar>,
+}
+
+// Sidecar ----------------------------------------------------------------------
+
+/// Settings from an `.RMD` sidecar (RED's XML metadata file). Our rewrap writes ISO and an
+/// exposure offset; files written by cameras or other software may carry more, and only
+/// the fields we understand are read.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Sidecar {
+    pub path: PathBuf,
+    pub exposure: Option<f32>,
+    pub iso: Option<u32>,
+    pub kelvin: Option<f32>,
+    pub tint: Option<f32>,
+}
+
+/// The sidecar of a clip: same base name, extension `.rmd` in any case, in the same folder.
+pub fn find_rmd(clip: &Path) -> Option<PathBuf> {
+    let stem = clip.file_stem()?.to_string_lossy().to_lowercase();
+    let dir = match clip.parent() {
+        Some(d) if !d.as_os_str().is_empty() => d,
+        _ => Path::new("."),
+    };
+    let exact = clip.with_extension("RMD");
+    if exact.is_file() {
+        return Some(exact);
+    }
+    std::fs::read_dir(dir).ok()?.flatten().map(|e| e.path()).find(|p| {
+        p.is_file()
+            && p.extension().is_some_and(|e| e.eq_ignore_ascii_case("rmd"))
+            && p.file_stem().is_some_and(|s| s.to_string_lossy().to_lowercase() == stem)
+    })
+}
+
+/// The value of the first element named one of `names` (case-insensitive): its text, or
+/// a `value="..."` attribute.
+fn xml_value(text: &str, names: &[&str]) -> Option<f32> {
+    let low = text.to_ascii_lowercase();
+    for name in names {
+        let open = format!("<{name}");
+        let mut from = 0;
+        while let Some(i) = low[from..].find(&open).map(|i| i + from) {
+            from = i + open.len();
+            let rest = &low[from..];
+            if !rest.starts_with(|c: char| c == '>' || c == '/' || c.is_whitespace()) {
+                continue;
+            }
+            let end = rest.find('>')?;
+            let tag = &rest[..end];
+            if let Some(a) = tag.find("value=") {
+                let v = tag[a + 6..].trim_start_matches(['"', '\'']);
+                let v: String = v.chars().take_while(|c| !matches!(c, '"' | '\'' | ' ' | '/')).collect();
+                if let Ok(x) = v.trim().parse() {
+                    return Some(x);
+                }
+            }
+            if !tag.ends_with('/') {
+                let body = &text[from + end + 1..];
+                let v = &body[..body.find('<').unwrap_or(body.len())];
+                if let Ok(x) = v.trim().parse() {
+                    return Some(x);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Reads an RMD's text. Returns None when it carries nothing we use.
+pub fn parse_rmd(text: &str, path: &Path) -> Option<Sidecar> {
+    let s = Sidecar {
+        path: path.to_path_buf(),
+        exposure: xml_value(text, &["exposure_adjust", "exposureadjust", "exposure_compensation", "exposure"])
+            .filter(|v| v.is_finite() && v.abs() <= 7.0),
+        iso: xml_value(text, &["iso"]).filter(|v| (25.0..=102_400.0).contains(v)).map(|v| v.round() as u32),
+        kelvin: xml_value(text, &["kelvin", "color_temp", "colortemp", "color_temperature"])
+            .filter(|v| (1000.0..=50_000.0).contains(v)),
+        tint: xml_value(text, &["tint"]).filter(|v| v.is_finite() && v.abs() <= 150.0),
+    };
+    (s.exposure.is_some() || s.iso.is_some() || s.kelvin.is_some() || s.tint.is_some()).then_some(s)
+}
+
+/// The sidecar next to a clip, read.
+pub fn read_sidecar(clip: &Path) -> Option<Sidecar> {
+    let p = find_rmd(clip)?;
+    let text = std::fs::read(&p).ok()?;
+    parse_rmd(&String::from_utf8_lossy(&text), &p)
 }
 
 fn floats(v: &[u8], n: usize) -> Option<Vec<f32>> {
@@ -118,6 +207,7 @@ pub fn clip_info(path: &Path) -> Result<ClipInfo> {
         wb,
         matrix,
         has_audio: movie.tracks.iter().any(|t| t.handler == fourcc(b"soun")),
+        sidecar: if video.codec == fourcc(b"NR3D") { read_sidecar(path) } else { None },
     })
 }
 
@@ -180,13 +270,16 @@ pub struct Params {
 
 impl Params {
     /// The as shot settings of a clip: its white balance and ISO, native log output.
+    /// An R3D NE's `.RMD` sidecar is part of how it was shot: its exposure, ISO and white
+    /// balance replace the recorded ones.
     pub fn as_shot(c: &ClipInfo) -> Params {
+        let sc = c.sidecar.as_ref();
         Params {
             output: if c.r3d { Output::Log3G10 } else { Output::NLog },
-            kelvin: if c.kelvin > 0 { c.kelvin as f32 } else { 5600.0 },
-            tint: 0.0,
-            exposure: 0.0,
-            iso: if c.iso > 0 { c.iso as f32 } else { 800.0 },
+            kelvin: sc.and_then(|s| s.kelvin).unwrap_or(if c.kelvin > 0 { c.kelvin as f32 } else { 5600.0 }),
+            tint: sc.and_then(|s| s.tint).unwrap_or(0.0),
+            exposure: sc.and_then(|s| s.exposure).unwrap_or(0.0),
+            iso: sc.and_then(|s| s.iso).map(|v| v as f32).unwrap_or(if c.iso > 0 { c.iso as f32 } else { 800.0 }),
             roll_off: RollOff::Medium,
             tone_map: ToneMap::Medium,
             contrast: 0.0,
@@ -196,6 +289,18 @@ impl Params {
             color_boost: 0.0,
             sharpness: 20.0,
         }
+    }
+}
+
+/// Exposure of R3D NE raw values relative to N-RAW. Cameras record R3D NE about one stop
+/// brighter than N-RAW at the same ISO (r3d::zr_exposure_ev), and RED's pipeline renders
+/// those values that much darker, so a camera R3D NE looks like its N-RAW twin. A clip
+/// rewrapped from N-RAW has N-RAW levels; the +1 in the RMD our rewrap writes brings it back.
+pub fn r3d_scale(c: &ClipInfo) -> f32 {
+    if c.r3d {
+        2f32.powf(-r3d::zr_exposure_ev(&c.camera) as f32)
+    } else {
+        1.0
     }
 }
 
@@ -308,6 +413,7 @@ pub struct Shade {
 pub fn shade(c: &ClipInfo, p: &Params, black: f32, white: f32, view: bool) -> Shade {
     let g = wb_gains(c, p.kelvin, p.tint);
     let gain = SENSOR_WHITE
+        * r3d_scale(c)
         * 2f32.powf(p.exposure)
         * if c.r3d { p.iso / (if c.iso > 0 { c.iso as f32 } else { 800.0 }) } else { 1.0 };
     let cam = cam_matrix(c);
@@ -808,7 +914,71 @@ mod tests {
             wb: [1.7, 1.49],
             matrix: r3d::default_camera_matrix(),
             has_audio: false,
+            sidecar: None,
         }
+    }
+
+    #[test]
+    fn reads_our_own_rmd() {
+        let s = parse_rmd(&r3d::rmd_text(800, 1.0), Path::new("a.RMD")).unwrap();
+        assert_eq!((s.exposure, s.iso, s.kelvin, s.tint), (Some(1.0), Some(800), None, None));
+    }
+
+    #[test]
+    fn tolerates_other_rmd_layouts() {
+        let t = r#"<?xml version="1.0"?><!DOCTYPE REDXIF><RMD><Color><ISO value="1600"/>
+            <ExposureAdjust>-0.5</ExposureAdjust><Kelvin value='3200'/><Tint>4.5</Tint>
+            <exposure_extra>9</exposure_extra></Color></RMD>"#;
+        let s = parse_rmd(t, Path::new("b.rmd")).unwrap();
+        assert_eq!((s.exposure, s.iso, s.kelvin, s.tint), (Some(-0.5), Some(1600), Some(3200.0), Some(4.5)));
+        assert!(parse_rmd("<rmd><other>1</other></rmd>", Path::new("c.rmd")).is_none());
+        assert!(parse_rmd("<rmd><exposure_adjust>40</exposure_adjust></rmd>", Path::new("d.rmd")).is_none());
+    }
+
+    #[test]
+    fn finds_the_sidecar_in_any_case() {
+        let dir = std::env::temp_dir().join(format!("bc-rmd-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let clip = dir.join("A001_C001.R3D");
+        std::fs::write(&clip, b"").unwrap();
+        assert!(find_rmd(&clip).is_none());
+        std::fs::write(dir.join("a001_c001.rmd"), r3d::rmd_text(800, 1.0)).unwrap();
+        let s = read_sidecar(&clip).unwrap();
+        assert_eq!(s.exposure, Some(1.0));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn sidecar_is_the_as_shot_start() {
+        let mut c = clip();
+        c.r3d = true;
+        c.sidecar = Some(Sidecar { exposure: Some(1.0), ..Default::default() });
+        let p = Params::as_shot(&c);
+        assert_eq!((p.exposure, p.iso, p.kelvin), (1.0, 800.0, 4760.0));
+    }
+
+    #[test]
+    fn rewrapped_nev_with_its_rmd_matches_the_nev() {
+        // Same raw values: N-RAW as shot vs R3D NE rewrap with the +1 RMD our rewrap writes.
+        let nev = clip();
+        let mut r3d = clip();
+        r3d.r3d = true;
+        r3d.sidecar = Some(Sidecar { exposure: Some(r3d::zr_exposure_ev("NIKON ZR") as f32), ..Default::default() });
+        let pn = Params { output: Output::Rec709, ..Params::as_shot(&nev) };
+        let pr = Params { output: Output::Rec709, ..Params::as_shot(&r3d) };
+        let a = shade(&nev, &pn, 0.0, 1.0, false);
+        let b = shade(&r3d, &pr, 0.0, 1.0, false);
+        let v = [0.003, 0.004, 0.002];
+        let (x, y) = (shade_pixel(&a, v), shade_pixel(&b, v));
+        for i in 0..3 {
+            assert!((x[i] - y[i]).abs() < 2e-3, "{x:?} vs {y:?}");
+        }
+        // Without the RMD the rewrap is a stop darker, as in RED's pipeline.
+        let mut bare = r3d.clone();
+        bare.sidecar = None;
+        let pb = Params { output: Output::Rec709, ..Params::as_shot(&bare) };
+        let z = shade_pixel(&shade(&bare, &pb, 0.0, 1.0, false), v);
+        assert!(z[1] < x[1] - 0.05, "{z:?} vs {x:?}");
     }
 
     #[test]

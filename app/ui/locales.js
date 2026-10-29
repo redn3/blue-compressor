@@ -401,6 +401,9 @@ window.BC_LOCALES = {
     "How bright highlights ease into white in Rec.709.": "How bright highlights ease into white in Rec.709.",
     "Contrast of the Rec.709 picture.": "Contrast of the Rec.709 picture.",
     "Log keeps the most for grading later. Rec.709 is ready to watch.": "Log keeps the most for grading later. Rec.709 is ready to watch.",
+    "Exposure offset from the clip's .RMD sidecar": "Exposure offset from the clip's .RMD sidecar",
+    "RMD {0} EV": "RMD {0} EV",
+    "Starts at {0} from the sidecar {1}.": "Starts at {0} from the sidecar {1}.",
   },
   "sv": {
     "Lossless": "Förlustfri",
@@ -799,6 +802,9 @@ window.BC_LOCALES = {
     "How bright highlights ease into white in Rec.709.": "Hur ljusa högdagrar övergår i vitt i Rec.709.",
     "Contrast of the Rec.709 picture.": "Kontrasten i Rec.709-bilden.",
     "Log keeps the most for grading later. Rec.709 is ready to watch.": "Log bevarar mest för färgsättning senare. Rec.709 är klar att titta på.",
+    "Exposure offset from the clip's .RMD sidecar": "Exponeringsförskjutning från klippets .RMD-sidofil",
+    "RMD {0} EV": "RMD {0} EV",
+    "Starts at {0} from the sidecar {1}.": "Börjar på {0} från sidofilen {1}.",
   },
   "de": {
     "Lossless": "Verlustfrei",
@@ -1197,6 +1203,9 @@ window.BC_LOCALES = {
     "How bright highlights ease into white in Rec.709.": "Wie helle Lichter in Rec.709 sanft in Weiß übergehen.",
     "Contrast of the Rec.709 picture.": "Kontrast des Rec.709-Bildes.",
     "Log keeps the most for grading later. Rec.709 is ready to watch.": "Log bewahrt am meisten für ein späteres Grading. Rec.709 ist sofort ansehbar.",
+    "Exposure offset from the clip's .RMD sidecar": "Belichtungsversatz aus der .RMD-Begleitdatei des Clips",
+    "RMD {0} EV": "RMD {0} EV",
+    "Starts at {0} from the sidecar {1}.": "Beginnt bei {0} aus der Begleitdatei {1}.",
   },
   "fr": {
     "Lossless": "Sans perte",
@@ -1595,6 +1604,9 @@ window.BC_LOCALES = {
     "How bright highlights ease into white in Rec.709.": "Comment les hautes lumières passent au blanc en Rec.709.",
     "Contrast of the Rec.709 picture.": "Contraste de l'image Rec.709.",
     "Log keeps the most for grading later. Rec.709 is ready to watch.": "Le log conserve le plus pour l'étalonnage. Le Rec.709 est prêt à regarder.",
+    "Exposure offset from the clip's .RMD sidecar": "Décalage d'exposition du fichier annexe .RMD du clip",
+    "RMD {0} EV": "RMD {0} EV",
+    "Starts at {0} from the sidecar {1}.": "Commence à {0} d'après le fichier annexe {1}.",
   },
   "es": {
     "Lossless": "Sin pérdida",
@@ -1993,6 +2005,9 @@ window.BC_LOCALES = {
     "How bright highlights ease into white in Rec.709.": "Cómo las altas luces pasan suavemente al blanco en Rec.709.",
     "Contrast of the Rec.709 picture.": "Contraste de la imagen Rec.709.",
     "Log keeps the most for grading later. Rec.709 is ready to watch.": "Log conserva más para corregir después. Rec.709 está listo para ver.",
+    "Exposure offset from the clip's .RMD sidecar": "Ajuste de exposición del archivo .RMD del clip",
+    "RMD {0} EV": "RMD {0} EV",
+    "Starts at {0} from the sidecar {1}.": "Empieza en {0} según el archivo {1}.",
   },
   "pt-BR": {
     "Lossless": "Sem perdas",
@@ -2391,6 +2406,9 @@ window.BC_LOCALES = {
     "How bright highlights ease into white in Rec.709.": "Como os realces passam suavemente para o branco em Rec.709.",
     "Contrast of the Rec.709 picture.": "Contraste da imagem Rec.709.",
     "Log keeps the most for grading later. Rec.709 is ready to watch.": "Log preserva mais para correção posterior. Rec.709 está pronto para assistir.",
+    "Exposure offset from the clip's .RMD sidecar": "Ajuste de exposição do arquivo .RMD do clipe",
+    "RMD {0} EV": "RMD {0} EV",
+    "Starts at {0} from the sidecar {1}.": "Começa em {0} a partir do arquivo {1}.",
   },
   "it": {
     "Lossless": "Senza perdita",
@@ -2789,6 +2807,9 @@ window.BC_LOCALES = {
     "How bright highlights ease into white in Rec.709.": "Come le alte luci sfumano nel bianco in Rec.709.",
     "Contrast of the Rec.709 picture.": "Contrasto dell'immagine Rec.709.",
     "Log keeps the most for grading later. Rec.709 is ready to watch.": "Log conserva di più per il grading successivo. Rec.709 è pronto da guardare.",
+    "Exposure offset from the clip's .RMD sidecar": "Correzione di esposizione dal file .RMD della clip",
+    "RMD {0} EV": "RMD {0} EV",
+    "Starts at {0} from the sidecar {1}.": "Parte da {0} dal file {1}.",
   },
   "nl": {
     "Lossless": "Verliesvrij",
@@ -3187,6 +3208,9 @@ window.BC_LOCALES = {
     "How bright highlights ease into white in Rec.709.": "Hoe heldere hooglichten in Rec.709 naar wit overlopen.",
     "Contrast of the Rec.709 picture.": "Contrast van het Rec.709-beeld.",
     "Log keeps the most for grading later. Rec.709 is ready to watch.": "Log bewaart het meest voor later graden. Rec.709 is direct te bekijken.",
+    "Exposure offset from the clip's .RMD sidecar": "Belichtingscorrectie uit het .RMD-bestand van de clip",
+    "RMD {0} EV": "RMD {0} EV",
+    "Starts at {0} from the sidecar {1}.": "Begint bij {0} uit het bestand {1}.",
   },
   "pl": {
     "Lossless": "Bezstratnie",
@@ -3585,6 +3609,9 @@ window.BC_LOCALES = {
     "How bright highlights ease into white in Rec.709.": "Jak jasne światła przechodzą w biel w Rec.709.",
     "Contrast of the Rec.709 picture.": "Kontrast obrazu Rec.709.",
     "Log keeps the most for grading later. Rec.709 is ready to watch.": "Log zachowuje najwięcej do późniejszej korekcji. Rec.709 jest gotowy do oglądania.",
+    "Exposure offset from the clip's .RMD sidecar": "Korekta ekspozycji z pliku .RMD klipu",
+    "RMD {0} EV": "RMD {0} EV",
+    "Starts at {0} from the sidecar {1}.": "Zaczyna od {0} z pliku {1}.",
   },
   "ru": {
     "Lossless": "Без потерь",
@@ -3983,6 +4010,9 @@ window.BC_LOCALES = {
     "How bright highlights ease into white in Rec.709.": "Как яркие света переходят в белый в Rec.709.",
     "Contrast of the Rec.709 picture.": "Контраст изображения Rec.709.",
     "Log keeps the most for grading later. Rec.709 is ready to watch.": "Log сохраняет больше всего для цветокоррекции. Rec.709 готов к просмотру.",
+    "Exposure offset from the clip's .RMD sidecar": "Поправка экспозиции из файла .RMD клипа",
+    "RMD {0} EV": "RMD {0} EV",
+    "Starts at {0} from the sidecar {1}.": "Начинается с {0} из файла {1}.",
   },
   "ja": {
     "Lossless": "ロスレス",
@@ -4381,6 +4411,9 @@ window.BC_LOCALES = {
     "How bright highlights ease into white in Rec.709.": "Rec.709 で明るいハイライトが白へ移る滑らかさ。",
     "Contrast of the Rec.709 picture.": "Rec.709 画像のコントラスト。",
     "Log keeps the most for grading later. Rec.709 is ready to watch.": "Log は後のグレーディング用に最も多くの情報を残します。Rec.709 はそのまま視聴できます。",
+    "Exposure offset from the clip's .RMD sidecar": "クリップの .RMD サイドカーの露出オフセット",
+    "RMD {0} EV": "RMD {0} EV",
+    "Starts at {0} from the sidecar {1}.": "サイドカー {1} の {0} から始まります。",
   },
   "ko": {
     "Lossless": "무손실",
@@ -4779,6 +4812,9 @@ window.BC_LOCALES = {
     "How bright highlights ease into white in Rec.709.": "Rec.709에서 밝은 하이라이트가 흰색으로 넘어가는 방식.",
     "Contrast of the Rec.709 picture.": "Rec.709 이미지의 대비.",
     "Log keeps the most for grading later. Rec.709 is ready to watch.": "Log는 나중 그레이딩을 위해 가장 많은 정보를 남깁니다. Rec.709는 바로 볼 수 있습니다.",
+    "Exposure offset from the clip's .RMD sidecar": "클립 .RMD 사이드카의 노출 오프셋",
+    "RMD {0} EV": "RMD {0} EV",
+    "Starts at {0} from the sidecar {1}.": "사이드카 {1}의 {0}에서 시작합니다.",
   },
   "zh-Hans": {
     "Lossless": "无损",
@@ -5177,6 +5213,9 @@ window.BC_LOCALES = {
     "How bright highlights ease into white in Rec.709.": "Rec.709 中明亮高光过渡到白色的方式。",
     "Contrast of the Rec.709 picture.": "Rec.709 画面的对比度。",
     "Log keeps the most for grading later. Rec.709 is ready to watch.": "Log 为后期调色保留最多信息。Rec.709 可直接观看。",
+    "Exposure offset from the clip's .RMD sidecar": "来自片段 .RMD 附属文件的曝光偏移",
+    "RMD {0} EV": "RMD {0} EV",
+    "Starts at {0} from the sidecar {1}.": "从附属文件 {1} 中的 {0} 开始。",
   },
   "zh-Hant": {
     "Lossless": "無損",
@@ -5575,5 +5614,8 @@ window.BC_LOCALES = {
     "How bright highlights ease into white in Rec.709.": "Rec.709 中明亮高光過渡到白色的方式。",
     "Contrast of the Rec.709 picture.": "Rec.709 畫面的對比度。",
     "Log keeps the most for grading later. Rec.709 is ready to watch.": "Log 為後期調色保留最多資訊。Rec.709 可直接觀看。",
+    "Exposure offset from the clip's .RMD sidecar": "來自片段 .RMD 附屬檔案的曝光偏移",
+    "RMD {0} EV": "RMD {0} EV",
+    "Starts at {0} from the sidecar {1}.": "從附屬檔案 {1} 中的 {0} 開始。",
   },
 };

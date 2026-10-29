@@ -689,6 +689,7 @@ function updateCard(j) {
     if (t && (t[0] !== j.width || t[1] !== j.height)) html += `${sep}<span class="target">→ ${t[0]} × ${t[1]}</span>`;
     else if (t && j.state === "waiting") html += sep + tr("stays at this size");
     if (j.bpp > 0) html += `${sep}<span class="job-bpp">${esc(bppFlow(j))}</span>`;
+    if (j.rmdEv != null) html += `${sep}<span title="${esc(tr("Exposure offset from the clip's .RMD sidecar"))}">${esc(tr("RMD {0} EV", (j.rmdEv >= 0 ? "+" : "") + num(j.rmdEv, 1, 2)))}</span>`;
     meta.innerHTML = html;
   }
 
@@ -2443,7 +2444,7 @@ function browserStandIn() {
         case "is_running": return false;
         case "initial_paths": return location.hash === "#demo" ? ["demo"] : [];
         case "scan": return sample.map(([path, codec, width, height, frames, bytes], i) => ({
-          path, name: path.split("/").pop(), ok: true, codec, width, height, frames, fps: 25, bytes, bpp: srcBpp(sample[i]), error: null,
+          path, name: path.split("/").pop(), ok: true, codec, width, height, frames, fps: 25, bytes, bpp: srcBpp(sample[i]), error: null, rmdEv: codec === "R3D NE" ? 1 : null,
         }));
         case "plan_output": return a.resolution === "6k" && a.width > 6060 ? [6060, 3410] : a.resolution === "4k" ? [3852, 2168] : [a.width, a.height];
         case "preview": {

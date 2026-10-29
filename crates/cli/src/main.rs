@@ -1026,6 +1026,17 @@ fn develop_cmd(args: Vec<String>) -> ExitCode {
         info.has_audio
     );
     println!("matrix: {:?}", info.matrix);
+    if let Some(sc) = &info.sidecar {
+        println!(
+            "sidecar: {} exposure={:?} iso={:?} kelvin={:?} tint={:?}",
+            sc.path.display(),
+            sc.exposure,
+            sc.iso,
+            sc.kelvin,
+            sc.tint
+        );
+    }
+    println!("settings: exposure={:+.2} iso={} kelvin={}", p.exposure, p.iso, p.kelvin);
     if auto {
         match develop::auto_exposure_for(&input, frame, &p) {
             Ok(ev) => {

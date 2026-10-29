@@ -29,6 +29,17 @@ pub struct Info {
     renderer: String,
     output_path: String,
     as_shot: Settings,
+    sidecar: Option<SidecarInfo>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SidecarInfo {
+    name: String,
+    exposure: Option<f32>,
+    iso: Option<u32>,
+    kelvin: Option<f32>,
+    tint: Option<f32>,
 }
 
 /// The develop settings as the UI keeps them.
@@ -144,6 +155,13 @@ pub async fn develop_info(path: String) -> Result<Info, String> {
             renderer: develop::renderer_name(),
             output_path: develop::export_path(Path::new(&path), p.output).display().to_string(),
             as_shot: Settings::from(&p),
+            sidecar: c.sidecar.as_ref().map(|s| SidecarInfo {
+                name: s.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+                exposure: s.exposure,
+                iso: s.iso,
+                kelvin: s.kelvin,
+                tint: s.tint,
+            }),
         })
     })
     .await
