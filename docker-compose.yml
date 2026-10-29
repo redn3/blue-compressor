@@ -33,6 +33,11 @@ services:
       # WATCH_R3D the watch folder:
       - R3D=false
       - WATCH_R3D=false
+      # true pads every compressed frame to the bpp budget (all frames the same size) and
+      # encodes proxies at a constant bitrate; R3D NE is always constant. CBR sets the
+      # Web UI toggle's default, WATCH_CBR the watch folder:
+      - CBR=false
+      - WATCH_CBR=false
       # Checks GitHub for a new version at start and every 12 hours (an anonymous request,
       # nothing else is sent) and shows a banner in the Web UI. The container never updates
       # itself. Set to false to turn the check off:

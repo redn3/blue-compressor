@@ -284,6 +284,7 @@ mod mock {
             output_bytes: info.file_bytes,
             seconds: 0.5,
             iso: 1600,
+            frame_bytes: 7_750_656,
         }))
     }
 

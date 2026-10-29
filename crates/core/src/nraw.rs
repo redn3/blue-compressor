@@ -98,9 +98,20 @@ impl NrawFrame {
     /// Builds a new sample around `cs`, zero padding it to whole KiB before EOC (as the
     /// cameras do) and patching the sizes; optionally rewrites the frame size tags.
     pub fn build(&self, cs: &[u8], size: Option<(u32, u32)>) -> Result<Vec<u8>> {
+        self.build_padded(cs, size, None)
+    }
+
+    /// [`NrawFrame::build`] padding the codestream to exactly `pad_to` bytes when given
+    /// (constant bitrate: every frame the same size, like the cameras write). A codestream
+    /// longer than `pad_to` is an error, never truncated.
+    pub fn build_padded(&self, cs: &[u8], size: Option<(u32, u32)>, pad_to: Option<usize>) -> Result<Vec<u8>> {
         let n = cs.len();
         require(n >= 4 && cs[n - 2] == 0xff && cs[n - 1] == 0x11, "codestream does not end in EOC")?;
-        let padded = n.div_ceil(CODESTREAM_ALIGN) * CODESTREAM_ALIGN;
+        let mut padded = n.div_ceil(CODESTREAM_ALIGN) * CODESTREAM_ALIGN;
+        if let Some(t) = pad_to {
+            require(n <= t, "codestream over the constant bitrate frame size")?;
+            padded = t;
+        }
         let mut out = Vec::with_capacity(self.header.len() + padded);
         out.extend_from_slice(&self.header);
         let cs_at = out.len();

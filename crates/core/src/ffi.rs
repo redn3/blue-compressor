@@ -227,6 +227,8 @@ unsafe fn transcode_with(
         resolution: resolution(o.resolution),
         backend: backend(o.backend),
         threads: o.threads.max(0) as usize,
+        // The C API keeps the variable frame sizes it always had.
+        cbr: false,
     };
     let cancel = AtomicBool::new(false);
     let user = user as usize;

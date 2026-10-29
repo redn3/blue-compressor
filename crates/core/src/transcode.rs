@@ -89,6 +89,13 @@ pub fn transcode(opt: &Options, cancel: &AtomicBool, progress: &mut dyn FnMut(f6
     let workers = if resizing { threads.clamp(2, 4) } else { threads.clamp(1, 16) };
     let target_rank = rank_for_quality(quality);
     let budget = target.frame_budget(video.width, video.height);
+    // Constant bitrate pads to the budget of the frame as written (the resized size when
+    // resizing), the same budget the rate control codes to.
+    let pad_to = match (opt.cbr, &resizer) {
+        (false, _) => None,
+        (true, Some(_)) => target.frame_budget(dst.width, dst.height),
+        (true, None) => budget,
+    };
     // Rate controlled frames go to the workers in fixed runs, coded in order within a run,
     // so each frame starts its search from the previous one's choices. The runs do not
     // depend on the thread count, so neither does the output.
@@ -104,10 +111,10 @@ pub fn transcode(opt: &Options, cancel: &AtomicBool, progress: &mut dyn FnMut(f6
         let frame = NrawFrame::parse(&sample)?;
         let cs = &sample[frame.codestream_offset..];
         if let Some(r) = &resizer {
-            frame.build(&r.process(cs, target, seed)?, Some((dst.width, dst.height)))
+            frame.build_padded(&r.process(cs, target, seed)?, Some((dst.width, dst.height)), pad_to)
         } else {
             let p = RequantParams { target_rank, budget, ..Default::default() };
-            frame.build(&requant_codestream_seeded(cs, &p, 1, seed)?.0, None)
+            frame.build_padded(&requant_codestream_seeded(cs, &p, 1, seed)?.0, None, pad_to)
         }
     };
 

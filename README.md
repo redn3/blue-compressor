@@ -170,6 +170,26 @@ otherwise, which is what a NAS without a GPU uses. The Docker image includes ffm
 a computer, Blue Compressor uses an `ffmpeg` next to itself, the one in
 `BLUECOMPRESS_FFMPEG`, or one on the PATH (Homebrew's folders included).
 
+### Constant bitrate
+
+**Constant bitrate** (or `--cbr`, or `CBR` / `WATCH_CBR` in Docker) applies to every
+output:
+
+- **Compressed clips:** with a bpp target, every frame is padded to exactly the frame
+  budget, so all frames are the same size, as the cameras write them. Off (the default
+  and what earlier versions did), each frame takes what it needs up to the budget, so
+  simple frames come in smaller; Nikon's and RED's decoders and Resolve read either,
+  since the container lists each frame's size. Lossless repacks are always variable:
+  padding them to one size would give back what the repack saves.
+- **Proxies:** on, ffmpeg encodes at a constant rate of about 0.4 bits per pixel (about
+  20 Mb/s for 1920x1080 at 25 fps, 2 to 80 Mb/s), with the encoder's CBR mode
+  (VideoToolbox `constant_bit_rate`, NVENC and AMF `-rc cbr`, Quick Sync with equal
+  average and maximum rate, libx265 strict CBR). Off, proxies use quality based VBR.
+- **R3D NE:** always constant bitrate, whatever the toggle says. Camera R3D NE files
+  have every frame at the same size (7,750,656 bytes on the ZR) and the conversion copies
+  the camera original's frames as they are, so only camera original `.nev` files with
+  constant frames are converted.
+
 ### R3D NE from N-RAW
 
 Turn on **Convert .nev to R3D NE** (or pass `--r3d`, or set `R3D` / `WATCH_R3D` in
@@ -382,6 +402,8 @@ services:
 | `WATCH_CLEAR` | `false` | Set to `true` (or toggle **Clear watch folder after process** in the Web UI) to delete source clips from `WATCH_INPUT` once compression succeeds. |
 | `PROXIES` | `false` | Set to `true` to turn on **Make H.265 proxies** for new Web UI jobs (see Proxies above). |
 | `WATCH_PROXIES` | `false` | Set to `true` to also write a proxy of every watch-folder clip. A proxy that fails keeps the source even with `WATCH_CLEAR`. |
+| `CBR` | `false` | Set to `true` to turn on **Constant bitrate** for new Web UI jobs (see Constant bitrate above). |
+| `WATCH_CBR` | `false` | Set to `true` for constant bitrate watch-folder outputs. |
 | `R3D` | `false` | Set to `true` to turn on **Convert .nev to R3D NE** for new Web UI jobs (see R3D NE from N-RAW above). |
 | `WATCH_R3D` | `false` | Set to `true` to also convert every watch-folder `.nev` to R3D NE. A failed conversion keeps the source even with `WATCH_CLEAR`. |
 | `UPDATE_CHECK` | `true` | Set to `false` to stop the update check (an anonymous request to the GitHub releases API at start and every 12 hours; the Web UI then shows no update banner). |

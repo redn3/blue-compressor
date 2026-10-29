@@ -39,6 +39,8 @@ pub struct ServeConfig {
     pub default_proxies: bool,
     /// R3D NE toggle for new clips (R3D or --r3d).
     pub default_r3d: bool,
+    /// Constant bitrate toggle for new clips (CBR or --cbr).
+    pub default_cbr: bool,
     pub threads: usize,
     pub watch: Option<WatchConfig>,
 }
@@ -51,6 +53,7 @@ struct ServerState {
     default_backend: Backend,
     default_proxies: bool,
     default_r3d: bool,
+    default_cbr: bool,
     threads: usize,
     running: Arc<AtomicBool>,
     cancel: Arc<AtomicBool>,
@@ -95,6 +98,7 @@ struct AppInfo {
     default_resolution: String,
     default_proxies: bool,
     default_r3d: bool,
+    default_cbr: bool,
     /// The encoder proxies use here ("hevc_nvenc (GPU)", "libx265 (CPU)") or why none.
     proxy_encoder: String,
     watch: WatchSnapshot,
@@ -143,6 +147,9 @@ struct JobRequest {
     /// Also convert a .nev source to R3D NE in "R3D NE/" next to the output.
     #[serde(default)]
     r3d: bool,
+    /// Constant bitrate for the compressed clip and the proxy (R3D NE always is).
+    #[serde(default)]
+    cbr: bool,
     /// Clip details the UI shows on the card (name, codec, size, frames, fps), kept as is so
     /// a reloaded page can rebuild its queue.
     #[serde(default)]
@@ -175,6 +182,7 @@ struct QueueJob {
     force: bool,
     proxy: bool,
     r3d: bool,
+    cbr: bool,
     clip: Option<serde_json::Value>,
     /// waiting, running, done, failed or cancelled.
     state: String,
@@ -759,6 +767,7 @@ fn start_queue(state: &Arc<ServerState>, args: StartArgs) -> Result<(), String> 
                 force: job.force,
                 proxy: job.proxy,
                 r3d: job.r3d,
+                cbr: job.cbr,
                 clip: job.clip,
                 state: state_name.into(),
                 fraction,
@@ -892,6 +901,7 @@ fn run_job(st: &Arc<ServerState>, job: &QueueJob, settings: &Settings) {
         resolution: resolution_of(&job.resolution),
         backend,
         threads: st.threads,
+        cbr: job.cbr,
     };
     let mut last = Instant::now() - Duration::from_secs(1);
     let clients = st.sse_clients.clone();
@@ -933,7 +943,10 @@ fn run_job(st: &Arc<ServerState>, job: &QueueJob, settings: &Settings) {
             let mut last = Instant::now() - Duration::from_secs(1);
             let clients = st.sse_clients.clone();
             let r = bluecompress::make_proxy(
-                &bluecompress::ProxyOptions::new(&options.input, &target),
+                &bluecompress::ProxyOptions {
+                    cbr: job.cbr,
+                    ..bluecompress::ProxyOptions::new(&options.input, &target)
+                },
                 &st.cancel,
                 &mut |fraction, fps| {
                     if fraction >= 1.0 || last.elapsed().as_millis() >= 100 {
@@ -1025,6 +1038,7 @@ fn invoke_command(state: &Arc<ServerState>, cmd: &str, body: &[u8]) -> HttpRespo
                 default_resolution: resolution_name(state.default_resolution).into(),
                 default_proxies: state.default_proxies,
                 default_r3d: state.default_r3d,
+                default_cbr: state.default_cbr,
                 proxy_encoder: bluecompress::proxy::encoder_description(),
                 watch: state.watch_state.lock().unwrap().clone(),
             };
@@ -1458,6 +1472,7 @@ pub fn run_serve(cfg: ServeConfig, cancel: &'static AtomicBool) -> u8 {
         default_backend: cfg.default_backend,
         default_proxies: cfg.default_proxies,
         default_r3d: cfg.default_r3d,
+        default_cbr: cfg.default_cbr,
         threads: cfg.threads,
         running: Arc::new(AtomicBool::new(false)),
         cancel: Arc::new(AtomicBool::new(false)),

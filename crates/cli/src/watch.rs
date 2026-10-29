@@ -30,6 +30,8 @@ pub struct WatchConfig {
     pub proxies: bool,
     /// Also convert .nev clips to R3D NE in "R3D NE/" next to each output.
     pub r3d: bool,
+    /// Constant bitrate for the compressed clip and the proxy.
+    pub cbr: bool,
     pub json: bool,
     pub quiet: bool,
     pub once: bool,
@@ -389,6 +391,7 @@ pub fn run_watch(
                     resolution: live_resolution,
                     backend: cfg.backend,
                     threads: cfg.threads,
+                    cbr: cfg.cbr,
                 };
 
                 let mut last_emit = Instant::now() - Duration::from_secs(1);
@@ -436,7 +439,7 @@ pub fn run_watch(
                                 s.fraction = 0.0;
                                 s.fps = 0.0;
                             });
-                            crate::write_proxy(&clip, &target_out, cfg.json, cfg.quiet)
+                            crate::write_proxy(&clip, &target_out, cfg.cbr, cfg.json, cfg.quiet)
                         };
                         // Same for R3D NE: from the source, and a failure keeps it.
                         let r3d_ok = !(out_ok && cfg.r3d) || crate::write_r3d(&clip, &target_out, cfg.json, cfg.quiet);

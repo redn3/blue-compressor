@@ -66,6 +66,8 @@ pub struct R3dOutcome {
     pub seconds: f64,
     /// ISO written to the RED exposure tag.
     pub iso: u32,
+    /// Size of every video frame (R3D NE is always constant bitrate).
+    pub frame_bytes: u32,
 }
 
 /// One NCTG entry; `value` is the offset of its value inside the movie's moov bytes.
@@ -312,6 +314,13 @@ fn plan(m: &Movie, iso_factor: f64) -> Result<(MoovPatches, u32)> {
         Some(2) => return Err(Error(NORMAL_UNSUPPORTED.into())),
         q => return Err(Error(format!("unknown N-RAW quality {q:?}"))),
     }
+    // R3D NE is constant bitrate: the camera writes every frame at the same size, and the
+    // conversion copies frames as they are, so the source must be constant too (camera
+    // originals are; a compressed or edited .nev is not).
+    let sizes = &m.video().samples;
+    if sizes.windows(2).any(|w| w[0].size != w[1].size) {
+        return Err(Error("R3D NE needs the camera original .nev (its frames are not all the same size)".into()));
+    }
     let iso = get(0x0110_8832).filter(|v| v.len() == 4).map(|v| rd32(v, 0)).unwrap_or(0);
     if iso == 0 {
         return Err(Error("clip has no ISO tag".into()));
@@ -423,6 +432,7 @@ pub fn convert(o: &R3dOptions, cancel: &AtomicBool, progress: &mut dyn FnMut(f64
                 output_bytes: bytes,
                 seconds: start.elapsed().as_secs_f64(),
                 iso,
+                frame_bytes: v.samples.first().map_or(0, |s| s.size),
             })
         }
         Err(e) => {

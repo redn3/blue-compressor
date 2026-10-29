@@ -96,12 +96,23 @@
           </label>
         </section>
 
+        <section class="field" id="cbr-section">
+          <div class="field-label">Bitrate</div>
+          <label class="switch-row" id="cbr-row">
+            <span class="switch-text">
+              <span class="switch-title">Constant bitrate</span>
+              <span class="switch-sub" id="cbr-sub">Every frame the same size in compressed clips (bpp targets; Lossless stays variable) and CBR proxies. Off: frames use what they need up to the target, proxies use quality based VBR.</span>
+            </span>
+            <input type="checkbox" id="cbr" class="switch">
+          </label>
+        </section>
+
         <section class="field" id="r3d-section">
           <div class="field-label">R3D NE</div>
           <label class="switch-row" id="r3d-row">
             <span class="switch-text">
               <span class="switch-title">Convert .nev to R3D NE</span>
-              <span class="switch-sub" id="r3d-sub">Nikon ZR N-RAW High clips only, from the original, into an R3D NE folder next to each output. Log3G10 and REDWideGamutRGB.</span>
+              <span class="switch-sub" id="r3d-sub">Nikon ZR N-RAW High clips only, from the original, into an R3D NE folder next to each output. Log3G10 and REDWideGamutRGB. Always constant bitrate, like the camera.</span>
             </span>
             <input type="checkbox" id="r3d" class="switch">
           </label>

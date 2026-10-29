@@ -53,6 +53,7 @@ fn encodes_main10_rec709() {
         frames: n,
         audio: None,
         output: &out,
+        cbr_kbps: None,
     };
     let grade = Grade { gains: [1.0; 3], exposure: 1.0 };
     let mut last = 0;
@@ -100,6 +101,7 @@ fn cancel_leaves_nothing() {
         frames: 50,
         audio: None,
         output: &out,
+        cbr_kbps: None,
     };
     let r = encode(
         &job,
@@ -126,5 +128,43 @@ fn rejects_non_clip() {
     o.encoder = Some("libx265".into());
     assert!(make_proxy(&o, &AtomicBool::new(false), &mut |_, _| {}).is_err());
     assert!(!dir.join("Proxies/bad.mov").exists());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn cbr_rate_scales_with_size() {
+    assert_eq!(bluecompress::proxy::cbr_kbps(1920, 1080, 25.0), 20_736);
+    assert_eq!(bluecompress::proxy::cbr_kbps(64, 32, 25.0), 2_000);
+    assert_eq!(bluecompress::proxy::cbr_kbps(1920, 1080, 120.0), 80_000);
+}
+
+#[test]
+fn encodes_constant_bitrate() {
+    let Some(ff) = find_ffmpeg() else {
+        eprintln!("no ffmpeg, skipped");
+        return;
+    };
+    let dir = std::env::temp_dir().join(format!("bc_proxy_cbr_{}", std::process::id()));
+    let out = dir.join("C0002.mov");
+    let (w, h, n) = (320usize, 180usize, 50usize);
+    let kbps = 3_000;
+    let job = Encode {
+        ffmpeg: &ff,
+        encoder: "libx265",
+        width: w,
+        height: h,
+        fps: 25.0,
+        frames: n,
+        audio: None,
+        output: &out,
+        cbr_kbps: Some(kbps),
+    };
+    let grade = Grade { gains: [1.0; 3], exposure: 1.0 };
+    encode(&job, &grade, &AtomicBool::new(false), &mut |_, _| {}, &frames(w, h)).unwrap();
+    // A nearly flat test picture would code to almost nothing with VBR; strict CBR fills
+    // it up to the asked rate.
+    let size = std::fs::metadata(&out).unwrap().len() as f64;
+    let rate = size * 8.0 / (n as f64 / 25.0) / 1000.0;
+    assert!(rate > kbps as f64 * 0.7 && rate < kbps as f64 * 1.3, "{rate:.0} kb/s for {kbps}");
     let _ = std::fs::remove_dir_all(dir);
 }

@@ -188,6 +188,8 @@ struct Cli {
     proxies: Option<bool>,
     /// --r3d / --no-r3d; None reads R3D (watch: WATCH_R3D first).
     r3d: Option<bool>,
+    /// --cbr / --no-cbr; None reads CBR (watch: WATCH_CBR first).
+    cbr: Option<bool>,
 }
 
 fn usage() -> String {
@@ -227,6 +229,12 @@ options:
                           the GPU when ffmpeg has a working encoder (VideoToolbox, NVENC,
                           Quick Sync, AMF), else libx265. Needs ffmpeg (next to bluecompress,
                           on the PATH, or BLUECOMPRESS_FFMPEG). Default: PROXIES, else off
+      --cbr               constant bitrate for every output: compressed clips get every
+                          frame padded to exactly the bpp budget (lossless repacks stay
+                          variable), proxies use the encoder's CBR mode at about 0.4 bits
+                          per pixel (about 20 Mb/s at 1080p25). Off: frames take what they
+                          need up to the budget and proxies use quality based VBR. R3D NE
+                          is always constant bitrate. Default: CBR, else off
       --r3d               also convert each Nikon ZR .nev (N-RAW High) to R3D NE in
                           R3D NE/<name>.R3D next to its output: the original codestream
                           is copied unchanged and the tags are rewritten (N-Log to
@@ -525,6 +533,7 @@ fn compress_cmd(o: &Cli) -> u8 {
             resolution,
             backend,
             threads: o.threads,
+            cbr: env_cbr(o.cbr, false),
         };
         let mut last_permille = -1i64;
         let result = bluecompress::transcode(&opt, &CANCEL, &mut |fraction, fps| {
@@ -594,7 +603,7 @@ fn compress_cmd(o: &Cli) -> u8 {
         let _ = stdout.flush();
         if env_proxies(o.proxies, false)
             && !CANCEL.load(Ordering::Relaxed)
-            && !write_proxy(input, &out, o.json, o.quiet)
+            && !write_proxy(input, &out, env_cbr(o.cbr, false), o.json, o.quiet)
         {
             failed += 1;
         }
@@ -630,6 +639,13 @@ fn compress_cmd(o: &Cli) -> u8 {
 pub(crate) fn env_proxies(cli: Option<bool>, watch: bool) -> bool {
     cli.or_else(|| if watch { env_nonempty("WATCH_PROXIES").and_then(|v| parse_bool(&v)) } else { None })
         .or_else(|| env_nonempty("PROXIES").and_then(|v| parse_bool(&v)))
+        .unwrap_or(false)
+}
+
+/// Constant bitrate on: the command line, else WATCH_CBR (watch only), else CBR, else off.
+pub(crate) fn env_cbr(cli: Option<bool>, watch: bool) -> bool {
+    cli.or_else(|| if watch { env_nonempty("WATCH_CBR").and_then(|v| parse_bool(&v)) } else { None })
+        .or_else(|| env_nonempty("CBR").and_then(|v| parse_bool(&v)))
         .unwrap_or(false)
 }
 
@@ -697,7 +713,7 @@ pub(crate) fn write_r3d(source: &Path, out: &Path, json: bool, quiet: bool) -> b
 
 /// Writes the proxy of `source` next to its output `out` (see [`bluecompress::proxy_path`]),
 /// reporting like a compress job. Returns false on failure (cancel is not a failure).
-pub(crate) fn write_proxy(source: &Path, out: &Path, json: bool, quiet: bool) -> bool {
+pub(crate) fn write_proxy(source: &Path, out: &Path, cbr: bool, json: bool, quiet: bool) -> bool {
     let target = bluecompress::proxy_path(out);
     let (ins, outs) = (ps(source), ps(&target));
     if json {
@@ -705,7 +721,7 @@ pub(crate) fn write_proxy(source: &Path, out: &Path, json: bool, quiet: bool) ->
     } else if !quiet {
         eprintln!("{ins}: proxy -> {outs} [{}]", bluecompress::proxy::encoder_description());
     }
-    let opts = bluecompress::ProxyOptions::new(source, &target);
+    let opts = bluecompress::ProxyOptions { cbr, ..bluecompress::ProxyOptions::new(source, &target) };
     let mut last = -1i64;
     let r = bluecompress::make_proxy(&opts, &CANCEL, &mut |fraction, fps| {
         let pm = (fraction * 100.0) as i64;
@@ -839,6 +855,7 @@ fn watch_cmd(o: &Cli) -> u8 {
         clear_after_process: env_watch_clear(o.clear_watch),
         proxies: env_proxies(o.proxies, true),
         r3d: env_r3d(o.r3d, true),
+        cbr: env_cbr(o.cbr, true),
         json: o.json,
         quiet: o.quiet,
         once: o.once,
@@ -904,6 +921,7 @@ fn serve_cmd(o: &Cli) -> u8 {
             clear_after_process: env_watch_clear(o.clear_watch),
             proxies: env_proxies(o.proxies, true),
             r3d: env_r3d(o.r3d, true),
+            cbr: env_cbr(o.cbr, true),
             json: o.json,
             quiet: o.quiet,
             once: false,
@@ -921,6 +939,7 @@ fn serve_cmd(o: &Cli) -> u8 {
             clear_after_process: env_watch_clear(o.clear_watch),
             proxies: env_proxies(o.proxies, true),
             r3d: env_r3d(o.r3d, true),
+            cbr: env_cbr(o.cbr, true),
             json: o.json,
             quiet: o.quiet,
             once: false,
@@ -947,6 +966,7 @@ fn serve_cmd(o: &Cli) -> u8 {
         default_backend: env_watch_backend(o.backend),
         default_proxies: env_proxies(o.proxies, false),
         default_r3d: env_r3d(o.r3d, false),
+        default_cbr: env_cbr(o.cbr, false),
         threads: o.threads,
         watch: watch_cfg,
     };
@@ -1125,6 +1145,7 @@ fn main() -> ExitCode {
         once: false,
         proxies: None,
         r3d: None,
+        cbr: None,
     };
     let args: Vec<String> = std::env::args_os().skip(1).map(|a| a.to_string_lossy().into_owned()).collect();
     if args.first().map(String::as_str) == Some("calibrate") {
@@ -1227,6 +1248,8 @@ fn main() -> ExitCode {
             "--no-proxies" | "--no-proxy" => o.proxies = Some(false),
             "--r3d" => o.r3d = Some(true),
             "--no-r3d" => o.r3d = Some(false),
+            "--cbr" => o.cbr = Some(true),
+            "--no-cbr" | "--vbr" => o.cbr = Some(false),
             "--suffix" => match it.next() {
                 Some(v) => o.suffix = v,
                 None => return bad("--suffix needs a value"),
@@ -1485,6 +1508,66 @@ mod tests {
     }
 
     #[test]
+    fn constant_bitrate_pads_every_frame_to_the_budget() {
+        let base = std::env::temp_dir().join(format!("bluecomp_cbr_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let clip = base.join("A001_C001.NEV");
+        make_synthetic_nev(&clip, 256, 128, 3);
+        let src_bpp = bluecompress::probe(&clip).unwrap().bpp;
+        let bpp = ((src_bpp * 5.0).floor() / 10.0).max(0.5);
+        assert!(bpp < src_bpp, "source {src_bpp} bpp");
+        let budget = bluecompress::Target::bpp(bpp).frame_budget(256, 128).unwrap();
+        for cbr in [true, false] {
+            let out = base.join(if cbr { "cbr" } else { "vbr" });
+            let o = Cli {
+                quality: None,
+                bpp: Some(bpp),
+                legacy_q: false,
+                resolution: None,
+                backend: Some(Backend::Cpu),
+                threads: 2,
+                inputs: vec![clip.to_string_lossy().into_owned()],
+                input_dir: None,
+                output_dir: Some(out.to_string_lossy().into_owned()),
+                output_file: None,
+                watch_input: None,
+                watch_output: None,
+                listen: None,
+                browse_root: None,
+                poll_seconds: None,
+                clear_watch: None,
+                suffix: String::new(),
+                json: false,
+                quiet: true,
+                overwrite: false,
+                skip_existing: false,
+                once: false,
+                proxies: Some(false),
+                r3d: Some(false),
+                cbr: Some(cbr),
+            };
+            assert_eq!(compress_cmd(&o), 0);
+            let f = bluecompress::bmff::InputFile::open(&out.join("A001_C001.NEV")).unwrap();
+            let m = bluecompress::bmff::Movie::parse(&f).unwrap();
+            for s in &m.video().samples {
+                let buf = f.read(s.offset, s.size as usize).unwrap();
+                let nf = bluecompress::nraw::NrawFrame::parse(&buf).unwrap();
+                if cbr {
+                    assert_eq!(nf.codestream_size, budget, "CBR frame not at the budget");
+                } else {
+                    assert!(nf.codestream_size <= budget);
+                }
+            }
+            if cbr {
+                let s0 = m.video().samples[0].size;
+                assert!(m.video().samples.iter().all(|s| s.size == s0));
+            }
+        }
+        let _ = std::fs::remove_dir_all(base);
+    }
+
+    #[test]
     fn r3d_skips_clips_that_are_not_zr_high() {
         let base = std::env::temp_dir().join(format!("bluecomp_r3d_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
@@ -1518,6 +1601,7 @@ mod tests {
             once: false,
             proxies: Some(false),
             r3d: Some(true),
+            cbr: None,
         };
         assert_eq!(compress_cmd(&o), 0);
         assert!(out_dir.join("A001_C001.NEV").is_file());
@@ -1562,6 +1646,7 @@ mod tests {
             once: false,
             proxies: Some(true),
             r3d: None,
+            cbr: None,
         };
         assert_eq!(compress_cmd(&o), 0);
         let proxy = out_dir.join("Proxies").join("A001_C001.mov");
@@ -1616,6 +1701,7 @@ mod tests {
                 clear_after_process: true,
                 proxies: have_ffmpeg,
                 r3d: false,
+                cbr: false,
                 json: false,
                 quiet: true,
                 once: true,
@@ -1667,6 +1753,7 @@ mod tests {
             default_backend: Backend::Cpu,
             default_proxies: false,
             default_r3d: false,
+            default_cbr: false,
             threads: 2,
             watch: Some(watch::WatchConfig {
                 input_dir: watch_in.clone(),
@@ -1680,6 +1767,7 @@ mod tests {
                 clear_after_process: false,
                 proxies: false,
                 r3d: false,
+                cbr: false,
                 json: false,
                 quiet: true,
                 once: false,

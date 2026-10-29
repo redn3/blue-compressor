@@ -240,3 +240,50 @@ fn iso_factor_is_a_parameter() {
     assert_eq!(r3d::convert(&o, &AtomicBool::new(false), &mut |_, _| {}).unwrap().iso, 800);
     let _ = std::fs::remove_dir_all(d);
 }
+
+#[test]
+fn output_is_constant_bitrate_and_vbr_sources_are_refused() {
+    let d = dir("cbr");
+    let src = d.join("A001_C004_0101AB.NEV");
+    synthetic_nev(&src, 1, "NIKON ZR", 4);
+    let out = d.join("A001_C004_0101AB.R3D");
+    let r = r3d::convert(&R3dOptions::new(&src, &out), &AtomicBool::new(false), &mut |_, _| {}).unwrap();
+    let m = Movie::parse(&InputFile::open(&out).unwrap()).unwrap();
+    assert!(m.video().samples.iter().all(|s| s.size == r.frame_bytes));
+
+    // A .nev whose frames vary in size (not a camera original) cannot become R3D NE.
+    let mut bytes = std::fs::read(&src).unwrap();
+    let stsz = bytes.windows(4).position(|w| w == b"stsz").unwrap();
+    let n = u32::from_be_bytes(bytes[stsz + 12..stsz + 16].try_into().unwrap());
+    let size = u32::from_be_bytes(bytes[stsz + 8..stsz + 12].try_into().unwrap());
+    // Rewrite stsz as a table with one frame a little shorter (contents do not matter here).
+    let mut table = Vec::new();
+    for i in 0..n {
+        table.extend(if i == 1 { size - 16 } else { size }.to_be_bytes());
+    }
+    let old_len = u32::from_be_bytes(bytes[stsz - 4..stsz].try_into().unwrap()) as usize;
+    let mut new_box = ((20 + table.len()) as u32).to_be_bytes().to_vec();
+    new_box.extend(b"stsz");
+    new_box.extend([0, 0, 0, 0, 0, 0, 0, 0]);
+    new_box.extend(n.to_be_bytes());
+    new_box.extend(table);
+    let grow = new_box.len() - old_len;
+    bytes.splice(stsz - 4..stsz - 4 + old_len, new_box);
+    // Fix the parents' sizes (stbl, minf, mdia, trak, moov) and the chunk offsets.
+    for kind in [b"stbl", b"minf", b"mdia", b"trak", b"moov"] {
+        let at = bytes.windows(4).position(|w| w == kind).unwrap() - 4;
+        let v = u32::from_be_bytes(bytes[at..at + 4].try_into().unwrap()) + grow as u32;
+        bytes[at..at + 4].copy_from_slice(&v.to_be_bytes());
+    }
+    let co = bytes.windows(4).position(|w| w == b"co64").unwrap();
+    for i in 0..n as usize {
+        let at = co + 12 + 8 * i;
+        let v = u64::from_be_bytes(bytes[at..at + 8].try_into().unwrap()) + grow as u64;
+        bytes[at..at + 8].copy_from_slice(&v.to_be_bytes());
+    }
+    let vbr = d.join("A001_C005_0101AB.NEV");
+    std::fs::write(&vbr, bytes).unwrap();
+    let e = r3d::check(&vbr).unwrap_err();
+    assert!(e.0.contains("camera original"), "{e}");
+    let _ = std::fs::remove_dir_all(d);
+}

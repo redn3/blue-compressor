@@ -92,6 +92,9 @@ struct JobRequest {
     /// Also convert a .nev source to R3D NE in "R3D NE/" next to the output.
     #[serde(default)]
     r3d: bool,
+    /// Constant bitrate for the compressed clip and the proxy (R3D NE always is).
+    #[serde(default)]
+    cbr: bool,
 }
 
 #[derive(Serialize, Clone)]
@@ -489,8 +492,16 @@ fn start(app: AppHandle, state: State<'_, Runner>, jobs: Vec<JobRequest>, settin
             }
             let out_s = output.to_string_lossy().into_owned();
             let _ = app.emit("job-start", JobStart { id: job.id, output: out_s.clone() });
-            let options =
-                Options { input, output, quality, bpp, resolution: resolution(&job.resolution), backend, threads: 0 };
+            let options = Options {
+                input,
+                output,
+                quality,
+                bpp,
+                resolution: resolution(&job.resolution),
+                backend,
+                threads: 0,
+                cbr: job.cbr,
+            };
             let mut last = Instant::now() - std::time::Duration::from_secs(1);
             let app2 = app.clone();
             // The core reports frames per second since the clip started; take paused time out.
@@ -521,7 +532,10 @@ fn start(app: AppHandle, state: State<'_, Runner>, jobs: Vec<JobRequest>, settin
                     let _ = app.emit("job-proxy", JobProgress { id: job.id, fraction: 0.0, fps: 0.0 });
                     let mut last = Instant::now() - std::time::Duration::from_secs(1);
                     let r = engine::make_proxy(
-                        &bluecompress::ProxyOptions::new(&options.input, &target),
+                        &bluecompress::ProxyOptions {
+                            cbr: job.cbr,
+                            ..bluecompress::ProxyOptions::new(&options.input, &target)
+                        },
                         &cancel,
                         &mut |fraction, fps| {
                             if fraction >= 1.0 || last.elapsed().as_millis() >= 100 {

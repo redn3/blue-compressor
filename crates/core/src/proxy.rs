@@ -44,6 +44,8 @@ pub struct ProxyOptions {
     pub encoder: Option<String>,
     /// ffmpeg to run; `None` uses [`find_ffmpeg`].
     pub ffmpeg: Option<PathBuf>,
+    /// Constant bitrate at [`cbr_kbps`] instead of the default quality based VBR.
+    pub cbr: bool,
 }
 
 impl ProxyOptions {
@@ -54,6 +56,7 @@ impl ProxyOptions {
             max_width: DEFAULT_MAX_WIDTH,
             encoder: None,
             ffmpeg: None,
+            cbr: false,
         }
     }
 }
@@ -105,8 +108,65 @@ fn quiet(cmd: &mut Command) -> &mut Command {
     cmd
 }
 
-/// Encoder specific arguments for a 10-bit Main10 encode at roughly proxy quality.
-fn encoder_args(encoder: &str) -> Vec<&'static str> {
+/// Bits per pixel of a constant bitrate proxy: 0.4 gives about 20 Mb/s at 1920x1080 25p,
+/// comfortably above the quality based VBR's typical rate for editing proxies.
+pub const CBR_BITS_PER_PIXEL: f64 = 0.4;
+
+/// Constant bitrate of a proxy in kb/s for its size and frame rate (2 to 80 Mb/s).
+pub fn cbr_kbps(width: usize, height: usize, fps: f64) -> u32 {
+    let bps = width as f64 * height as f64 * fps.max(1.0) * CBR_BITS_PER_PIXEL;
+    (bps / 1000.0).round().clamp(2_000.0, 80_000.0) as u32
+}
+
+/// Encoder specific constant bitrate arguments at `kbps`: average, minimum and maximum
+/// rate equal with a one second buffer, plus the encoder's own CBR mode where it has one
+/// (x265 strict CBR adds filler so the rate never dips).
+fn cbr_args(encoder: &str, kbps: u32) -> Vec<String> {
+    let r = format!("{kbps}k");
+    let mut a: Vec<String> = vec!["-c:v".into(), encoder.into(), "-profile:v".into(), "main10".into()];
+    let rate = |a: &mut Vec<String>| {
+        for (k, v) in [("-b:v", &r), ("-minrate", &r), ("-maxrate", &r), ("-bufsize", &r)] {
+            a.push(k.into());
+            a.push(v.clone());
+        }
+    };
+    match encoder {
+        "hevc_videotoolbox" => {
+            a.extend(["-b:v".into(), r.clone(), "-constant_bit_rate".into(), "1".into()]);
+            a.extend(["-pix_fmt".into(), "p010le".into()]);
+        }
+        "hevc_nvenc" => {
+            a.extend(["-preset", "p5", "-rc", "cbr"].map(String::from));
+            rate(&mut a);
+            a.extend(["-pix_fmt".into(), "p010le".into()]);
+        }
+        "hevc_qsv" => {
+            // QSV picks its CBR mode when the average and maximum rate are equal.
+            rate(&mut a);
+            a.extend(["-pix_fmt".into(), "p010le".into()]);
+        }
+        "hevc_amf" => {
+            a.extend(["-rc".into(), "cbr".into()]);
+            rate(&mut a);
+            a.extend(["-filler_data".into(), "1".into(), "-pix_fmt".into(), "p010le".into()]);
+        }
+        _ => {
+            a[1] = "libx265".into();
+            a.extend(["-preset".into(), "fast".into()]);
+            rate(&mut a);
+            a.extend(["-pix_fmt", "yuv420p10le", "-x265-params", "log-level=error:strict-cbr=1"].map(String::from));
+        }
+    }
+    a.extend(["-tag:v".into(), "hvc1".into()]);
+    a
+}
+
+/// Encoder specific arguments for a 10-bit Main10 encode: quality based VBR, or constant
+/// bitrate at `cbr` kb/s.
+fn encoder_args(encoder: &str, cbr: Option<u32>) -> Vec<String> {
+    if let Some(kbps) = cbr {
+        return cbr_args(encoder, kbps);
+    }
     let mut a = match encoder {
         "hevc_videotoolbox" => {
             vec!["-c:v", "hevc_videotoolbox", "-profile:v", "main10", "-q:v", "55", "-pix_fmt", "p010le"]
@@ -156,7 +216,7 @@ fn encoder_args(encoder: &str) -> Vec<&'static str> {
         ],
     };
     a.extend(["-tag:v", "hvc1"]);
-    a
+    a.into_iter().map(String::from).collect()
 }
 
 /// Whether `encoder` really encodes a 10-bit frame here (a listed encoder can still lack its
@@ -164,7 +224,7 @@ fn encoder_args(encoder: &str) -> Vec<&'static str> {
 pub fn encoder_works(ffmpeg: &Path, encoder: &str) -> bool {
     let mut cmd = Command::new(ffmpeg);
     cmd.args(["-hide_banner", "-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=256x144:r=25:d=0.2"])
-        .args(encoder_args(encoder))
+        .args(encoder_args(encoder, None))
         .args(["-frames:v", "2", "-f", "null", "-"])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -365,8 +425,18 @@ pub fn make_proxy(o: &ProxyOptions, cancel: &AtomicBool, progress: &mut dyn FnMu
 
     let produce = |range: std::ops::Range<usize>| range.into_par_iter().map(decode).collect::<Result<Vec<_>>>();
     let audio = has_readable_audio(&ffmpeg, &o.input).then_some(o.input.as_path());
-    let job =
-        Encode { ffmpeg: &ffmpeg, encoder: &encoder, width: ow, height: oh, fps, frames: n, audio, output: &o.output };
+    let cbr_kbps = o.cbr.then(|| cbr_kbps(ow, oh, fps));
+    let job = Encode {
+        ffmpeg: &ffmpeg,
+        encoder: &encoder,
+        width: ow,
+        height: oh,
+        fps,
+        frames: n,
+        audio,
+        output: &o.output,
+        cbr_kbps,
+    };
     encode(
         &job,
         &grade,
@@ -396,6 +466,8 @@ pub struct Encode<'a> {
     /// A file whose first audio track is muxed in as AAC.
     pub audio: Option<&'a Path>,
     pub output: &'a Path,
+    /// Constant bitrate in kb/s; `None` is quality based VBR.
+    pub cbr_kbps: Option<u32>,
 }
 
 /// Runs ffmpeg for `job`, feeding it the frames `produce` returns for consecutive ranges
@@ -431,7 +503,7 @@ pub fn encode(
         cmd.arg("-i").arg(a).args(["-map", "0:v:0", "-map", "1:a:0", "-c:a", "aac", "-b:a", "256k", "-shortest"]);
     }
     cmd.args(["-vf", "scale=out_color_matrix=bt709:out_range=tv,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv"])
-        .args(encoder_args(encoder))
+        .args(encoder_args(encoder, job.cbr_kbps))
         .args(["-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-color_range", "tv"])
         .args(["-f", "mov"])
         .arg(&tmp)

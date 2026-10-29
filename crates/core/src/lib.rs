@@ -112,6 +112,11 @@ pub struct Options {
     pub backend: Backend,
     /// 0 = all cores.
     pub threads: usize,
+    /// Constant bitrate: with a bpp target every frame is padded to exactly the frame
+    /// budget, so all frames have the same size, as the cameras write them. Off, frames
+    /// take what they need up to the budget (simple frames come in smaller). Lossless
+    /// repacks are always variable (padding them would give back the saving).
+    pub cbr: bool,
 }
 
 #[derive(Debug, Clone)]

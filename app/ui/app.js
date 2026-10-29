@@ -80,7 +80,7 @@ const resizes = (j, r) => r !== "original" && !(r === "6k" && j.width <= 6060) &
 const settingLabel = (c, r) => `${compText(c)}${r !== "original" ? " · " + RES_LABEL[r] : ""}`;
 
 const settings = Object.assign(
-  { resolution: "original", compression: "light", backend: "gpu", outputFolder: null, dest: "next", sameForAll: true, squeeze: 1, autoUpdate: true, skipVersion: null, proxies: false, r3d: false },
+  { resolution: "original", compression: "light", backend: "gpu", outputFolder: null, dest: "next", sameForAll: true, squeeze: 1, autoUpdate: true, skipVersion: null, proxies: false, r3d: false, cbr: false },
   migrateSettings(readSettings()),
 );
 let jobs = [];
@@ -146,7 +146,7 @@ function resolvedSpan(list, c = settings.compression) {
   return v.length ? [Math.min(...v), Math.max(...v)] : null;
 }
 const spanText = (sp) => (!sp ? "" : sp[0] === sp[1] ? `${bppText(sp[0])} bpp` : `${bppText(sp[0])} to ${bppText(sp[1])} bpp`);
-const settingOf = (j) => ({ compression: compOf(j), resolution: resolutionOf(j), proxy: !!settings.proxies, r3d: !!settings.r3d && isNev(j) });
+const settingOf = (j) => ({ compression: compOf(j), resolution: resolutionOf(j), proxy: !!settings.proxies, r3d: !!settings.r3d && isNev(j), cbr: !!settings.cbr });
 // The R3D NE toggle only acts on .nev clips.
 function isNev(j) { return /\.nev$/i.test((j && j.path) || ""); }
 const ranComp = (j) => (j.ran ? j.ran.compression : compOf(j));
@@ -997,6 +997,7 @@ const jobRequest = (j) => ({
   id: j.id, path: j.path, ...compFields(j.ran.compression), resolution: j.ran.resolution, force: !!j.force,
   proxy: !!(j.ran && j.ran.proxy),
   r3d: !!(j.ran && j.ran.r3d),
+  cbr: !!(j.ran && j.ran.cbr),
   clip: { name: j.name, codec: j.codec, width: j.width, height: j.height, frames: j.frames, fps: j.fps, bytes: j.bytes, bpp: j.bpp },
   existing: j.alreadyRef || null,
 });
@@ -1082,7 +1083,7 @@ function fromServer(s) {
     path: s.path, name: c.name || s.name, ok: true, codec: c.codec || "", width: c.width || 0, height: c.height || 0,
     frames: c.frames || 0, fps: c.fps || 0, bytes: c.bytes || s.bytes, bpp: c.bpp || 0, error: s.error,
     id: s.id, state: s.state, fraction: s.fraction, rate: s.fps, target: null, force: s.force,
-    resolution: s.resolution, compression: comp, ran: { compression: comp, resolution: s.resolution, proxy: !!s.proxy, r3d: !!s.r3d },
+    resolution: s.resolution, compression: comp, ran: { compression: comp, resolution: s.resolution, proxy: !!s.proxy, r3d: !!s.r3d, cbr: !!s.cbr },
     output: s.output, result: s.result, onServer: true,
   };
 }
@@ -1917,6 +1918,7 @@ async function init() {
       if (RES_LABEL[info.defaultResolution]) settings.resolution = info.defaultResolution;
       if (info.defaultProxies) settings.proxies = true;
       if (info.defaultR3d) settings.r3d = true;
+      if (info.defaultCbr) settings.cbr = true;
     }
     if ($("watch-clear")) {
       $("watch-clear").addEventListener("change", (e) => {
@@ -2034,6 +2036,7 @@ async function init() {
   addPaths(await api.invoke("initial_paths"));
   initProxies();
   initR3d();
+  initCbr();
   initUpdates();
 }
 
@@ -2143,6 +2146,16 @@ async function installUpdate() {
     $("update-later").textContent = "Close";
     update.info = { ...u, can_install: false };
   }
+}
+
+function initCbr() {
+  const box = $("cbr");
+  if (!box) return;
+  box.checked = !!settings.cbr;
+  box.addEventListener("change", () => {
+    settings.cbr = box.checked;
+    saveSettings();
+  });
 }
 
 function initR3d() {
