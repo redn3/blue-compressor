@@ -949,6 +949,22 @@ mod tests {
     }
 
     #[test]
+    fn r3d_iso_reaches_red_sdk_max() {
+        let mut c = clip();
+        c.r3d = true;
+        c.iso = 800;
+        let mut p = Params::as_shot(&c);
+        let at = |p: &Params| shade(&c, p, 0.0, 1.0, false);
+        let base = at(&p);
+        for iso in [50.0, 64.0, 1280.0, 12800.0, 25600.0] {
+            p.iso = iso;
+            let s = at(&p);
+            let r = s.m_out[0][0] / base.m_out[0][0];
+            assert!(s.m_out[0][0].is_finite() && (r - iso / 800.0).abs() < 1e-3 * r.max(1.0), "iso {iso}: ratio {r}");
+        }
+    }
+
+    #[test]
     fn sidecar_is_the_as_shot_start() {
         let mut c = clip();
         c.r3d = true;

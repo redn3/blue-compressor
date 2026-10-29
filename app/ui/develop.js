@@ -13,13 +13,14 @@ const DEV_ROLL = [["none", N_("None")], ["hard", N_("Hard")], ["medium", N_("Med
 const DEV_TONE = [["none", N_("None")], ["low", N_("Low")], ["medium", N_("Medium")], ["high", N_("High")]];
 const DEV_SIZES = [[3840, "4K"], [1920, "1080p"]];
 
-// True ISO values in third stops; the ISO slider and box only land on these.
-const ISO_STOPS = [50, 64, 80, 100, 125, 160, 200, 250, 320, 400, 500, 640, 800, 1000, 1250, 1600, 2000, 2500, 3200, 4000, 5000, 6400];
+// The ISO values the R3D SDK accepts (ImageProcessingLimits::ISOList, including the six added
+// in SDK 9.0). The ISO slider and box only land on these.
+const ISO_STOPS = [50, 64, 80, 100, 125, 160, 200, 250, 320, 400, 500, 640, 800, 1000, 1280, 1600, 2000, 2500, 3200, 4000, 5000, 6400, 8000, 10000, 12800, 16000, 20000, 25600];
 const snapIso = (v) => ISO_STOPS.reduce((b, x) => (Math.abs(Math.log(x / v)) < Math.abs(Math.log(b / v)) ? x : b), ISO_STOPS[0]);
 
 // Each slider: key, label, min, max, step, log scale, unit, format digits.
 const R3D_SLIDERS = [
-  ["iso", N_("ISO"), 50, 6400, 1, true, "", 0],
+  ["iso", N_("ISO"), 50, 25600, 1, true, "", 0],
   ["exposure", N_("Exposure Adjust"), -7, 7, 0.1, false, "", 1],
   ["kelvin", N_("Color Temp"), 1700, 10000, 10, true, "K", 0],
   ["tint", N_("Tint"), -100, 100, 1, false, "", 0],
