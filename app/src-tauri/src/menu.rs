@@ -1,20 +1,22 @@
 //! The native menu bar. "Check for Updates..." sits in the app menu on macOS (after About)
 //! and in the Help menu elsewhere; it asks the page to run a manual update check, which
-//! always reports back (the update prompt, "up to date" or an error). The page sends the
+//! always reports back (the update prompt, "up to date" or an error). "Check Automatically"
+//! under it is the daily check setting, kept by the page. The page sends the
 //! labels in its language with `set_menu_labels`, and the menu is rebuilt with them.
 
 use std::collections::HashMap;
 
-use tauri::menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu};
+use tauri::menu::{AboutMetadata, CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{AppHandle, Emitter, Runtime};
 
 pub const CHECK_UPDATES: &str = "check-updates";
+pub const AUTO_UPDATE: &str = "auto-update";
 
 fn label<'a>(l: &'a HashMap<String, String>, key: &'a str) -> &'a str {
     l.get(key).map(String::as_str).filter(|s| !s.is_empty()).unwrap_or(key)
 }
 
-pub fn build<R: Runtime>(app: &AppHandle<R>, l: &HashMap<String, String>) -> tauri::Result<Menu<R>> {
+pub fn build<R: Runtime>(app: &AppHandle<R>, l: &HashMap<String, String>, auto: bool) -> tauri::Result<Menu<R>> {
     let name = app.package_info().name.clone();
     let about = PredefinedMenuItem::about(
         app,
@@ -26,6 +28,8 @@ pub fn build<R: Runtime>(app: &AppHandle<R>, l: &HashMap<String, String>) -> tau
         }),
     )?;
     let check = MenuItem::with_id(app, CHECK_UPDATES, label(l, "Check for Updates..."), true, None::<&str>)?;
+    let auto_item =
+        CheckMenuItem::with_id(app, AUTO_UPDATE, label(l, "Check Automatically"), true, auto, None::<&str>)?;
     let sep = || PredefinedMenuItem::separator(app);
     let edit = Submenu::with_items(
         app,
@@ -51,6 +55,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>, l: &HashMap<String, String>) -> tau
                 &about,
                 &sep()?,
                 &check,
+                &auto_item,
                 &sep()?,
                 &PredefinedMenuItem::services(app, Some(label(l, "Services")))?,
                 &sep()?,
@@ -77,17 +82,28 @@ pub fn build<R: Runtime>(app: &AppHandle<R>, l: &HashMap<String, String>) -> tau
     #[cfg(not(target_os = "macos"))]
     {
         let _ = &edit;
-        let help = Submenu::with_items(app, label(l, "Help"), true, &[&check, &sep()?, &about])?;
+        let help = Submenu::with_items(app, label(l, "Help"), true, &[&check, &auto_item, &sep()?, &about])?;
         Menu::with_items(app, &[&help])
     }
 }
 
 /// Builds the menu with English labels and forwards "Check for Updates..." to the page.
 pub fn install<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
-    app.set_menu(build(app, &HashMap::new())?)?;
+    app.set_menu(build(app, &HashMap::new(), true)?)?;
     app.on_menu_event(|app, event| {
         if event.id() == CHECK_UPDATES {
             let _ = app.emit("menu-check-updates", ());
+        } else if event.id() == AUTO_UPDATE {
+            // The check item has already toggled itself; tell the page its new state.
+            let on = app
+                .menu()
+                .and_then(|m| m.items().ok())
+                .into_iter()
+                .flatten()
+                .filter_map(|k| k.as_submenu().and_then(|sub| sub.get(AUTO_UPDATE)))
+                .find_map(|i| i.as_check_menuitem().and_then(|c| c.is_checked().ok()))
+                .unwrap_or(true);
+            let _ = app.emit("menu-auto-update", on);
         }
     });
     Ok(())
@@ -95,7 +111,11 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
 
 /// Rebuilds the menu with the page's translated labels (keys are the English labels).
 #[tauri::command]
-pub fn set_menu_labels(app: AppHandle, labels: HashMap<String, String>) -> Result<(), String> {
-    let menu = build(&app, &labels).map_err(|e| e.to_string())?;
+pub fn set_menu_labels(
+    app: AppHandle,
+    labels: HashMap<String, String>,
+    auto_update: Option<bool>,
+) -> Result<(), String> {
+    let menu = build(&app, &labels, auto_update.unwrap_or(true)).map_err(|e| e.to_string())?;
     app.set_menu(menu).map(|_| ()).map_err(|e| e.to_string())
 }

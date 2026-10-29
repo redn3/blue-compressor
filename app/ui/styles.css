@@ -1261,7 +1261,6 @@ body.per-clip .job-settings { display: flex; }
 .update-banner-steps li + li { margin-top: 4px; }
 .update-banner-steps code { font-size: 11px; padding: 1px 4px; border-radius: 4px; background: var(--surface-2); }
 .update-banner-steps a { color: var(--accent-2); }
-body.web #updates-section { display: none; }
 
 .badge-exp { display: inline-block; padding: 0 6px; border-radius: 4px; font-size: 0.85em; background: rgba(255, 170, 0, 0.18); color: #c77d00; }
 .switch-row.dim, .select-row.dim { opacity: 0.5; }

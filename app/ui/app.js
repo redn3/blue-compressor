@@ -2142,8 +2142,9 @@ function sendMenuLabels() {
     "Zoom": tr("Zoom"),
     "Close Window": tr("Close Window"),
     "Help": tr("Help"),
+    "Check Automatically": tr("Check Automatically"),
   };
-  api.invoke("set_menu_labels", { labels }).catch(() => {});
+  api.invoke("set_menu_labels", { labels, autoUpdate: settings.autoUpdate !== false }).catch(() => {});
 }
 
 // Check for Updates... from the menu: works with automatic checks off, and always answers.
@@ -2302,15 +2303,11 @@ function initR3d() {
 
 function initUpdates() {
   if (info.web || DEMO_PARAMS.has("docker")) { initUpdateBanner(); return; }
-  const auto = $("auto-update");
-  auto.checked = settings.autoUpdate !== false;
-  auto.addEventListener("change", () => {
-    settings.autoUpdate = auto.checked;
+  // Check Automatically lives in the native menu; it reports each change here.
+  api.listen("menu-auto-update", (on) => {
+    settings.autoUpdate = !!on;
     saveSettings();
-    setUpdateStatus(auto.checked ? "" : tr("Automatic checks are off."));
   });
-  if (!auto.checked) setUpdateStatus(tr("Automatic checks are off."));
-  $("btn-check-update").addEventListener("click", () => checkForUpdates(true));
   $("notice-ok").addEventListener("click", () => $("notice-modal").classList.remove("show"));
   api.listen("menu-check-updates", () => checkFromMenu());
   sendMenuLabels();
