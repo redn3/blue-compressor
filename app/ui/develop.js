@@ -11,7 +11,11 @@ const DEV_WB = [
 ];
 const DEV_ROLL = [["none", N_("None")], ["hard", N_("Hard")], ["medium", N_("Medium")], ["soft", N_("Soft")], ["verySoft", N_("Very Soft")]];
 const DEV_TONE = [["none", N_("None")], ["low", N_("Low")], ["medium", N_("Medium")], ["high", N_("High")]];
-const DEV_SIZES = [[3840, "UHD"], [1920, "1080p"]];
+const DEV_SIZES = [[3840, "4K"], [1920, "1080p"]];
+
+// True ISO values in third stops; the ISO slider and box only land on these.
+const ISO_STOPS = [50, 64, 80, 100, 125, 160, 200, 250, 320, 400, 500, 640, 800, 1000, 1250, 1600, 2000, 2500, 3200, 4000, 5000, 6400];
+const snapIso = (v) => ISO_STOPS.reduce((b, x) => (Math.abs(Math.log(x / v)) < Math.abs(Math.log(b / v)) ? x : b), ISO_STOPS[0]);
 
 // Each slider: key, label, min, max, step, log scale, unit, format digits.
 const R3D_SLIDERS = [
@@ -218,18 +222,21 @@ function devSlider(c, [key, label, mn, mx, step, lg, unit, dig], disabled = fals
   row.innerHTML = `<div class="dev-row-head"><span class="dev-label">${esc(tr(label))}</span>${devTip(c, key) ? `<span class="info" tabindex="0" role="img" aria-label="${esc(devTip(c, key))}">i</span>` : ""}<input class="mini-input dev-num" type="text" inputmode="decimal" aria-label="${esc(tr(label))}"><span class="dev-unit">${esc(unit)}</span></div><input type="range" class="range dev-range" min="0" max="1000" step="any" aria-label="${esc(tr(label))}">`;
   const range = row.querySelector(".dev-range"), numEl = row.querySelector(".dev-num");
   const show = () => {
-    range.value = sliderToPos(c.s[key], mn, mx, lg);
+    range.value = key === "iso" ? (ISO_STOPS.indexOf(snapIso(c.s[key])) * 1000) / (ISO_STOPS.length - 1) : sliderToPos(c.s[key], mn, mx, lg);
     range.style.setProperty("--p", `${range.value / 10}%`);
     numEl.value = num(c.s[key], dig, dig);
   };
   show();
   range.disabled = numEl.disabled = disabled;
-  const set = (x) => { c.s[key] = Math.min(mx, Math.max(mn, x)); show(); devChanged(); };
-  range.addEventListener("input", () => set(posToSlider(+range.value, mn, mx, lg, step)));
+  const iso = key === "iso";
+  const set = (x) => { c.s[key] = Math.min(mx, Math.max(mn, iso && x > 0 ? snapIso(x) : x)); show(); devChanged(); };
+  range.addEventListener("input", () => set(iso ? ISO_STOPS[Math.round((+range.value / 1000) * (ISO_STOPS.length - 1))] : posToSlider(+range.value, mn, mx, lg, step)));
   numEl.addEventListener("change", () => {
     const x = parseFloat(numEl.value.replace(",", "."));
     if (Number.isFinite(x)) set(x); else show();
   });
+  if (iso && c.s[key] > 0 && snapIso(c.s[key]) !== c.s[key]) c.s[key] = snapIso(c.s[key]);
+  show();
   range.addEventListener("dblclick", () => set(c.info.asShot[key]));
   return row;
 }
@@ -311,7 +318,7 @@ function devRenderExport() {
   box.append(devSelect(N_("Size"), DEV_SIZES.map(([w, l]) => [String(w), l]), String(dev.export.width), (v) => { dev.export.width = +v; dev.export.mbps = null; devRenderExport(); }));
   const row = document.createElement("div");
   row.className = "dev-row";
-  row.innerHTML = `<div class="dev-row-head"><span class="dev-label">${esc(tr("Bitrate"))}</span><span class="info" tabindex="0" role="img" aria-label="${esc(tr("10-bit HEVC. 100 Mb/s at UHD by default."))}">i</span><input class="mini-input dev-num" id="dev-mbps" type="text" inputmode="decimal" aria-label="${esc(tr("Bitrate"))}"><span class="dev-unit">Mb/s</span></div>
+  row.innerHTML = `<div class="dev-row-head"><span class="dev-label">${esc(tr("Bitrate"))}</span><span class="info" tabindex="0" role="img" aria-label="${esc(tr("10-bit HEVC. 100 Mb/s at 4K by default."))}">i</span><input class="mini-input dev-num" id="dev-mbps" type="text" inputmode="decimal" aria-label="${esc(tr("Bitrate"))}"><span class="dev-unit">Mb/s</span></div>
     <label class="dev-check"><input type="checkbox" id="dev-cbr" class="switch"><span>${esc(tr("Constant bitrate"))}</span></label>`;
   box.append(row);
   const mb = row.querySelector("#dev-mbps");
