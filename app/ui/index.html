@@ -13,13 +13,17 @@
       <div class="brand" data-tauri-drag-region>
         <img src="icon.png" alt="" class="brand-icon" draggable="false">
         <div class="brand-text" data-tauri-drag-region>
-          <span class="brand-name">Blue Compressor <span class="beta-tag" title="Beta software: keep your originals">Beta</span></span>
-          <span class="brand-sub">Raw video recompression for Nikon N-RAW and R3D NE</span>
+          <span class="brand-name">Blue Compressor <span class="beta-tag" title="Beta software: keep your originals" data-i18n-title="Beta software: keep your originals" data-i18n="Beta">Beta</span></span>
+          <span class="brand-sub" data-i18n="Raw video recompression for Nikon N-RAW and R3D NE">Raw video recompression for Nikon N-RAW and R3D NE</span>
         </div>
       </div>
       <div class="titlebar-right" data-tauri-drag-region>
-        <span class="chip" id="watch-chip" title="Watch folder daemon" hidden><span class="chip-dot" id="watch-dot"></span><span id="watch-chip-text">Watch</span></span>
-        <span class="chip" id="engine-chip" title="Processor"><span class="chip-dot"></span><span id="engine-text">Starting</span></span>
+        <label class="lang-pick" title="Language" data-i18n-title="Language">
+          <svg viewBox="0 0 16 16" class="ico-sm" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M2 8h12M8 2c1.8 1.7 2.6 3.7 2.6 6S9.8 12.3 8 14M8 2C6.2 3.7 5.4 5.7 5.4 8S6.2 12.3 8 14"/></svg>
+          <select id="lang" aria-label="Language" data-i18n-aria-label="Language"></select>
+        </label>
+        <span class="chip" id="watch-chip" title="Watch folder daemon" data-i18n-title="Watch folder daemon" hidden><span class="chip-dot" id="watch-dot"></span><span id="watch-chip-text" data-i18n="Watch">Watch</span></span>
+        <span class="chip" id="engine-chip" title="Processor" data-i18n-title="Processor"><span class="chip-dot"></span><span id="engine-text" data-i18n="Starting">Starting</span></span>
       </div>
     </header>
 
@@ -27,39 +31,39 @@
       <aside class="panel">
         <label class="switch-row" id="same-row">
           <span class="switch-text">
-            <span class="switch-title">Same settings for all clips</span>
-            <span class="switch-sub" id="same-sub">Applies to every clip in the queue</span>
+            <span class="switch-title" data-i18n="Same settings for all clips">Same settings for all clips</span>
+            <span class="switch-sub" id="same-sub" data-i18n="Applies to every clip in the queue">Applies to every clip in the queue</span>
           </span>
           <input type="checkbox" id="same-all" class="switch" checked>
         </label>
 
         <section class="field">
-          <div class="field-label" id="label-resolution">Resolution</div>
-          <div class="seg" id="seg-resolution" role="radiogroup" aria-label="Resolution">
-            <button data-value="original" role="radio">Original</button>
+          <div class="field-label" id="label-resolution" data-i18n="Resolution">Resolution</div>
+          <div class="seg" id="seg-resolution" role="radiogroup" aria-label="Resolution" data-i18n-aria-label="Resolution">
+            <button data-value="original" role="radio" data-i18n="Original">Original</button>
             <button data-value="6k" role="radio">6K</button>
-            <button data-value="4k" role="radio">4K UHD</button>
+            <button data-value="4k" role="radio" data-i18n="4K UHD">4K UHD</button>
           </div>
           <p class="hint" id="resolution-note"></p>
         </section>
 
         <section class="field" id="compression-field">
-          <div class="field-label" id="label-compression">Compression</div>
-          <div class="seg seg-picks" id="seg-picks" role="radiogroup" aria-label="Compression">
-            <button data-value="lossless" role="radio" title="Repacks the camera's data. Every pixel stays identical.">Lossless</button>
-            <button data-value="light" role="radio" title="0.75 times your clips' bits per pixel">Light</button>
-            <button data-value="medium" role="radio" title="0.55 times your clips' bits per pixel">Medium</button>
-            <button data-value="strong" role="radio" title="0.35 times your clips' bits per pixel">Strong</button>
+          <div class="field-label" id="label-compression" data-i18n="Compression">Compression</div>
+          <div class="seg seg-picks" id="seg-picks" role="radiogroup" aria-label="Compression" data-i18n-aria-label="Compression">
+            <button data-value="lossless" role="radio" title="Repacks the camera's data. Every pixel stays identical." data-i18n-title="Repacks the camera's data. Every pixel stays identical." data-i18n="Lossless">Lossless</button>
+            <button data-value="light" role="radio" title="0.75 times your clips' bits per pixel" data-i18n-title="0.75 times your clips' bits per pixel" data-i18n="Light">Light</button>
+            <button data-value="medium" role="radio" title="0.55 times your clips' bits per pixel" data-i18n-title="0.55 times your clips' bits per pixel" data-i18n="Medium">Medium</button>
+            <button data-value="strong" role="radio" title="0.35 times your clips' bits per pixel" data-i18n-title="0.35 times your clips' bits per pixel" data-i18n="Strong">Strong</button>
           </div>
           <div class="bpp-card" id="bpp-card">
             <p class="comp-text" id="comp-text"></p>
             <div class="comp-readout" id="comp-readout"></div>
             <div class="bpp-head">
-              <span class="bpp-title" title="The size of each frame: how many bits are kept for every pixel of the raw image.">Bits per pixel</span>
-              <label class="bpp-value" title="Type a value from 0.5 to 8, or use the arrow keys"><input type="text" id="bpp-num" inputmode="decimal" autocomplete="off" spellcheck="false" aria-label="Bits per pixel"><span class="bpp-unit" id="bpp-unit">bpp</span></label>
+              <span class="bpp-title" title="The size of each frame: how many bits are kept for every pixel of the raw image." data-i18n-title="The size of each frame: how many bits are kept for every pixel of the raw image." data-i18n="Bits per pixel">Bits per pixel</span>
+              <label class="bpp-value" title="Type a value from 0.5 to 8, or use the arrow keys" data-i18n-title="Type a value from 0.5 to 8, or use the arrow keys"><input type="text" id="bpp-num" inputmode="decimal" autocomplete="off" spellcheck="false" aria-label="Bits per pixel" data-i18n-aria-label="Bits per pixel"><span class="bpp-unit" id="bpp-unit">bpp</span></label>
             </div>
-            <div class="bpp-slider" title="Yellow marks: your clips' own rates. At or above a clip's own rate it is only repacked, losslessly.">
-              <input type="range" id="bpp-range" class="range" min="0" max="5" step="any" aria-label="Bits per pixel">
+            <div class="bpp-slider" title="Yellow marks: your clips' own rates. At or above a clip's own rate it is only repacked, losslessly." data-i18n-title="Yellow marks: your clips' own rates. At or above a clip's own rate it is only repacked, losslessly.">
+              <input type="range" id="bpp-range" class="range" min="0" max="5" step="any" aria-label="Bits per pixel" data-i18n-aria-label="Bits per pixel">
               <div class="bpp-sources" id="bpp-sources" aria-hidden="true"></div>
             </div>
             <div class="bpp-ticks" id="bpp-ticks" aria-hidden="true"></div>
@@ -68,8 +72,8 @@
         </section>
 
         <section class="field">
-          <div class="field-label">Resizing on</div>
-          <div class="seg" id="seg-backend" role="radiogroup" aria-label="Resizing on">
+          <div class="field-label" data-i18n="Resizing on">Resizing on</div>
+          <div class="seg" id="seg-backend" role="radiogroup" aria-label="Resizing on" data-i18n-aria-label="Resizing on">
             <button data-value="gpu" role="radio">GPU</button>
             <button data-value="cpu" role="radio">CPU</button>
           </div>
@@ -77,70 +81,70 @@
         </section>
 
         <section class="field">
-          <div class="field-label">Save to</div>
-          <div class="seg" id="seg-dest" role="radiogroup" aria-label="Save to">
-            <button data-value="next" role="radio">Next to clips</button>
-            <button data-value="custom" role="radio" id="dest-custom">Choose folder</button>
+          <div class="field-label" data-i18n="Save to">Save to</div>
+          <div class="seg" id="seg-dest" role="radiogroup" aria-label="Save to" data-i18n-aria-label="Save to">
+            <button data-value="next" role="radio" data-i18n="Next to clips">Next to clips</button>
+            <button data-value="custom" role="radio" id="dest-custom" data-i18n="Choose folder">Choose folder</button>
           </div>
           <p class="hint dest-hint" id="dest-hint"></p>
         </section>
 
         <section class="field" id="proxy-section">
-          <div class="field-label">Proxies</div>
+          <div class="field-label" data-i18n="Proxies">Proxies</div>
           <label class="switch-row" id="proxies-row">
             <span class="switch-text">
-              <span class="switch-title">Make H.265 proxies</span>
-              <span class="switch-sub" id="proxies-sub">10-bit Rec.709, up to 1920 wide, in a Proxies folder next to each output.</span>
+              <span class="switch-title" data-i18n="Make H.265 proxies">Make H.265 proxies</span>
+              <span class="switch-sub" id="proxies-sub" data-i18n="10-bit Rec.709, up to 1920 wide, in a Proxies folder next to each output.">10-bit Rec.709, up to 1920 wide, in a Proxies folder next to each output.</span>
             </span>
             <input type="checkbox" id="proxies" class="switch">
           </label>
         </section>
 
         <section class="field" id="cbr-section">
-          <div class="field-label">Bitrate</div>
+          <div class="field-label" data-i18n="Bitrate">Bitrate</div>
           <label class="switch-row" id="cbr-row">
             <span class="switch-text">
-              <span class="switch-title">Constant bitrate</span>
-              <span class="switch-sub" id="cbr-sub">Every frame the same size in compressed clips (bpp targets; Lossless stays variable) and CBR proxies. Off: frames use what they need up to the target, proxies use quality based VBR. R3D NE is always constant; a rewrap is constant if the source is.</span>
+              <span class="switch-title" data-i18n="Constant bitrate">Constant bitrate</span>
+              <span class="switch-sub" id="cbr-sub" data-i18n="Every frame the same size in compressed clips (bpp targets; Lossless stays variable) and CBR proxies. Off: frames use what they need up to the target, proxies use quality based VBR. R3D NE is always constant; a rewrap is constant if the source is.">Every frame the same size in compressed clips (bpp targets; Lossless stays variable) and CBR proxies. Off: frames use what they need up to the target, proxies use quality based VBR. R3D NE is always constant; a rewrap is constant if the source is.</span>
             </span>
             <input type="checkbox" id="cbr" class="switch">
           </label>
         </section>
 
         <section class="field" id="r3d-section">
-          <div class="field-label">R3D NE and N-RAW</div>
+          <div class="field-label" data-i18n="R3D NE and N-RAW">R3D NE and N-RAW</div>
           <label class="switch-row" id="rewrap-row">
             <span class="switch-text">
-              <span class="switch-title">Rewrap only</span>
-              <span class="switch-sub" id="rewrap-sub">No compressed copy: just the conversions below, with the image data copied as it is. About disk speed. Constant bitrate if the source is.</span>
+              <span class="switch-title" data-i18n="Rewrap only">Rewrap only</span>
+              <span class="switch-sub" id="rewrap-sub" data-i18n="No compressed copy: just the conversions below, with the image data copied as it is. About disk speed. Constant bitrate if the source is.">No compressed copy: just the conversions below, with the image data copied as it is. About disk speed. Constant bitrate if the source is.</span>
             </span>
             <input type="checkbox" id="rewrap" class="switch">
           </label>
           <label class="switch-row" id="r3d-row">
             <span class="switch-text">
-              <span class="switch-title">N-RAW to R3D NE</span>
-              <span class="switch-sub" id="r3d-sub">Acts on .nev clips, into an R3D NE folder next to each output, at the chosen compression and resolution. Log3G10 and REDWideGamutRGB. Always constant bitrate. Nikon ZR; Z8, Z9 and Z6III clips are <span class="badge-exp">Experimental</span>.</span>
+              <span class="switch-title" data-i18n="N-RAW to R3D NE">N-RAW to R3D NE</span>
+              <span class="switch-sub" id="r3d-sub" data-i18n-html="html.r3d_sub">Acts on .nev clips, into an R3D NE folder next to each output, at the chosen compression and resolution. Log3G10 and REDWideGamutRGB. Always constant bitrate. Nikon ZR; Z8, Z9 and Z6III clips are <span class="badge-exp">Experimental</span>.</span>
             </span>
             <input type="checkbox" id="r3d" class="switch">
           </label>
           <label class="switch-row" id="to-nev-row">
             <span class="switch-text">
-              <span class="switch-title">R3D NE to N-RAW</span>
-              <span class="switch-sub" id="to-nev-sub">Acts on .R3D clips: rewraps them back to N-RAW (N-LOG) in an N-RAW folder next to each output.</span>
+              <span class="switch-title" data-i18n="R3D NE to N-RAW">R3D NE to N-RAW</span>
+              <span class="switch-sub" id="to-nev-sub" data-i18n="Acts on .R3D clips: rewraps them back to N-RAW (N-LOG) in an N-RAW folder next to each output.">Acts on .R3D clips: rewraps them back to N-RAW (N-LOG) in an N-RAW folder next to each output.</span>
             </span>
             <input type="checkbox" id="to-nev" class="switch">
           </label>
           <label class="switch-row" id="rmd-row">
             <span class="switch-text">
-              <span class="switch-title">Exposure sidecar</span>
-              <span class="switch-sub" id="rmd-sub">.RMD next to each R3D NE clip: +1 stop for the ZR, +0.5 for other cameras.</span>
+              <span class="switch-title" data-i18n="Exposure sidecar">Exposure sidecar</span>
+              <span class="switch-sub" id="rmd-sub" data-i18n-html="html.rmd_sub">.RMD next to each R3D NE clip: +1 stop for the ZR, +0.5 for other cameras.</span>
             </span>
             <input type="checkbox" id="rmd" class="switch">
           </label>
           <label class="select-row" id="rmd-ev-row">
-            <span class="switch-sub">Exposure</span>
+            <span class="switch-sub" data-i18n="Exposure">Exposure</span>
             <select id="rmd-ev">
-              <option value="">Camera default</option>
+              <option value="" data-i18n="Camera default">Camera default</option>
               <option value="0">0</option>
               <option value="0.5">+0.5</option>
               <option value="1">+1</option>
@@ -151,11 +155,11 @@
         </section>
 
         <section class="field" id="watch-section" hidden>
-          <div class="field-label">Watch folder</div>
+          <div class="field-label" data-i18n="Watch folder">Watch folder</div>
           <div class="watch-card">
             <div class="watch-head">
               <span class="watch-preset" id="watch-preset"></span>
-              <span class="job-pill" id="watch-pill">Watching</span>
+              <span class="job-pill" id="watch-pill" data-i18n="Watching">Watching</span>
             </div>
             <div class="watch-dirs" id="watch-dirs"></div>
             <div class="watch-stats" id="watch-stats"></div>
@@ -163,23 +167,23 @@
               <div class="meter-fill" id="watch-meter-fill"></div>
             </div>
             <div class="watch-controls">
-              <div class="seg seg-sm" id="watch-quality" role="radiogroup" aria-label="Watch compression">
-                <button data-value="1" role="radio" title="Lossless repack">Lossless</button>
-                <button data-value="2" role="radio" title="0.75 times each clip's own bits per pixel">Light</button>
-                <button data-value="3" role="radio" title="0.55 times each clip's own bits per pixel">Medium</button>
-                <button data-value="4" role="radio" title="0.35 times each clip's own bits per pixel">Strong</button>
+              <div class="seg seg-sm" id="watch-quality" role="radiogroup" aria-label="Watch compression" data-i18n-aria-label="Watch compression">
+                <button data-value="1" role="radio" title="Lossless repack" data-i18n-title="Lossless repack" data-i18n="Lossless">Lossless</button>
+                <button data-value="2" role="radio" title="0.75 times each clip's own bits per pixel" data-i18n-title="0.75 times each clip's own bits per pixel" data-i18n="Light">Light</button>
+                <button data-value="3" role="radio" title="0.55 times each clip's own bits per pixel" data-i18n-title="0.55 times each clip's own bits per pixel" data-i18n="Medium">Medium</button>
+                <button data-value="4" role="radio" title="0.35 times each clip's own bits per pixel" data-i18n-title="0.35 times each clip's own bits per pixel" data-i18n="Strong">Strong</button>
               </div>
-              <input type="number" class="mini-input watch-bpp" id="watch-bpp" min="0.5" max="8" step="0.1" inputmode="decimal" placeholder="bpp" aria-label="Watch bits per pixel" title="Bits per pixel for every watched clip">
-              <div class="seg seg-sm" id="watch-resolution" role="radiogroup" aria-label="Watch resolution">
-                <button data-value="original" role="radio" title="Original resolution">Orig</button>
+              <input type="number" class="mini-input watch-bpp" id="watch-bpp" min="0.5" max="8" step="0.1" inputmode="decimal" placeholder="bpp" aria-label="Watch bits per pixel" data-i18n-aria-label="Watch bits per pixel" title="Bits per pixel for every watched clip" data-i18n-title="Bits per pixel for every watched clip">
+              <div class="seg seg-sm" id="watch-resolution" role="radiogroup" aria-label="Watch resolution" data-i18n-aria-label="Watch resolution">
+                <button data-value="original" role="radio" title="Original resolution" data-i18n-title="Original resolution" data-i18n="Orig">Orig</button>
                 <button data-value="6k" role="radio" title="6K">6K</button>
-                <button data-value="4k" role="radio" title="4K UHD">4K</button>
+                <button data-value="4k" role="radio" title="4K UHD" data-i18n-title="4K UHD">4K</button>
               </div>
             </div>
             <label class="switch-row watch-clear-row" id="watch-clear-row">
               <span class="switch-text">
-                <span class="switch-title">Clear watch folder after process</span>
-                <span class="switch-sub" id="watch-clear-sub">Keeps source clips in watch input folder</span>
+                <span class="switch-title" data-i18n="Clear watch folder after process">Clear watch folder after process</span>
+                <span class="switch-sub" id="watch-clear-sub" data-i18n="Keeps source clips in watch input folder">Keeps source clips in watch input folder</span>
               </span>
               <input type="checkbox" id="watch-clear" class="switch">
             </label>
@@ -187,60 +191,60 @@
         </section>
 
         <section class="field" id="updates-section">
-          <div class="field-label">Updates</div>
+          <div class="field-label" data-i18n="Updates">Updates</div>
           <label class="switch-row" id="auto-update-row">
             <span class="switch-text">
-              <span class="switch-title">Check for updates</span>
-              <span class="switch-sub">Once a day. Only asks GitHub for the newest version; nothing about you or your clips is sent.</span>
+              <span class="switch-title" data-i18n="Check for updates">Check for updates</span>
+              <span class="switch-sub" data-i18n="Once a day. Only asks GitHub for the newest version; nothing about you or your clips is sent.">Once a day. Only asks GitHub for the newest version; nothing about you or your clips is sent.</span>
             </span>
             <input type="checkbox" id="auto-update" class="switch" checked>
           </label>
           <div class="update-row">
-            <button class="btn ghost" id="btn-check-update">Check Now</button>
+            <button class="btn ghost" id="btn-check-update" data-i18n="Check Now">Check Now</button>
             <span class="hint update-status" id="update-status"></span>
           </div>
         </section>
 
         <div class="beta-note">
           <svg viewBox="0 0 16 16" class="ico-sm"><path d="M8 5.2v3.3m0 2.2v.1M7 2.3 1.6 11.6c-.5.8.1 1.9 1.1 1.9h10.6c1 0 1.6-1.1 1.1-1.9L9 2.3c-.4-.8-1.6-.8-2 0Z"/></svg>
-          <span><b>Beta software.</b> Keep your digital negatives (the original clips) until you have checked the compressed copies yourself.</span>
+          <span data-i18n-html="html.beta"><b>Beta software.</b> Keep your digital negatives (the original clips) until you have checked the compressed copies yourself.</span>
         </div>
       </aside>
 
       <main class="queue" id="queue">
         <div class="queue-head">
           <div class="queue-title">
-            <h2>Queue</h2>
+            <h2 data-i18n="Queue">Queue</h2>
             <span class="queue-meta" id="queue-meta"></span>
           </div>
           <div class="queue-actions">
             <button class="btn ghost" id="btn-add">
-              <svg viewBox="0 0 16 16" class="ico-sm"><path d="M8 3v10M3 8h10"/></svg>Add Clips
+              <svg viewBox="0 0 16 16" class="ico-sm"><path d="M8 3v10M3 8h10"/></svg><span data-i18n="Add Clips">Add Clips</span>
             </button>
             <button class="btn ghost" id="btn-add-folder">
-              <svg viewBox="0 0 16 16" class="ico-sm"><path d="M1.8 4.2c0-.7.5-1.2 1.2-1.2h3l1.4 1.6h5.6c.7 0 1.2.5 1.2 1.2v6.2c0 .7-.5 1.2-1.2 1.2H3c-.7 0-1.2-.5-1.2-1.2V4.2Z"/></svg>Add Folder
+              <svg viewBox="0 0 16 16" class="ico-sm"><path d="M1.8 4.2c0-.7.5-1.2 1.2-1.2h3l1.4 1.6h5.6c.7 0 1.2.5 1.2 1.2v6.2c0 .7-.5 1.2-1.2 1.2H3c-.7 0-1.2-.5-1.2-1.2V4.2Z"/></svg><span data-i18n="Add Folder">Add Folder</span>
             </button>
-            <button class="btn ghost" id="btn-clear">Clear List</button>
+            <button class="btn ghost" id="btn-clear" data-i18n="Clear List">Clear List</button>
           </div>
         </div>
 
         <div class="update-banner" id="update-banner" role="status" hidden>
           <div class="update-banner-main">
             <svg viewBox="0 0 16 16" class="ico-sm"><path d="M8 2.5v7.5m0 0L5 7m3 3 3-3M3 12.5h10"/></svg>
-            <span id="update-banner-text">A new version is available</span>
-            <button class="link-btn" id="update-banner-how">How to update</button>
-            <button class="icon-btn" id="update-banner-close" title="Hide until the next version" aria-label="Hide">
+            <span id="update-banner-text" data-i18n="A new version is available">A new version is available</span>
+            <button class="link-btn" id="update-banner-how" data-i18n="How to update">How to update</button>
+            <button class="icon-btn" id="update-banner-close" title="Hide until the next version" data-i18n-title="Hide until the next version" aria-label="Hide" data-i18n-aria-label="Hide">
               <svg viewBox="0 0 16 16" class="ico-sm"><path d="M4 4l8 8M12 4l-8 8"/></svg>
             </button>
           </div>
           <div class="update-banner-steps" id="update-banner-steps" hidden>
-            <p>This server runs in a container, which does not update itself. To update it:</p>
+            <p data-i18n="This server runs in a container, which does not update itself. To update it:">This server runs in a container, which does not update itself. To update it:</p>
             <ol>
-              <li><b>Synology Container Manager:</b> open Project, select the Blue Compressor project and click Stop. Under Image, delete the old <code>ghcr.io/redn3/blue-compressor</code> image (or set the image tag in <code>docker-compose.yml</code> to <code id="update-banner-tag">the new version</code>). Then build or start the project again; it downloads the new version.</li>
-              <li><b>Docker Compose:</b> <code>docker compose pull</code>, then <code>docker compose up -d</code>.</li>
-              <li><b>Docker:</b> <code>docker pull ghcr.io/redn3/blue-compressor:latest</code>, then remove and recreate the container with the same settings.</li>
+              <li data-i18n-html="html.update_synology"><b>Synology Container Manager:</b> open Project, select the Blue Compressor project and click Stop. Under Image, delete the old <code>ghcr.io/redn3/blue-compressor</code> image (or set the image tag in <code>docker-compose.yml</code> to <code id="update-banner-tag">the new version</code>). Then build or start the project again; it downloads the new version.</li>
+              <li><b data-i18n="Docker Compose:">Docker Compose:</b> <code>docker compose pull</code>, then <code>docker compose up -d</code>.</li>
+              <li data-i18n-html="html.update_docker"><b>Docker:</b> <code>docker pull ghcr.io/redn3/blue-compressor:latest</code>, then remove and recreate the container with the same settings.</li>
             </ol>
-            <p>Your settings, watch folders and compressed clips stay as they are. <a id="update-banner-link" href="https://github.com/redn3/blue-compressor/releases/latest" target="_blank" rel="noopener">What's new</a>. Set <code>UPDATE_CHECK=false</code> to turn these checks off.</p>
+            <p data-i18n-html="html.update_note">Your settings, watch folders and compressed clips stay as they are. <a id="update-banner-link" href="https://github.com/redn3/blue-compressor/releases/latest" target="_blank" rel="noopener">What's new</a>. Set <code>UPDATE_CHECK=false</code> to turn these checks off.</p>
           </div>
         </div>
 
@@ -253,16 +257,16 @@
               </div>
               <svg viewBox="0 0 24 24" class="drop-arrow"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 19h14"/></svg>
             </div>
-            <div class="drop-title" id="drop-title">Drop clips or folders here</div>
-            <div class="drop-sub">Nikon N-RAW <span class="kbd">.NEV</span> and R3D NE <span class="kbd">.R3D</span>, any number at once</div>
+            <div class="drop-title" id="drop-title" data-i18n="Drop clips or folders here">Drop clips or folders here</div>
+            <div class="drop-sub" data-i18n-html="html.drop_sub">Nikon N-RAW <span class="kbd">.NEV</span> and R3D NE <span class="kbd">.R3D</span>, any number at once</div>
             <div class="drop-buttons">
-              <button class="btn primary-soft" id="empty-add">Choose Clips</button>
-              <button class="btn ghost" id="empty-add-folder">Choose Folder</button>
+              <button class="btn primary-soft" id="empty-add" data-i18n="Choose Clips">Choose Clips</button>
+              <button class="btn ghost" id="empty-add-folder" data-i18n="Choose Folder">Choose Folder</button>
             </div>
             <ul class="promises">
-              <li><svg viewBox="0 0 16 16" class="ico-sm"><path d="M8 1.5 2.5 3.8v3.7c0 3.3 2.3 6 5.5 7 3.2-1 5.5-3.7 5.5-7V3.8L8 1.5Z"/><path d="m5.6 8 1.7 1.7 3.2-3.4"/></svg>Originals are never modified</li>
-              <li><svg viewBox="0 0 16 16" class="ico-sm"><path d="M3 2.5h7l3 3v8H3z"/><path d="M5.5 8h5M5.5 10.5h5"/></svg>Metadata, audio and timecode kept</li>
-              <li><svg viewBox="0 0 16 16" class="ico-sm"><path d="M6.5 9.5 9.5 6.5M7.2 4.3l1-1a2.6 2.6 0 0 1 3.6 3.6l-1 1M8.8 11.7l-1 1a2.6 2.6 0 0 1-3.6-3.6l1-1"/></svg>Same file names, so edits relink</li>
+              <li><svg viewBox="0 0 16 16" class="ico-sm"><path d="M8 1.5 2.5 3.8v3.7c0 3.3 2.3 6 5.5 7 3.2-1 5.5-3.7 5.5-7V3.8L8 1.5Z"/><path d="m5.6 8 1.7 1.7 3.2-3.4"/></svg><span data-i18n="Originals are never modified">Originals are never modified</span></li>
+              <li><svg viewBox="0 0 16 16" class="ico-sm"><path d="M3 2.5h7l3 3v8H3z"/><path d="M5.5 8h5M5.5 10.5h5"/></svg><span data-i18n="Metadata, audio and timecode kept">Metadata, audio and timecode kept</span></li>
+              <li><svg viewBox="0 0 16 16" class="ico-sm"><path d="M6.5 9.5 9.5 6.5M7.2 4.3l1-1a2.6 2.6 0 0 1 3.6 3.6l-1 1M8.8 11.7l-1 1a2.6 2.6 0 0 1-3.6-3.6l1-1"/></svg><span data-i18n="Same file names, so edits relink">Same file names, so edits relink</span></li>
             </ul>
           </div>
         </div>
@@ -272,15 +276,15 @@
         <div class="drop-overlay" id="drop-overlay">
           <div class="drop-overlay-inner">
             <svg viewBox="0 0 24 24" class="drop-arrow"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 19h14"/></svg>
-            <span>Drop to add to the queue</span>
+            <span data-i18n="Drop to add to the queue">Drop to add to the queue</span>
           </div>
         </div>
       </main>
     </div>
 
-    <section class="viewer" id="viewer" aria-label="Quality preview">
+    <section class="viewer" id="viewer" aria-label="Quality preview" data-i18n-aria-label="Quality preview">
       <div class="viewer-top">
-        <button class="icon-btn v-close" id="v-close" title="Back to queue (Esc)">
+        <button class="icon-btn v-close" id="v-close" title="Back to queue (Esc)" data-i18n-title="Back to queue (Esc)">
           <svg viewBox="0 0 16 16"><path d="M10 3.5 5.5 8l4.5 4.5"/></svg>
         </button>
         <div class="v-title">
@@ -288,23 +292,23 @@
           <div class="v-meta" id="v-meta"></div>
         </div>
         <div class="v-controls">
-          <div class="v-group" id="v-quality-group"><span class="v-group-label">Compression</span>
+          <div class="v-group" id="v-quality-group"><span class="v-group-label" data-i18n="Compression">Compression</span>
             <div class="v-squeeze">
               <div class="seg seg-sm" id="v-quality">
-                <button data-value="lossless">Lossless</button><button data-value="light">Light</button><button data-value="medium">Medium</button><button data-value="strong">Strong</button>
+                <button data-value="lossless" data-i18n="Lossless">Lossless</button><button data-value="light" data-i18n="Light">Light</button><button data-value="medium" data-i18n="Medium">Medium</button><button data-value="strong" data-i18n="Strong">Strong</button>
               </div>
-              <input type="number" class="mini-input" id="v-bpp" min="0.5" max="8" step="0.1" inputmode="decimal" aria-label="Bits per pixel" title="Bits per pixel">
+              <input type="number" class="mini-input" id="v-bpp" min="0.5" max="8" step="0.1" inputmode="decimal" aria-label="Bits per pixel" data-i18n-aria-label="Bits per pixel" title="Bits per pixel" data-i18n-title="Bits per pixel">
             </div>
           </div>
-          <div class="v-group"><span class="v-group-label">Resolution</span>
+          <div class="v-group"><span class="v-group-label" data-i18n="Resolution">Resolution</span>
             <div class="seg seg-sm" id="v-res">
-              <button data-value="original">Original</button><button data-value="6k">6K</button><button data-value="4k">4K</button>
+              <button data-value="original" data-i18n="Original">Original</button><button data-value="6k">6K</button><button data-value="4k">4K</button>
             </div>
           </div>
-          <div class="v-group" id="v-squeeze-group" title="Anamorphic de-squeeze: stretches the preview sideways. Display only, the compressed clip is not changed."><span class="v-group-label">De-squeeze</span>
+          <div class="v-group" id="v-squeeze-group" title="Anamorphic de-squeeze: stretches the preview sideways. Display only, the compressed clip is not changed." data-i18n-title="Anamorphic de-squeeze: stretches the preview sideways. Display only, the compressed clip is not changed."><span class="v-group-label" data-i18n="De-squeeze">De-squeeze</span>
             <div class="v-squeeze">
-              <select class="mini-select" id="v-squeeze" aria-label="Anamorphic de-squeeze">
-                <option value="1">None (1x)</option>
+              <select class="mini-select" id="v-squeeze" aria-label="Anamorphic de-squeeze" data-i18n-aria-label="Anamorphic de-squeeze">
+                <option value="1" data-i18n="None (1x)">None (1x)</option>
                 <option value="1.25">1.25x</option>
                 <option value="1.33">1.33x</option>
                 <option value="1.5">1.5x</option>
@@ -312,14 +316,14 @@
                 <option value="1.6">1.6x</option>
                 <option value="1.8">1.8x</option>
                 <option value="2">2x</option>
-                <option value="custom">Custom</option>
+                <option value="custom" data-i18n="Custom">Custom</option>
               </select>
-              <input type="number" class="mini-input" id="v-squeeze-custom" min="1" max="3" step="0.01" inputmode="decimal" aria-label="Custom de-squeeze factor" hidden>
+              <input type="number" class="mini-input" id="v-squeeze-custom" min="1" max="3" step="0.01" inputmode="decimal" aria-label="Custom de-squeeze factor" data-i18n-aria-label="Custom de-squeeze factor" hidden>
             </div>
           </div>
-          <div class="v-group"><span class="v-group-label">Zoom</span>
+          <div class="v-group"><span class="v-group-label" data-i18n="Zoom">Zoom</span>
             <div class="seg seg-sm" id="v-zoom">
-              <button data-value="fit">Fit</button><button data-value="1">100%</button><button data-value="2">200%</button>
+              <button data-value="fit" data-i18n="Fit">Fit</button><button data-value="1">100%</button><button data-value="2">200%</button>
             </div>
           </div>
         </div>
@@ -327,48 +331,48 @@
 
       <div class="stage" id="stage">
         <canvas id="v-canvas"></canvas>
-        <div class="v-tag left">Original</div>
+        <div class="v-tag left" data-i18n="Original">Original</div>
         <div class="v-tag right" id="v-tag-after"></div>
         <div class="v-split" id="v-split"><div class="v-knob"><svg viewBox="0 0 16 16"><path d="M6 4 2.5 8 6 12M10 4l3.5 4-3.5 4"/></svg></div></div>
-        <div class="v-loading" id="v-loading"><span class="spinner"></span><span id="v-loading-text">Rendering</span></div>
+        <div class="v-loading" id="v-loading"><span class="spinner"></span><span id="v-loading-text" data-i18n="Rendering">Rendering</span></div>
         <div class="v-error" id="v-error"></div>
-        <div class="v-mini" id="v-mini" title="Drag to move around the frame">
+        <div class="v-mini" id="v-mini" title="Drag to move around the frame" data-i18n-title="Drag to move around the frame">
           <canvas id="v-mini-canvas"></canvas>
           <div class="v-mini-view" id="v-mini-view"></div>
         </div>
         <div class="v-zoom-badge" id="v-zoom-badge"></div>
-        <div class="v-hint" id="v-hint">Drag the line to compare. Click to zoom in, pinch or scroll to zoom, drag to pan.</div>
+        <div class="v-hint" id="v-hint" data-i18n="Drag the line to compare. Click to zoom in, pinch or scroll to zoom, drag to pan.">Drag the line to compare. Click to zoom in, pinch or scroll to zoom, drag to pan.</div>
       </div>
 
       <div class="viewer-bottom">
         <div class="scrub">
-          <button class="icon-btn" id="v-prev" title="Previous frame (Left)"><svg viewBox="0 0 16 16"><path d="M10 3.5 5.5 8l4.5 4.5"/></svg></button>
+          <button class="icon-btn" id="v-prev" title="Previous frame (Left)" data-i18n-title="Previous frame (Left)"><svg viewBox="0 0 16 16"><path d="M10 3.5 5.5 8l4.5 4.5"/></svg></button>
           <input type="range" id="v-frame" min="0" max="0" value="0" class="range">
-          <button class="icon-btn" id="v-next" title="Next frame (Right)"><svg viewBox="0 0 16 16"><path d="m6 3.5 4.5 4.5L6 12.5"/></svg></button>
-          <div class="scrub-label"><span id="v-frame-label">Frame 1</span><span class="scrub-tc" id="v-tc"></span></div>
+          <button class="icon-btn" id="v-next" title="Next frame (Right)" data-i18n-title="Next frame (Right)"><svg viewBox="0 0 16 16"><path d="m6 3.5 4.5 4.5L6 12.5"/></svg></button>
+          <div class="scrub-label"><span id="v-frame-label" data-i18n="Frame 1">Frame 1</span><span class="scrub-tc" id="v-tc"></span></div>
         </div>
         <div class="v-estimate">
-          <div class="v-est-main" id="v-est-main">Estimating</div>
+          <div class="v-est-main" id="v-est-main" data-i18n="Estimating">Estimating</div>
           <div class="v-est-sub" id="v-est-sub"></div>
         </div>
-        <button class="btn primary" id="v-apply">Apply to this clip</button>
+        <button class="btn primary" id="v-apply" data-i18n="Apply to this clip">Apply to this clip</button>
       </div>
     </section>
 
     <footer class="bar">
       <div class="bar-progress" aria-hidden="true"><div class="bar-progress-fill" id="bar-fill"></div></div>
       <div class="bar-left">
-        <div class="bar-main" id="bar-main">No clips yet</div>
-        <div class="bar-sub" id="bar-sub">Add clips to see the estimated savings</div>
+        <div class="bar-main" id="bar-main" data-i18n="No clips yet">No clips yet</div>
+        <div class="bar-sub" id="bar-sub" data-i18n="Add clips to see the estimated savings">Add clips to see the estimated savings</div>
       </div>
       <div class="bar-actions">
         <button class="btn ghost" id="btn-pause" hidden>
           <svg viewBox="0 0 16 16" class="ico-sm" id="pause-icon"></svg>
-          <span id="pause-label">Pause</span>
+          <span id="pause-label" data-i18n="Pause">Pause</span>
         </button>
         <button class="btn primary" id="btn-go" disabled>
           <svg viewBox="0 0 16 16" class="ico-sm" id="go-icon"><path d="M4.5 3.2v9.6L12.5 8 4.5 3.2Z" class="fill"/></svg>
-          <span id="go-label">Compress</span>
+          <span id="go-label" data-i18n="Compress">Compress</span>
         </button>
       </div>
     </footer>
@@ -379,11 +383,11 @@
       <div class="modal-icon">
         <svg viewBox="0 0 24 24"><path d="M12 8v5m0 3.2v.1M10.3 3.9 2.6 17.3c-.8 1.3.2 2.9 1.7 2.9h15.4c1.5 0 2.5-1.6 1.7-2.9L13.7 3.9c-.8-1.3-2.6-1.3-3.4 0Z"/></svg>
       </div>
-      <h3 id="quit-title">Stop compressing and quit?</h3>
-      <p>The clip in progress is discarded. Finished clips are kept.</p>
+      <h3 id="quit-title" data-i18n="Stop compressing and quit?">Stop compressing and quit?</h3>
+      <p data-i18n="The clip in progress is discarded. Finished clips are kept.">The clip in progress is discarded. Finished clips are kept.</p>
       <div class="modal-buttons">
-        <button class="btn ghost" id="quit-cancel">Keep Working</button>
-        <button class="btn danger" id="quit-confirm">Stop and Quit</button>
+        <button class="btn ghost" id="quit-cancel" data-i18n="Keep Working">Keep Working</button>
+        <button class="btn danger" id="quit-confirm" data-i18n="Stop and Quit">Stop and Quit</button>
       </div>
     </div>
   </div>
@@ -393,10 +397,10 @@
       <div class="modal-icon">
         <svg viewBox="0 0 24 24"><path d="M12 8v5m0 3.2v.1M10.3 3.9 2.6 17.3c-.8 1.3.2 2.9 1.7 2.9h15.4c1.5 0 2.5-1.6 1.7-2.9L13.7 3.9c-.8-1.3-2.6-1.3-3.4 0Z"/></svg>
       </div>
-      <h3 id="beta-title">Blue Compressor is beta software</h3>
-      <p>It has been tested on only a few cameras and clips. Do not delete your digital negatives (the original clips) until you have opened the compressed copies in your own software and checked them yourself.</p>
+      <h3 id="beta-title" data-i18n="Blue Compressor is beta software">Blue Compressor is beta software</h3>
+      <p data-i18n="It has been tested on only a few cameras and clips. Do not delete your digital negatives (the original clips) until you have opened the compressed copies in your own software and checked them yourself.">It has been tested on only a few cameras and clips. Do not delete your digital negatives (the original clips) until you have opened the compressed copies in your own software and checked them yourself.</p>
       <div class="modal-buttons">
-        <button class="btn primary" id="beta-ok">I understand</button>
+        <button class="btn primary" id="beta-ok" data-i18n="I understand">I understand</button>
       </div>
     </div>
   </div>
@@ -406,16 +410,16 @@
       <div class="modal-icon update-icon">
         <svg viewBox="0 0 24 24"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 19.5h14"/></svg>
       </div>
-      <h3 id="update-title">Blue Compressor is available</h3>
-      <p id="update-sub">Update now?</p>
+      <h3 id="update-title" data-i18n="Blue Compressor is available">Blue Compressor is available</h3>
+      <p id="update-sub" data-i18n="Update now?">Update now?</p>
       <div class="update-notes" id="update-notes"></div>
-      <div class="update-progress" id="update-progress" hidden><div class="update-bar"><i id="update-bar"></i></div><span id="update-progress-text">Downloading</span></div>
+      <div class="update-progress" id="update-progress" hidden><div class="update-bar"><i id="update-bar"></i></div><span id="update-progress-text" data-i18n="Downloading">Downloading</span></div>
       <p class="update-msg" id="update-msg" hidden></p>
       <div class="modal-buttons" id="update-buttons">
-        <button class="btn ghost" id="update-later">Later</button>
-        <button class="btn primary" id="update-now">Update</button>
+        <button class="btn ghost" id="update-later" data-i18n="Later">Later</button>
+        <button class="btn primary" id="update-now" data-i18n="Update">Update</button>
       </div>
-      <button class="link-btn update-skip" id="update-skip">Skip this version</button>
+      <button class="link-btn update-skip" id="update-skip" data-i18n="Skip this version">Skip this version</button>
     </div>
   </div>
 
@@ -423,36 +427,36 @@
     <div class="modal-card fs-card">
       <div class="fs-head">
         <div>
-          <h3 id="fs-title">Browse Files</h3>
+          <h3 id="fs-title" data-i18n="Browse Files">Browse Files</h3>
           <div class="fs-sub" id="fs-sub"></div>
         </div>
-        <button class="icon-btn" id="fs-close" title="Close (Esc)">
+        <button class="icon-btn" id="fs-close" title="Close (Esc)" data-i18n-title="Close (Esc)">
           <svg viewBox="0 0 16 16"><path d="m4.5 4.5 7 7m0-7-7 7"/></svg>
         </button>
       </div>
       <div class="fs-roots" id="fs-roots"></div>
       <div class="fs-nav">
-        <button class="btn ghost" id="fs-up" title="Parent folder">
+        <button class="btn ghost" id="fs-up" title="Parent folder" data-i18n-title="Parent folder">
           <svg viewBox="0 0 16 16" class="ico-sm"><path d="m4.5 9.5 3.5-3.5 3.5 3.5"/></svg>Up
         </button>
         <input type="text" class="fs-input" id="fs-path-input" spellcheck="false" autocomplete="off">
-        <button class="btn ghost" id="fs-go">Go</button>
-        <button class="btn ghost" id="fs-select-all" hidden>Select All Clips</button>
-        <button class="btn ghost" id="fs-mkdir-toggle" hidden>New Folder</button>
+        <button class="btn ghost" id="fs-go" data-i18n="Go">Go</button>
+        <button class="btn ghost" id="fs-select-all" hidden data-i18n="Select All Clips">Select All Clips</button>
+        <button class="btn ghost" id="fs-mkdir-toggle" hidden data-i18n="New Folder">New Folder</button>
       </div>
       <div class="fs-mkdir-row" id="fs-mkdir-row" hidden>
-        <input type="text" class="fs-input" id="fs-mkdir-input" placeholder="New folder name" spellcheck="false" autocomplete="off">
-        <button class="btn primary-soft" id="fs-mkdir-create">Create</button>
-        <button class="btn ghost" id="fs-mkdir-cancel">Cancel</button>
+        <input type="text" class="fs-input" id="fs-mkdir-input" placeholder="New folder name" data-i18n-placeholder="New folder name" spellcheck="false" autocomplete="off">
+        <button class="btn primary-soft" id="fs-mkdir-create" data-i18n="Create">Create</button>
+        <button class="btn ghost" id="fs-mkdir-cancel" data-i18n="Cancel">Cancel</button>
       </div>
       <div class="fs-error" id="fs-error" hidden></div>
       <div class="fs-list" id="fs-list"></div>
       <div class="fs-foot">
         <div class="fs-summary" id="fs-summary"></div>
         <div class="fs-buttons">
-          <button class="btn ghost" id="fs-cancel">Cancel</button>
-          <button class="btn ghost" id="fs-add-current-dir" hidden>Add Current Folder</button>
-          <button class="btn primary" id="fs-confirm">Select</button>
+          <button class="btn ghost" id="fs-cancel" data-i18n="Cancel">Cancel</button>
+          <button class="btn ghost" id="fs-add-current-dir" hidden data-i18n="Add Current Folder">Add Current Folder</button>
+          <button class="btn primary" id="fs-confirm" data-i18n="Select">Select</button>
         </div>
       </div>
     </div>
@@ -468,13 +472,13 @@
         </div>
         <div class="job-meta"></div>
         <div class="job-settings">
-          <select class="mini-select job-c" title="Compression (picks go by this clip's own bits per pixel)">
-            <option value="lossless">Lossless</option><option value="light">Light</option>
-            <option value="medium">Medium</option><option value="strong">Strong</option><option value="custom">Custom</option>
+          <select class="mini-select job-c" title="Compression (picks go by this clip's own bits per pixel)" data-i18n-title="Compression (picks go by this clip's own bits per pixel)">
+            <option value="lossless" data-i18n="Lossless">Lossless</option><option value="light" data-i18n="Light">Light</option>
+            <option value="medium" data-i18n="Medium">Medium</option><option value="strong" data-i18n="Strong">Strong</option><option value="custom" data-i18n="Custom">Custom</option>
           </select>
-          <input type="number" class="mini-input job-b" min="0.5" max="8" step="0.1" inputmode="decimal" title="Bits per pixel" aria-label="Bits per pixel">
-          <select class="mini-select job-r" title="Resolution">
-            <option value="original">Original</option><option value="6k">6K</option><option value="4k">4K UHD</option>
+          <input type="number" class="mini-input job-b" min="0.5" max="8" step="0.1" inputmode="decimal" title="Bits per pixel" data-i18n-title="Bits per pixel" aria-label="Bits per pixel" data-i18n-aria-label="Bits per pixel">
+          <select class="mini-select job-r" title="Resolution" data-i18n-title="Resolution">
+            <option value="original" data-i18n="Original">Original</option><option value="6k">6K</option><option value="4k" data-i18n="4K UHD">4K UHD</option>
           </select>
         </div>
       </div>
@@ -483,13 +487,13 @@
         <div class="job-stat-sub"></div>
       </div>
       <div class="job-actions">
-        <button class="icon-btn job-preview" title="Preview quality">
+        <button class="icon-btn job-preview" title="Preview quality" data-i18n-title="Preview quality">
           <svg viewBox="0 0 16 16"><path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8Z"/><circle cx="8" cy="8" r="2"/></svg>
         </button>
-        <button class="icon-btn job-reveal" title="Show in folder">
+        <button class="icon-btn job-reveal" title="Show in folder" data-i18n-title="Show in folder">
           <svg viewBox="0 0 16 16"><path d="M6.5 3H3.8C3 3 2.5 3.5 2.5 4.3v7.9c0 .8.5 1.3 1.3 1.3h7.9c.8 0 1.3-.5 1.3-1.3V9.5"/><path d="M9 2.5h4.5V7M13.3 2.7 7.5 8.5"/></svg>
         </button>
-        <button class="icon-btn job-remove" title="Remove from queue">
+        <button class="icon-btn job-remove" title="Remove from queue" data-i18n-title="Remove from queue">
           <svg viewBox="0 0 16 16"><path d="m4.5 4.5 7 7m0-7-7 7"/></svg>
         </button>
       </div>
@@ -501,6 +505,8 @@
     </div>
   </template>
 
+  <script src="locales.js"></script>
+  <script src="i18n.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -25,20 +25,20 @@ const BPP_MARKS = { 3: "HE", 5: "HE*" };
 const LOSSLESS = "lossless";
 const LOSSLESS_KEEP = 0.93; // typical size of the lossless repack: 4 to 10% smaller
 const PICKS = [
-  { id: "lossless", label: "Lossless", text: "Identical picture, files only a little smaller." },
-  { id: "light", label: "Light", f: 0.75, text: "Minimal quality loss, about a quarter smaller." },
-  { id: "medium", label: "Medium", f: 0.55, text: "Balanced, good for archive copies, about half the size." },
-  { id: "strong", label: "Strong", f: 0.35, text: "Smallest files, for reference copies." },
+  { id: "lossless", get label() { return tr("Lossless"); }, get text() { return tr("Identical picture, files only a little smaller."); } },
+  { id: "light", get label() { return tr("Light"); }, f: 0.75, get text() { return tr("Minimal quality loss, about a quarter smaller."); } },
+  { id: "medium", get label() { return tr("Medium"); }, f: 0.55, get text() { return tr("Balanced, good for archive copies, about half the size."); } },
+  { id: "strong", get label() { return tr("Strong"); }, f: 0.35, get text() { return tr("Smallest files, for reference copies."); } },
 ];
 const PICK = Object.fromEntries(PICKS.map((x) => [x.id, x]));
 // Quality steps of earlier versions: Q1 is Lossless, Q2 to Q4 the Light, Medium and Strong picks.
 const LEGACY_PICK = { 1: "lossless", 2: "light", 3: "medium", 4: "strong" };
 function clampBpp(v) {
-  const n = Number(v);
+  const n = Number(String(v).replace(",", "."));
   if (v === "" || v == null || !Number.isFinite(n)) return null;
   return Math.round(Math.min(BPP_MAX, Math.max(BPP_MIN, n)) * 10) / 10;
 }
-const bppText = (b) => String(Math.round(b * 10) / 10);
+const bppText = (b) => num(Math.round(b * 10) / 10, 0, 1);
 const isLossless = (c) => c === LOSSLESS;
 const resolved = (c) => typeof c === "number" || c === LOSSLESS;
 // What a quick pick stands for on clips of `ref` bpp: a fraction of it, rounded to 0.1 and
@@ -54,7 +54,7 @@ const pickOf = (c) => (typeof c === "string" && PICK[c]) || null;
 const relative = (c) => !resolved(c) && !!PICK[c];
 // A target at or above the clip's own rate gains nothing: it is the lossless repack.
 const repacks = (j, c) => typeof c === "number" && j.bpp > 0 && c >= j.bpp;
-const compText = (c) => (isLossless(c) ? "Lossless" : typeof c === "number" ? `${bppText(c)} bpp` : PICK[c] ? PICK[c].label : "");
+const compText = (c) => (isLossless(c) ? tr("Lossless") : typeof c === "number" ? tr("{0} bpp", bppText(c)) : PICK[c] ? PICK[c].label : "");
 // Request fields of a setting.
 // A pick not yet resolved (a clip whose rate is unknown) goes as its legacy step, which the
 // engine resolves from the clip's own rate.
@@ -65,11 +65,11 @@ const compFields = (c) =>
   : { lossless: false, bpp: null, quality: PICK_STEP[c] || 2 };
 
 const RESOLUTION_NOTES = {
-  original: "Keeps the recorded raw resolution. Only the coded data changes.",
-  "6k": "6048 × 3402 active. Clips already 6K or smaller keep their size.",
-  "4k": "3840 × 2160 active (UHD). The raw image is scaled down per colour, then compressed again.",
+  get original() { return tr("Keeps the recorded raw resolution. Only the coded data changes."); },
+  get "6k"() { return tr("6048 × 3402 active. Clips already 6K or smaller keep their size."); },
+  get "4k"() { return tr("3840 × 2160 active (UHD). The raw image is scaled down per colour, then compressed again."); },
 };
-const RES_LABEL = { original: "Original", "6k": "6K", "4k": "4K UHD" };
+const RES_LABEL = { get original() { return tr("Original"); }, "6k": "6K", get "4k"() { return tr("4K UHD"); } };
 const BETA_ACK = "beta-ack-1";
 
 // Short name of a setting, as the output folders are named: "1.2bpp", "Lossless 4K".
@@ -86,6 +86,8 @@ const settings = Object.assign(
 let jobs = [];
 let nextId = 1;
 let running = false;
+// Re-renders the text after a language change (see i18n.js).
+window.bcRerender = () => { renderSettings(); renderCompression(); renderAll(); renderFooter(); };
 let paused = false;
 // Totals of the current batch for the "saved so far" counter. Clips skipped at run time
 // because their output already existed count as done, not towards the bytes.
@@ -145,7 +147,7 @@ function resolvedSpan(list, c = settings.compression) {
   const v = list.filter((j) => j.bpp > 0).map((j) => resolveComp(c, j.bpp)).filter((x) => typeof x === "number");
   return v.length ? [Math.min(...v), Math.max(...v)] : null;
 }
-const spanText = (sp) => (!sp ? "" : sp[0] === sp[1] ? `${bppText(sp[0])} bpp` : `${bppText(sp[0])} to ${bppText(sp[1])} bpp`);
+const spanText = (sp) => (!sp ? "" : sp[0] === sp[1] ? tr("{0} bpp", bppText(sp[0])) : tr("{0} to {1} bpp", bppText(sp[0]), bppText(sp[1])));
 const settingOf = (j) => ({ compression: compOf(j), resolution: resolutionOf(j), proxy: !!settings.proxies, r3d: !!settings.r3d && isNev(j), cbr: !!settings.cbr, toNev: !!settings.toNev && isR3d(j), rewrap: !!settings.rewrap, rmd: settings.rmd !== false, rmdEv: settings.rmdEv ?? null });
 // The R3D NE toggle only acts on .nev clips, the N-RAW one on .R3D clips.
 function isR3d(j) { return /\.r3d$/i.test((j && j.path) || ""); }
@@ -207,10 +209,10 @@ async function checkExisting() {
 // Formatting -----------------------------------------------------------------
 
 function gb(bytes) {
-  if (bytes >= 1e12) return (bytes / 1e12).toFixed(2) + " TB";
-  if (bytes >= 1e9) return (bytes / 1e9).toFixed(2) + " GB";
-  if (bytes >= 1e6) return (bytes / 1e6).toFixed(bytes >= 1e8 ? 0 : 1) + " MB";
-  return (bytes / 1e3).toFixed(0) + " KB";
+  if (bytes >= 1e12) return tr("{0} TB", num(bytes / 1e12, 2, 2));
+  if (bytes >= 1e9) return tr("{0} GB", num(bytes / 1e9, 2, 2));
+  if (bytes >= 1e6) { const d = bytes >= 1e8 ? 0 : 1; return tr("{0} MB", num(bytes / 1e6, d, d)); }
+  return tr("{0} KB", num(bytes / 1e3, 0, 0));
 }
 function clock(s) {
   if (!isFinite(s) || s < 0) return "";
@@ -224,8 +226,8 @@ function timecode(frame, fps) {
   const pad = (n) => String(n).padStart(2, "0");
   return `${pad(Math.floor(total / 3600))}:${pad(Math.floor(total / 60) % 60)}:${pad(total % 60)}:${pad(frame % f)}`;
 }
-const duration = (s) => (s < 60 ? `${s.toFixed(1)} s` : clock(s));
-const fpsText = (f) => (f >= 100 ? f.toFixed(0) : f.toFixed(1));
+const duration = (s) => (s < 60 ? tr("{0} s", num(s, 1, 1)) : clock(s));
+const fpsText = (f) => (f >= 100 ? num(f, 0, 0) : num(f, 1, 1));
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 
 // Settings panel ---------------------------------------------------------------
@@ -257,26 +259,26 @@ function renderSettings() {
   $("same-all").checked = settings.sameForAll;
   $("same-all").disabled = running;
   $("same-sub").textContent = settings.sameForAll
-    ? "Applies to every clip in the queue"
-    : "Each clip keeps its own settings";
-  $("label-resolution").textContent = settings.sameForAll ? "Resolution" : "Default resolution";
+    ? tr("Applies to every clip in the queue")
+    : tr("Each clip keeps its own settings");
+  $("label-resolution").textContent = settings.sameForAll ? tr("Resolution") : tr("Default resolution");
   $("resolution-note").textContent = RESOLUTION_NOTES[settings.resolution];
   renderCompression();
   $("backend-note").textContent = backendNote();
   $("seg-backend").classList.toggle("inactive", !anyResize());
   const custom = settings.dest === "custom" && settings.outputFolder;
   setSeg("seg-dest", custom ? "custom" : "next", running);
-  $("dest-custom").textContent = custom ? "Folder" : "Choose folder";
+  $("dest-custom").textContent = custom ? tr("Folder") : tr("Choose folder");
   const hint = $("dest-hint");
   if (custom) {
     hint.textContent = "";
-    hint.title = "File names are kept. A second version of a clip goes into a sub-folder named after its setting.";
+    hint.title = tr("File names are kept. A second version of a clip goes into a sub-folder named after its setting.");
     const path = document.createElement("span");
     path.className = "dest-path";
     path.textContent = settings.outputFolder;
     path.title = settings.outputFolder;
     const change = document.createElement("a");
-    change.textContent = "Change";
+    change.textContent = tr("Change");
     change.className = "link";
     change.addEventListener("click", chooseOutput);
     hint.append(path, change);
@@ -285,12 +287,12 @@ function renderSettings() {
       ? [...new Set(jobs.filter((j) => j.ok && j.bpp > 0).map((j) => variantName(compOf(j), settings.resolution)))]
       : [];
     hint.textContent = settings.sameForAll && resolved(settings.compression)
-      ? `In a “Compressed ${variantName(settings.compression, settings.resolution)}” folder beside each clip.`
+      ? tr("In a “Compressed {0}” folder beside each clip.", variantName(settings.compression, settings.resolution))
       : settings.sameForAll && names.length === 1
-        ? `In a “Compressed ${names[0]}” folder beside each clip.`
+        ? tr("In a “Compressed {0}” folder beside each clip.", names[0])
         : settings.sameForAll && names.length
-          ? `In a “Compressed …” folder beside each clip, named after its bpp (${names.slice(0, 3).join(", ")}${names.length > 3 ? ", …" : ""}).`
-          : "In a “Compressed …” folder beside each clip, named after its setting.";
+          ? tr("In a “Compressed …” folder beside each clip, named after its bpp ({0}{1}).", names.slice(0, 3).join(", "), names.length > 3 ? ", …" : "")
+          : tr("In a “Compressed …” folder beside each clip, named after its setting.");
   }
   const chip = $("engine-chip");
   chip.classList.toggle("cpu", settings.backend === "cpu");
@@ -306,12 +308,12 @@ function anyResize() {
 function backendNote() {
   const gpuName = (info.gpu || "").replace(/^[^:]*:\s*/, "");
   if (!anyResize()) {
-    return "Not used at the original resolution: all the work then runs on the CPU cores.";
+    return tr("Not used at the original resolution: all the work then runs on the CPU cores.");
   }
-  if (settings.backend === "cpu") return "6K and 4K resizing runs on the CPU cores, about two to three times slower.";
-  if (!info.gpuAvailable) return "No supported GPU found, so 6K and 4K resizing runs on the CPU cores.";
-  return `6K and 4K resizing runs on the ${gpuName || "GPU"}; the final packing stays on the CPU. ` +
-    "Matches the CPU result to within float rounding.";
+  if (settings.backend === "cpu") return tr("6K and 4K resizing runs on the CPU cores, about two to three times slower.");
+  if (!info.gpuAvailable) return tr("No supported GPU found, so 6K and 4K resizing runs on the CPU cores.");
+  return tr("6K and 4K resizing runs on the {0}; the final packing stays on the CPU. ", gpuName || "GPU") +
+    tr("Matches the CPU result to within float rounding.");
 }
 
 // Compression panel ---------------------------------------------------------------
@@ -356,7 +358,7 @@ function renderCompression() {
   const live = jobs.filter((j) => toCompress(j) && j.bpp > 0);
   const span = relative(c) && !isLossless(c) ? resolvedSpan(live.length ? live : jobs) : null;
   setSeg("seg-picks", pick ? pick.id : "", running);
-  $("label-compression").textContent = settings.sameForAll ? "Compression" : "Default compression";
+  $("label-compression").textContent = settings.sameForAll ? tr("Compression") : tr("Default compression");
   const top = sliderTop();
   const range = $("bpp-range"), num = $("bpp-num");
   range.max = String(top);
@@ -369,28 +371,28 @@ function renderCompression() {
   range.classList.toggle("lossless", isLossless(c));
   // The value box: a number with its unit, or the pick's name when it differs per clip.
   const shown = typeof c === "number" ? c : span && span[0] === span[1] ? span[0] : null;
-  if (!num.matches(":focus")) num.value = shown != null ? bppText(shown) : isLossless(c) ? "Lossless" : pick ? pick.label : "";
+  if (!num.matches(":focus")) num.value = shown != null ? bppText(shown) : isLossless(c) ? tr("Lossless") : pick ? pick.label : "";
   $("bpp-unit").hidden = shown == null && !num.matches(":focus");
   fitNum(num);
-  num.title = span ? `${pick.label}: ${spanText(span)}, by each clip's own rate` : "Bits per pixel";
+  num.title = span ? tr("{0}: {1}, by each clip's own rate", pick.label, spanText(span)) : tr("Bits per pixel");
   range.disabled = num.disabled = running;
   renderTicks($("bpp-ticks"), top);
   $("bpp-sources").innerHTML = sourceMarks().map((m) =>
     `<span class="bpp-source" style="left:${sliderPos(m.bpp, top)}" title="${esc(`Your clip${m.names.length > 1 ? "s" : ""} at ${bppText(m.bpp)} bpp: ${m.names.slice(0, 4).join(", ")}${m.names.length > 4 ? ` and ${m.names.length - 4} more` : ""}`)}"></span>`).join("") +
-    (span ? targetMarks(c).map((t) => `<span class="bpp-target" style="left:${sliderPos(t, top)}" title="${esc(`${pick.label} on a ${bppText(t / pick.f)} bpp clip: ${bppText(t)} bpp`)}"></span>`).join("") : "") +
+    (span ? targetMarks(c).map((t) => `<span class="bpp-target" style="left:${sliderPos(t, top)}" title="${esc(tr("{0} on a {1} bpp clip: {2} bpp", pick.label, bppText(t / pick.f), bppText(t)))}"></span>`).join("") : "") +
     Object.entries(BPP_MARKS).filter(([r]) => Number(r) <= top).map(([r, name]) =>
       `<span class="bpp-he" style="left:${sliderPos(Number(r), top)}" title="${esc(`${name}: Nikon's own ${r} bpp stills`)}">${name}</span>`).join("");
 
   const sizes = batchSizes();
   const pct = sizes.before > 0 ? Math.round((1 - sizes.after / sizes.before) * 100) : null;
   $("comp-text").textContent = pick ? pick.text
-    : pct != null ? `Files about ${Math.max(0, pct)}% smaller than the originals.`
-    : "Your own size, in bits per pixel.";
+    : pct != null ? tr("Files about {0}% smaller than the originals.", Math.max(0, pct))
+    : tr("Your own size, in bits per pixel.");
   const readout = $("comp-readout");
   if (sizes.count && (resolved(c) || span)) {
-    readout.innerHTML = `${gb(sizes.before)} → about ${gb(sizes.after)} <span class="good">${pct > 0 ? `${pct}% smaller` : "about the same"}</span>`;
+    readout.innerHTML = `${tr("{0} → about {1}", gb(sizes.before), gb(sizes.after))} <span class="good">${pct > 0 ? tr("{0}% smaller", pct) : tr("about the same")}</span>`;
   } else {
-    readout.textContent = jobs.length ? "" : "Add clips to see the sizes.";
+    readout.textContent = jobs.length ? "" : tr("Add clips to see the sizes.");
   }
   // One short line under the slider.
   const note = $("bpp-note");
@@ -399,15 +401,15 @@ function renderCompression() {
   const over = pending.filter((j) => repacks(j, compOf(j)));
   const rates = pending.map((j) => j.bpp);
   const srcSpan = rates.length ? spanText([Math.min(...rates), Math.max(...rates)]) : "";
-  const yours = srcSpan ? `Your clip${pending.length === 1 ? "" : "s"}: ${srcSpan}.` : "";
+  const yours = srcSpan ? (pending.length === 1 ? tr("Your clip: {0}.", srcSpan) : tr("Your clips: {0}.", srcSpan)) : "";
   let line = yours;
   if (over.length && over.length === pending.length) {
-    line = pending.length === 1 ? `At or above this clip's ${bppText(pending[0].bpp)} bpp: lossless repack.` : "At or above every clip's rate: lossless repack.";
+    line = pending.length === 1 ? tr("At or above this clip's {0} bpp: lossless repack.", bppText(pending[0].bpp)) : tr("At or above every clip's rate: lossless repack.");
   } else if (over.length) {
-    line = `${over.length} of ${pending.length} clips at or below ${bppText(compOf(over[0]))} bpp: lossless repack.`;
+    line = tr("{0} of {1} clips at or below {2} bpp: lossless repack.", over.length, pending.length, bppText(compOf(over[0])));
   } else if (pick && !isLossless(c)) {
     const sp = one ? resolvedSpan([viewer.job]) : span;
-    line = sp && sp[0] === sp[1] ? `${pick.label}: ${bppText(sp[0])} bpp. ${yours}` : `${pick.label}: ${Math.round(pick.f * 100)}% of each clip's rate.`;
+    line = sp && sp[0] === sp[1] ? tr("{0}: {1} bpp. {2}", pick.label, bppText(sp[0]), yours) : tr("{0}: {1}% of each clip's rate.", pick.label, Math.round(pick.f * 100));
   }
   note.textContent = line.trim();
   note.title = srcSpan && line !== yours ? yours : "";
@@ -667,25 +669,25 @@ function updateCard(j) {
   el.querySelector(".job-codec").textContent = j.ok ? j.codec : "?";
   drawThumb(j);
   el.querySelector(".job-name").textContent = j.name;
-  el.title = j.ok ? `${j.path}\nClick to preview the quality` : j.path;
+  el.title = j.ok ? tr("{0}\nClick to preview the quality", j.path) : j.path;
 
   const pill = el.querySelector(".job-pill");
-  const pills = { waiting: "Waiting", running: j.ran && j.ran.rewrap ? "Rewrap" : j.r3dPhase ? (isNev(j) ? "R3D NE" : "N-RAW") : j.proxyPhase ? "Proxy" : "Compressing", done: "Done", failed: "Failed", cancelled: "Cancelled" };
+  const pills = { waiting: tr("Waiting"), running: j.ran && j.ran.rewrap ? tr("Rewrap") : j.r3dPhase ? (isNev(j) ? tr("R3D NE") : "N-RAW") : j.proxyPhase ? tr("Proxy") : tr("Compressing"), done: tr("Done"), failed: tr("Failed"), cancelled: tr("Cancelled") };
   const skipped = j.state === "done" && j.result && j.result.skipped;
-  pill.textContent = j.state === "failed" && !j.ok ? "Unreadable" : isPaused ? "Paused" : skipped || already ? "Already done" : pills[j.state];
+  pill.textContent = j.state === "failed" && !j.ok ? tr("Unreadable") : isPaused ? tr("Paused") : skipped || already ? tr("Already done") : pills[j.state];
   pill.className = `job-pill ${isPaused ? "paused" : already ? "done" : j.state}`;
 
   const meta = el.querySelector(".job-meta");
   if (!j.ok || (j.state === "failed" && j.error)) {
     meta.className = "job-meta error";
-    meta.textContent = j.error || "Could not read this clip";
+    meta.textContent = j.error || tr("Could not read this clip");
   } else {
     meta.className = "job-meta";
     const sep = '<span class="sep">·</span>';
-    let html = `${j.width} × ${j.height}${sep}${j.frames} frames${sep}${j.fps.toFixed(j.fps % 1 ? 3 : 0)} fps${sep}${gb(j.bytes)}`;
+    let html = `${j.width} × ${j.height}${sep}${tr("{0} frames", j.frames)}${sep}${tr("{0} fps", num(j.fps, 0, j.fps % 1 ? 3 : 0))}${sep}${gb(j.bytes)}`;
     const t = j.state === "done" ? j.resultTarget : j.target;
     if (t && (t[0] !== j.width || t[1] !== j.height)) html += `${sep}<span class="target">→ ${t[0]} × ${t[1]}</span>`;
-    else if (t && j.state === "waiting") html += `${sep}stays at this size`;
+    else if (t && j.state === "waiting") html += sep + tr("stays at this size");
     if (j.bpp > 0) html += `${sep}<span class="job-bpp">${esc(bppFlow(j))}</span>`;
     meta.innerHTML = html;
   }
@@ -697,8 +699,8 @@ function updateCard(j) {
     const folder = j.existing.output.split(/[\\/]/).slice(-2, -1)[0] || "";
     el.querySelector(".job-after-info").innerHTML = `${esc(settingLabel(compOf(j), resolutionOf(j)))}<span class="sep">·</span>` +
       `<span class="job-out" title="${esc(j.existing.output)}">${esc(folder)}/</span>`;
-    againBtn.textContent = "Compress again";
-    againBtn.title = "A compressed copy for this setting already exists, so this clip will be skipped. Compress it anyway to make a new version.";
+    againBtn.textContent = tr("Compress again");
+    againBtn.title = tr("A compressed copy for this setting already exists, so this clip will be skipped. Compress it anyway to make a new version.");
     againBtn.disabled = running;
   } else if (finished) {
     const info = el.querySelector(".job-after-info");
@@ -707,27 +709,27 @@ function updateCard(j) {
       info.innerHTML = `${esc(settingLabel(j.ran.compression, j.ran.resolution))}<span class="sep">·</span>` +
         `<span class="job-out" title="${esc(j.output || "")}">${esc(folder)}/</span>`;
       const r = j.result || {};
-      if (r.proxy) info.innerHTML += `<span class="sep">·</span><span class="job-out" title="${esc(r.proxy)}">Proxy</span>`;
-      else if (r.proxyError) info.innerHTML += `<span class="sep">·</span><span class="job-proxy-error" title="${esc(r.proxyError)}">Proxy failed</span>`;
+      if (r.proxy) info.innerHTML += `<span class="sep">·</span><span class="job-out" title="${esc(r.proxy)}">${tr("Proxy")}</span>`;
+      else if (r.proxyError) info.innerHTML += `<span class="sep">·</span><span class="job-proxy-error" title="${esc(r.proxyError)}">${tr("Proxy failed")}</span>`;
       if (r.r3d) info.innerHTML += `<span class="sep">·</span><span class="job-out" title="${esc(r.r3d)}">${isNev(j) ? "R3D NE" : "N-RAW"}</span>`;
-      else if (r.r3dError) info.innerHTML += `<span class="sep">·</span><span class="job-proxy-error" title="${esc(r.r3dError)}">${isNev(j) ? "R3D NE" : "N-RAW"} failed</span>`;
-      else if (r.r3dSkipped) info.innerHTML += `<span class="sep">·</span><span class="job-r3d-skipped" title="${esc(r.r3dSkipped)}">Not converted</span>`;
+      else if (r.r3dError) info.innerHTML += `<span class="sep">·</span><span class="job-proxy-error" title="${esc(r.r3dError)}">${tr("{0} failed", isNev(j) ? "R3D NE" : "N-RAW")}</span>`;
+      else if (r.r3dSkipped) info.innerHTML += `<span class="sep">·</span><span class="job-r3d-skipped" title="${esc(r.r3dSkipped)}">${tr("Not converted")}</span>`;
     } else {
       info.textContent = j.ran ? settingLabel(j.ran.compression, j.ran.resolution) : "";
     }
-    againBtn.textContent = j.state === "done" ? "Compress again" : "Try again";
+    againBtn.textContent = j.state === "done" ? tr("Compress again") : tr("Try again");
     againBtn.title = j.state === "done"
-      ? "Add this clip to the queue again, to make another version with different settings"
-      : "Put this clip back in the queue";
+      ? tr("Add this clip to the queue again, to make another version with different settings")
+      : tr("Put this clip back in the queue");
     againBtn.disabled = running;
-    if (skipped) againBtn.title = "A compressed copy was already there, so this clip was skipped. Add it again to make a new version.";
+    if (skipped) againBtn.title = tr("A compressed copy was already there, so this clip was skipped. Add it again to make a new version.");
   }
 
   const cSel = el.querySelector(".job-c"), rSel = el.querySelector(".job-r"), bIn = el.querySelector(".job-b");
   const jc = compOf(j), jp = pickOf(rawCompOf(j));
   cSel.value = jp ? jp.id : "custom";
   if (!bIn.matches(":focus")) bIn.value = typeof jc === "number" ? bppText(jc) : "";
-  bIn.placeholder = isLossless(jc) ? "Lossless" : "";
+  bIn.placeholder = isLossless(jc) ? tr("Lossless") : "";
   rSel.value = j.resolution;
   rSel.options[1].disabled = j.width <= 6060;
   rSel.options[2].disabled = j.width <= 3852;
@@ -738,32 +740,32 @@ function updateCard(j) {
   if (j.state === "running") {
     stat.textContent = `${Math.floor(j.fraction * 100)}%`;
     const left = j.rate > 0 ? (1 - j.fraction) * j.frames / j.rate : NaN;
-    sub.textContent = isPaused ? "Paused" : j.rate > 0 ? `${fpsText(j.rate)} fps · ${clock(left)} left` : "Starting";
+    sub.textContent = isPaused ? tr("Paused") : j.rate > 0 ? tr("{0} fps · {1} left", fpsText(j.rate), clock(left)) : tr("Starting");
     fill.style.width = `${j.fraction * 100}%`;
   } else if (already) {
     stat.textContent = gb(j.existing.bytes);
-    sub.textContent = "Already compressed";
-    sub.title = `A compressed copy already exists at ${j.existing.output}`;
+    sub.textContent = tr("Already compressed");
+    sub.title = tr("A compressed copy already exists at {0}", j.existing.output);
     fill.style.width = "100%";
   } else if (skipped) {
     const r = j.result;
     stat.textContent = gb(r.outputBytes);
-    sub.textContent = "Already compressed, skipped";
-    sub.title = `A compressed copy already exists at ${r.output}`;
+    sub.textContent = tr("Already compressed, skipped");
+    sub.title = tr("A compressed copy already exists at {0}", r.output);
     fill.style.width = "100%";
   } else if (j.state === "done") {
     const r = j.result;
     const saved = 1 - r.outputBytes / Math.max(1, r.inputBytes);
-    stat.innerHTML = `${gb(r.outputBytes)} <span class="good">−${(saved * 100).toFixed(1)}%</span>`;
+    stat.innerHTML = `${gb(r.outputBytes)} <span class="good">−${num(saved * 100, 1, 1)}%</span>`;
     const onGpu = r.backend !== "CPU";
     const resized = j.ran && resizes(j, j.ran.resolution);
     const how = resized
-      ? `resized on ${onGpu ? r.backend.replace(/\s*\(.*\)$/, "") + " GPU" : "CPU"}`
-      : "compressed on CPU";
-    sub.textContent = `${duration(r.seconds)} · ${fpsText(r.fps)} fps · ${how}`;
+      ? tr("resized on {0}", onGpu ? r.backend.replace(/\s*\(.*\)$/, "") + " GPU" : "CPU")
+      : tr("compressed on CPU");
+    sub.textContent = tr("{0} · {1} fps · {2}", duration(r.seconds), fpsText(r.fps), how);
     sub.title = resized
-      ? `Resized on ${r.backend}; final packing on the CPU`
-      : "At the original resolution all the work runs on the CPU. The GPU is used for 6K and 4K.";
+      ? tr("Resized on {0}; final packing on the CPU", r.backend)
+      : tr("At the original resolution all the work runs on the CPU. The GPU is used for 6K and 4K.");
     fill.style.width = "100%";
   } else if (j.state === "waiting" && j.ok) {
     const est = estimateBytes(j);
@@ -779,13 +781,13 @@ function updateCard(j) {
     fill.style.width = "0";
   }
   el.querySelector(".job-reveal").hidden = !(j.state === "done" || j.ok);
-  el.querySelector(".job-reveal").title = j.state === "done" ? `${revealLabel()} (compressed copy)` : revealLabel();
+  el.querySelector(".job-reveal").title = j.state === "done" ? tr("{0} (compressed copy)", revealLabel()) : revealLabel();
   el.querySelector(".job-preview").hidden = !j.ok;
   el.querySelector(".job-remove").hidden = running && !(WEB && j.state !== "running");
 }
 
 function revealLabel() {
-  return info.platform === "macos" ? "Show in Finder" : info.platform === "windows" ? "Show in Explorer" : "Show in folder";
+  return info.platform === "macos" ? tr("Show in Finder") : info.platform === "windows" ? tr("Show in Explorer") : tr("Show in folder");
 }
 
 function areaRatio(j, t) {
@@ -811,9 +813,9 @@ function typicalRatio(j, c, t) {
 // "source 4.6 bpp → 3 bpp" for a job's current (or finished) setting.
 function bppFlow(j) {
   const c = j.state === "waiting" ? compOf(j) : ranComp(j);
-  const src = `source ${bppText(j.bpp)} bpp`;
-  if (isLossless(c) || repacks(j, c)) return `${src} → lossless repack`;
-  return typeof c === "number" ? `${src} → ${bppText(c)} bpp` : src;
+  const src = tr("source {0} bpp", bppText(j.bpp));
+  if (isLossless(c) || repacks(j, c)) return tr("{0} → lossless repack", src);
+  return typeof c === "number" ? tr("{0} → {1} bpp", src, bppText(c)) : src;
 }
 
 function dropJobs(gone) {
@@ -888,32 +890,32 @@ function renderFooter() {
   const aIn = anyDone.reduce((s, j) => s + alreadyIn(j), 0), aOut = anyDone.reduce((s, j) => s + alreadyOut(j), 0);
   let meta = "";
   if (jobs.length) {
-    meta = `${jobs.length} clip${jobs.length === 1 ? "" : "s"}`;
+    meta = tp("{0} clip", "{0} clips", jobs.length);
     if (anyDone.length) {
       const left = ok.filter((j) => toCompress(j) || j.state === "running").reduce((s, j) => s + j.bytes, 0);
-      meta += ` · ${anyDone.length} already done` + (aIn > aOut ? ` (saved ${gb(aIn - aOut)})` : "") +
-        (left ? ` · ${gb(left)} to compress` : "");
+      meta += tr(" · {0} already done", anyDone.length) + (aIn > aOut ? tr(" (saved {0})", gb(aIn - aOut)) : "") +
+        (left ? tr(" · {0} to compress", gb(left)) : "");
     } else {
       meta += ` · ${gb(total)}`;
     }
   }
   $("queue-meta").textContent = meta;
   $("queue-meta").title = anyDone.length
-    ? "Clips whose compressed copy for their setting already exists are skipped and not counted in the saved-so-far total of a run."
+    ? tr("Clips whose compressed copy for their setting already exists are skipped and not counted in the saved-so-far total of a run.")
     : "";
   const clear = $("btn-clear");
   clear.disabled = running ? !jobs.some(isFinished) : jobs.length === 0;
   clear.title = running
-    ? "Removes finished clips. The clip being compressed and the waiting ones stay until the queue is done or stopped."
-    : "Removes every clip from the list. Compressed files are kept.";
+    ? tr("Removes finished clips. The clip being compressed and the waiting ones stay until the queue is done or stopped.")
+    : tr("Removes every clip from the list. Compressed files are kept.");
   $("btn-add").disabled = $("btn-add-folder").disabled = !canAdd();
   const pause = $("btn-pause");
   pause.hidden = !running;
-  $("pause-label").textContent = paused ? "Resume" : "Pause";
+  $("pause-label").textContent = paused ? tr("Resume") : tr("Pause");
   $("pause-icon").innerHTML = paused
     ? '<path d="M4.5 3.2v9.6L12.5 8 4.5 3.2Z" class="fill"/>'
     : '<rect x="4" y="3.5" width="2.6" height="9" rx="0.8" class="fill"/><rect x="9.4" y="3.5" width="2.6" height="9" rx="0.8" class="fill"/>';
-  pause.title = paused ? "Continue compressing" : "Pause the queue. The current clip pauses where it is and continues on Resume.";
+  pause.title = paused ? tr("Continue compressing") : tr("Pause the queue. The current clip pauses where it is and continues on Resume.");
 
   const go = $("btn-go");
   go.classList.toggle("stop", running);
@@ -921,9 +923,9 @@ function renderFooter() {
     ? '<rect x="4" y="4" width="8" height="8" rx="1.5" class="fill"/>'
     : '<path d="M4.5 3.2v9.6L12.5 8 4.5 3.2Z" class="fill"/>';
   const allDone = !waiting.length && already.length > 0;
-  $("go-label").textContent = running ? "Stop"
-    : waiting.length ? `Compress ${waiting.length} clip${waiting.length === 1 ? "" : "s"}`
-    : allDone ? "All clips already done" : "Compress";
+  $("go-label").textContent = running ? tr("Stop")
+    : waiting.length ? tp("Compress {0} clip", "Compress {0} clips", waiting.length)
+    : allDone ? tr("All clips already done") : tr("Compress");
   go.disabled = !running && waiting.length === 0;
 
   const main = $("bar-main"), sub = $("bar-sub"), fill = $("bar-fill");
@@ -941,53 +943,53 @@ function renderFooter() {
     const ratio = batch.inputBytes > 0 ? batch.outputBytes / batch.inputBytes
       : aIn > 0 ? aOut / aIn : cur ? liveRatio(cur) : 1;
     const saved = batch.inputBytes - batch.outputBytes + liveIn * (1 - ratio);
-    const count = `${batch.done} of ${Math.max(batch.total, batch.done)} done`;
-    const lead = paused ? "Paused · " : "";
+    const count = tr("{0} of {1} done", batch.done, Math.max(batch.total, batch.done));
+    const lead = paused ? tr("Paused · ") : "";
     if (saved > 0) {
-      main.innerHTML = `${lead}Saved ${gb(saved)} so far <span class="good">−${pctOf(saved, batch.inputBytes + liveIn).toFixed(1)}%</span> · ${count}`;
+      main.innerHTML = `${lead}${tr("Saved {0} so far", gb(saved))} <span class="good">−${num(pctOf(saved, batch.inputBytes + liveIn), 1, 1)}%</span> · ${count}`;
     } else {
       main.textContent = `${lead}${cur ? "Compressing" : "Preparing"} · ${count}`;
     }
     sub.textContent = paused
-      ? (cur ? `${cur.name} · ${Math.floor(cur.fraction * 100)}% · paused` : "Resume to continue with the next clip")
-      : cur ? `${cur.name}` + (fps > 0 ? ` · ${fpsText(fps)} fps · about ${clock((frames - doneFrames) / fps)} left for the queue` : "") : "";
+      ? (cur ? tr("{0} · {1}% · paused", cur.name, Math.floor(cur.fraction * 100)) : tr("Resume to continue with the next clip"))
+      : cur ? `${cur.name}` + (fps > 0 ? tr(" · {0} fps · about {1} left for the queue", fpsText(fps), clock((frames - doneFrames) / fps)) : "") : "";
     fill.style.width = frames ? `${(doneFrames / frames) * 100}%` : "0";
   } else if (batch.done > 0) {
     const savedIn = batch.inputBytes, savedOut = batch.outputBytes;
     const compressed = batch.done - batch.skipped;
-    main.innerHTML = `Saved ${gb(Math.max(0, savedIn - savedOut))} <span class="good">−${pctOf(savedIn - savedOut, savedIn).toFixed(1)}%</span>` +
-      ` · ${batch.done} of ${Math.max(batch.total, batch.done)} done`;
-    sub.textContent = `${compressed} clip${compressed === 1 ? "" : "s"} compressed · ${gb(savedIn)} → ${gb(savedOut)}` +
-      (batch.skipped ? ` · ${batch.skipped} skipped (already done)` : "") +
-      (batch.failed ? ` · ${batch.failed} failed` : "") +
-      (waiting.length ? ` · ${waiting.length} waiting` : "");
+    main.innerHTML = `${tr("Saved {0}", gb(Math.max(0, savedIn - savedOut)))} <span class="good">−${num(pctOf(savedIn - savedOut, savedIn), 1, 1)}%</span>` +
+      tr(" · {0} of {1} done", batch.done, Math.max(batch.total, batch.done));
+    sub.textContent = tp("{0} clip compressed · {1} → {2}", "{0} clips compressed · {1} → {2}", compressed, gb(savedIn), gb(savedOut)) +
+      (batch.skipped ? tr(" · {0} skipped (already done)", batch.skipped) : "") +
+      (batch.failed ? tr(" · {0} failed", batch.failed) : "") +
+      (waiting.length ? tr(" · {0} waiting", waiting.length) : "");
     fill.style.width = "0";
   } else if (waiting.length) {
     const est = waiting.reduce((s, j) => s + estimateBytes(j).bytes, 0);
     const tw = waiting.reduce((s, j) => s + j.bytes, 0);
     const pct = tw > 0 ? Math.round((1 - est / tw) * 100) : 0;
-    main.innerHTML = `${gb(tw)} → about ${gb(est)}` + (pct > 0 ? ` <span class="good">${pct}% smaller</span>` : "");
+    main.innerHTML = tr("{0} → about {1}", gb(tw), gb(est)) + (pct > 0 ? ` <span class="good">${tr("{0}% smaller", pct)}</span>` : "");
     const srcBpp = (() => {
       const rates = waiting.filter((j) => j.bpp > 0).map((j) => j.bpp);
       if (!rates.length) return "";
       const lo = Math.min(...rates), hi = Math.max(...rates);
-      return lo === hi ? `${bppText(lo)} bpp` : `${bppText(lo)} to ${bppText(hi)} bpp`;
+      return lo === hi ? tr("{0} bpp", bppText(lo)) : tr("{0} to {1} bpp", bppText(lo), bppText(hi));
     })();
     const c = settings.compression, pick = pickOf(c);
     const to = isLossless(c) ? "lossless" : relative(c) ? spanText(resolvedSpan(waiting)) || compText(c) : compText(c);
     sub.textContent = !settings.sameForAll
-      ? "Estimated with each clip's own settings"
-      : `Estimated for ${srcBpp ? `source ${srcBpp} → ` : ""}${to}` +
+      ? tr("Estimated with each clip's own settings")
+      : tr("Estimated for {0}{1}", srcBpp ? `source ${srcBpp} → ` : "", to) +
         (pick && !isLossless(c) ? ` (${pick.label})` : "") +
-        (settings.resolution !== "original" ? ` at ${RES_LABEL[settings.resolution]}` : "");
+        (settings.resolution !== "original" ? tr(" at {0}", RES_LABEL[settings.resolution]) : "");
     fill.style.width = "0";
   } else if (allDone) {
-    main.textContent = `All ${already.length} clip${already.length === 1 ? " is" : "s are"} already compressed`;
-    sub.textContent = `${gb(aIn)} → ${gb(aOut)} · use Compress again on a clip to make a new version`;
+    main.textContent = tp("{0} clip is already compressed", "All {0} clips are already compressed", already.length);
+    sub.textContent = tr("{0} → {1} · use Compress again on a clip to make a new version", gb(aIn), gb(aOut));
     fill.style.width = "0";
   } else {
-    main.textContent = jobs.length ? "Nothing to compress" : "No clips yet";
-    sub.textContent = jobs.length ? "Add clips or clear the finished ones" : "Add clips to see the estimated savings";
+    main.textContent = jobs.length ? tr("Nothing to compress") : tr("No clips yet");
+    sub.textContent = jobs.length ? tr("Add clips or clear the finished ones") : tr("Add clips to see the estimated savings");
     fill.style.width = "0";
   }
 }
@@ -1204,7 +1206,7 @@ function renderWatch(w) {
   const wb = w.bpp != null ? w.bpp : null;
   // Watched clips arrive one by one, so a pick there goes by each clip's own rate.
   const wp = PICK[LEGACY_PICK[q]];
-  const what = wb != null ? `${bppText(wb)} bpp` : q === 1 ? "Lossless" : `${wp.label}, ${wp.f} × each clip's bpp`;
+  const what = wb != null ? tr("{0} bpp", bppText(wb)) : q === 1 ? tr("Lossless") : tr("{0}, {1} × each clip's bpp", wp.label, wp.f);
   $("watch-preset").textContent = `${what}${res !== "original" ? " · " + RES_LABEL[res] : ""}`;
   if ($("watch-quality")) setSeg("watch-quality", wb != null ? "" : q, null);
   const wn = $("watch-bpp");
@@ -1213,37 +1215,36 @@ function renderWatch(w) {
   if ($("watch-clear")) {
     $("watch-clear").checked = !!w.clearAfterProcess;
     $("watch-clear-sub").textContent = w.clearAfterProcess
-      ? "Deletes source clip after compression succeeds"
-      : "Keeps source clips in watch input folder";
+      ? tr("Deletes source clip after compression succeeds")
+      : tr("Keeps source clips in watch input folder");
   }
   $("watch-dirs").textContent = `${w.inputDir} → ${w.outputDir}`;
-  $("watch-dirs").title = `Input: ${w.inputDir}
-Output: ${w.outputDir}`;
+  $("watch-dirs").title = tr("Input: {0}\nOutput: {1}", w.inputDir, w.outputDir);
   dot.className = `chip-dot ${w.state || "idle"}`;
   if (w.state === "running" && w.currentClip) {
     const pct = Math.floor((w.fraction || 0) * 100);
-    $("watch-chip-text").textContent = `Watch: ${w.currentClip} (${pct}%)`;
+    $("watch-chip-text").textContent = tr("Watch: {0} ({1}%)", w.currentClip, pct);
     pill.textContent = `${pct}%`;
     pill.className = "job-pill running";
     $("watch-stats").textContent = `${w.currentClip}${w.fps > 0 ? " · " + fpsText(w.fps) + " fps" : ""}`;
     meter.hidden = false;
     fill.style.width = `${(w.fraction || 0) * 100}%`;
   } else if (w.state === "stabilizing") {
-    $("watch-chip-text").textContent = "Watch: waiting for copy";
-    pill.textContent = "Copying";
+    $("watch-chip-text").textContent = tr("Watch: waiting for copy");
+    pill.textContent = tr("Copying");
     pill.className = "job-pill waiting";
-    $("watch-stats").textContent = "Waiting for incoming file copy to finish";
+    $("watch-stats").textContent = tr("Waiting for incoming file copy to finish");
     meter.hidden = true;
   } else {
-    $("watch-chip-text").textContent = w.doneCount ? `Watch: ${w.doneCount} done` : `Watch: ${w.inputDir}`;
-    pill.textContent = "Watching";
+    $("watch-chip-text").textContent = w.doneCount ? tr("Watch: {0} done", w.doneCount) : tr("Watch: {0}", w.inputDir);
+    pill.textContent = tr("Watching");
     pill.className = "job-pill done";
     if (w.lastError) {
-      $("watch-stats").textContent = `Last error: ${w.lastError}`;
+      $("watch-stats").textContent = tr("Last error: {0}", w.lastError);
     } else if (w.doneCount > 0) {
-      $("watch-stats").textContent = `${w.doneCount} done · ${gb(w.savedInputBytes || 0)} → ${gb(w.savedOutputBytes || 0)}`;
+      $("watch-stats").textContent = tr("{0} done · {1} → {2}", w.doneCount, gb(w.savedInputBytes || 0), gb(w.savedOutputBytes || 0));
     } else {
-      $("watch-stats").textContent = `Polling every ${w.pollSeconds || 5}s for .NEV and .R3D clips`;
+      $("watch-stats").textContent = tr("Polling every {0}s for .NEV and .R3D clips", w.pollSeconds || 5);
     }
     meter.hidden = true;
   }
@@ -1346,11 +1347,11 @@ function renderViewerControls() {
   setSeg("v-quality", vp ? vp.id : "", null);
   const vb = $("v-bpp");
   if (!vb.matches(":focus")) vb.value = typeof viewer.comp === "number" ? bppText(viewer.comp) : "";
-  vb.placeholder = isLossless(viewer.comp) ? "Lossless" : "";
+  vb.placeholder = isLossless(viewer.comp) ? tr("Lossless") : "";
   setSeg("v-res", viewer.resolution, null);
   for (const b of $("v-res").querySelectorAll("button")) {
     b.disabled = (b.dataset.value === "6k" && j.width <= 6060) || (b.dataset.value === "4k" && j.width <= 3852);
-    b.title = b.disabled ? "This clip is already at or below this size" : "";
+    b.title = b.disabled ? tr("This clip is already at or below this size") : "";
   }
   renderZoomControls();
   renderSqueezeControls();
@@ -1359,20 +1360,20 @@ function renderViewerControls() {
   const sc = shown ? shown.comp : viewer.comp, r = shown ? shown.resolution : viewer.resolution;
   const sp = sc === viewer.comp ? pickOf(viewer.setting) : null;
   const what = `<b>${esc(compText(sc))}</b>` +
-    (repacks(j, sc) ? " · lossless repack" : sp && !isLossless(sc) ? ` ${esc(sp.label)}` : "");
+    (repacks(j, sc) ? tr(" · lossless repack") : sp && !isLossless(sc) ? ` ${esc(sp.label)}` : "");
   $("v-tag-after").innerHTML = `${what}${r !== "original" ? " · " + esc(RES_LABEL[r]) : ""}`;
   const same = rawCompOf(j) === viewer.setting && resolutionOf(j) === viewer.resolution;
   const apply = $("v-apply");
-  apply.textContent = settings.sameForAll ? "Use for all clips" : "Apply to this clip";
+  apply.textContent = settings.sameForAll ? tr("Use for all clips") : tr("Apply to this clip");
   apply.disabled = same || running || j.state !== "waiting";
-  apply.title = same ? "These are the settings it will be compressed with" : "";
+  apply.title = same ? tr("These are the settings it will be compressed with") : "";
   renderEstimate();
 }
 
 function renderFrameLabel(frame = viewer.frame) {
   const j = viewer.job;
   $("v-frame").style.setProperty("--p", `${(frame / Math.max(1, j.frames - 1)) * 100}%`);
-  $("v-frame-label").textContent = `Frame ${frame + 1} of ${j.frames}`;
+  $("v-frame-label").textContent = tr("Frame {0} of {1}", frame + 1, j.frames);
   $("v-tc").textContent = timecode(frame, j.fps);
 }
 
@@ -1384,9 +1385,9 @@ function renderSqueezeControls() {
   custom.hidden = sel.value !== "custom";
   $("v-squeeze-group").classList.toggle("on", squeeze() !== 1);
   const j = viewer.job;
-  $("v-meta").textContent = `${j.codec} · ${j.width} × ${j.height} · ${j.frames} frames · ${j.fps.toFixed(j.fps % 1 ? 3 : 0)} fps · ${gb(j.bytes)}`
+  $("v-meta").textContent = tr("{0} · {1} × {2} · {3} frames · {4} fps · {5}", j.codec, j.width, j.height, j.frames, j.fps.toFixed(j.fps % 1 ? 3 : 0), gb(j.bytes))
     + (j.bpp > 0 ? ` · ${viewerBppFlow(j)}` : "")
-    + (squeeze() !== 1 ? ` · de-squeezed ${squeezeLabel(squeeze())}, ${((j.width * squeeze()) / j.height).toFixed(2)}:1 on screen` : "");
+    + (squeeze() !== 1 ? tr(" · de-squeezed {0}, {1}:1 on screen", squeezeLabel(squeeze()), ((j.width * squeeze()) / j.height).toFixed(2)) : "");
 }
 
 // A new de-squeeze changes the frame's shape on screen: refit (or keep the zoom and centre
@@ -1417,8 +1418,8 @@ function renderZoomControls() {
 }
 
 function viewerBppFlow(j) {
-  const src = `source ${bppText(j.bpp)} bpp`;
-  return isLossless(viewer.comp) || repacks(j, viewer.comp) ? `${src} → lossless repack` : `${src} → ${compText(viewer.comp)}`;
+  const src = tr("source {0} bpp", bppText(j.bpp));
+  return isLossless(viewer.comp) || repacks(j, viewer.comp) ? tr("{0} → lossless repack", src) : `${src} → ${compText(viewer.comp)}`;
 }
 function renderEstimate() {
   const j = viewer.job;
@@ -1426,14 +1427,14 @@ function renderEstimate() {
   const ratio = layer ? layer.ratio : measured.get(measureKey(j.path, viewer.comp, viewer.resolution));
   const flow = j.bpp > 0 ? viewerBppFlow(j) : "";
   if (ratio == null) {
-    $("v-est-main").textContent = "Estimating…";
+    $("v-est-main").textContent = tr("Estimating…");
     $("v-est-sub").textContent = flow || compText(viewer.comp);
     return;
   }
-  $("v-est-main").innerHTML = `≈ ${gb(j.bytes * ratio)} <span class="good">−${((1 - ratio) * 100).toFixed(1)}%</span>`;
+  $("v-est-main").innerHTML = `≈ ${gb(j.bytes * ratio)} <span class="good">−${num((1 - ratio) * 100, 1, 1)}%</span>`;
   $("v-est-sub").textContent = (layer
-    ? `This frame ${gb(layer.src)} → ${gb(layer.out)}, extrapolated to the clip`
-    : "From another frame, extrapolated to the clip") + (flow ? ` · ${flow}` : "");
+    ? tr("This frame {0} → {1}, extrapolated to the clip", gb(layer.src), gb(layer.out))
+    : tr("From another frame, extrapolated to the clip")) + (flow ? ` · ${flow}` : "");
 }
 
 // Pick the layers to show for the current frame and settings from the caches. Layers of an
@@ -1644,9 +1645,9 @@ async function pump() {
 
 function loadingText(req) {
   const shown = viewer.region || viewer.base;
-  if (!shown || shown.frame !== req.frame) return `Decoding frame ${req.frame + 1}`;
-  if (shown.comp !== req.comp || shown.resolution !== req.resolution) return `Compressing at ${compText(req.comp)}`;
-  return "Rendering";
+  if (!shown || shown.frame !== req.frame) return tr("Decoding frame {0}", req.frame + 1);
+  if (shown.comp !== req.comp || shown.resolution !== req.resolution) return tr("Compressing at {0}", compText(req.comp));
+  return tr("Rendering");
 }
 
 async function toLayer(req, buf) {
@@ -1675,7 +1676,7 @@ function setLoading(on, text) {
 function showError(msg) {
   setLoading(false);
   const el = $("v-error");
-  el.textContent = `Could not render a preview: ${msg}`;
+  el.textContent = tr("Could not render a preview: {0}", msg);
   el.classList.add("show");
 }
 
@@ -1896,14 +1897,14 @@ function onDragDrop(p) {
 
 async function chooseOutput() {
   if (running) return;
-  const f = await api.invoke("pick_folder", { title: "Save Compressed Clips To" });
+  const f = await api.invoke("pick_folder", { title: tr("Save Compressed Clips To") });
   if (f) { settings.outputFolder = f; settings.dest = "custom"; }
   saveSettings(); renderSettings();
 }
 async function pickClips() { if (canAdd()) addPaths(await api.invoke("pick_clips")); }
 async function pickFolder() {
   if (!canAdd()) return;
-  const f = await api.invoke("pick_folder", { title: "Add Folder" });
+  const f = await api.invoke("pick_folder", { title: tr("Add Folder") });
   if (f) addPaths([f]);
 }
 
@@ -1913,7 +1914,7 @@ async function init() {
   document.body.classList.add(info.platform);
   if (info.web) {
     document.body.classList.add("web");
-    if ($("drop-title")) $("drop-title").textContent = "Choose clips or folders on this server";
+    if ($("drop-title")) $("drop-title").textContent = tr("Choose clips or folders on this server");
     let hasSaved = false;
     try { hasSaved = !!localStorage.getItem("settings"); } catch { /* ignore */ }
     if (!hasSaved) {
@@ -1978,7 +1979,7 @@ async function init() {
   // Arrow keys and the scroll wheel step by 0.1 from the value shown.
   const stepNum = (d) => {
     if (running) return;
-    const cur = Number(bppNum.value);
+    const cur = Number(bppNum.value.replace(",", "."));
     const base = Number.isFinite(cur) && bppNum.value !== "" ? cur : Number($("bpp-range").value);
     const v = clampBpp(Math.round((base + d) * 10) / 10);
     if (v != null) { bppNum.value = bppText(v); fitNum(bppNum); setCompression(v); }
@@ -1989,7 +1990,7 @@ async function init() {
   });
   bppNum.addEventListener("wheel", (e) => { if (bppNum.matches(":focus")) { e.preventDefault(); stepNum(e.deltaY < 0 ? 0.1 : -0.1); } }, { passive: false });
   bppNum.addEventListener("focus", () => {
-    if (!/^[0-9.]+$/.test(bppNum.value)) { bppNum.value = ""; fitNum(bppNum); }
+    if (!/^[0-9.,]+$/.test(bppNum.value)) { bppNum.value = ""; fitNum(bppNum); }
     $("bpp-unit").hidden = false;
     bppNum.select();
   });
@@ -2076,25 +2077,25 @@ function setUpdateStatus(text) {
 function renderUpdatePrompt() {
   const u = update.info;
   if (!u) return;
-  $("update-title").textContent = `Blue Compressor ${u.version} is available${u.test ? " (test update)" : ""}`;
+  $("update-title").textContent = tr("Blue Compressor {0} is available{1}", u.version, u.test ? " (test update)" : "");
   $("update-notes").innerHTML = updateNotesHtml(u.notes);
   const now = $("update-now"), later = $("update-later"), sub = $("update-sub");
   $("update-progress").hidden = true;
   $("update-msg").hidden = true;
   $("update-buttons").hidden = false;
   $("update-skip").hidden = false;
-  later.textContent = "Later";
+  later.textContent = tr("Later");
   if (!u.can_install) {
-    sub.textContent = `You have ${u.current}. Download the new version from the release page.`;
-    now.textContent = "Download";
+    sub.textContent = tr("You have {0}. Download the new version from the release page.", u.current);
+    now.textContent = tr("Download");
   } else if (running) {
     sub.textContent = update.whenDone
-      ? "It will update when the queue has finished."
-      : `You have ${u.current}. The queue is compressing, so it can update when it has finished.`;
-    now.textContent = update.whenDone ? "OK" : "Update When the Queue Finishes";
+      ? tr("It will update when the queue has finished.")
+      : tr("You have {0}. The queue is compressing, so it can update when it has finished.", u.current);
+    now.textContent = update.whenDone ? "OK" : tr("Update When the Queue Finishes");
   } else {
-    sub.textContent = `You have ${u.current}. Update now? It takes a moment and reopens the app.`;
-    now.textContent = "Update";
+    sub.textContent = tr("You have {0}. Update now? It takes a moment and reopens the app.", u.current);
+    now.textContent = tr("Update");
   }
 }
 
@@ -2116,21 +2117,21 @@ async function checkForUpdates(manual) {
   try {
     u = await api.invoke("update_check");
   } catch {
-    if (manual) setUpdateStatus("Could not check right now. Try again later.");
+    if (manual) setUpdateStatus(tr("Could not check right now. Try again later."));
     return;
   }
   if (!u) {
-    if (manual) setUpdateStatus(`You have the newest version${info.version ? ` (${info.version})` : ""}.`);
+    if (manual) setUpdateStatus(tr("You have the newest version{0}.", info.version ? ` (${info.version})` : ""));
     return;
   }
-  setUpdateStatus(`Version ${u.version} is available.`);
+  setUpdateStatus(tr("Version {0} is available.", u.version));
   if (manual || u.version !== settings.skipVersion) showUpdatePrompt(u);
 }
 
 async function installUpdate() {
   const u = update.info;
   if (!u || update.busy) return;
-  if (running) { update.whenDone = true; renderUpdatePrompt(); hideUpdatePrompt(); setUpdateStatus(`Updates to ${u.version} when the queue finishes.`); return; }
+  if (running) { update.whenDone = true; renderUpdatePrompt(); hideUpdatePrompt(); setUpdateStatus(tr("Updates to {0} when the queue finishes.", u.version)); return; }
   update.busy = true;
   update.whenDone = false;
   $("update-modal").classList.add("show");
@@ -2140,7 +2141,7 @@ async function installUpdate() {
   $("update-progress").hidden = false;
   $("update-bar").style.width = "0%";
   $("update-progress-text").textContent = "Downloading...";
-  $("update-sub").textContent = `Updating to ${u.version}. Please keep the app open.`;
+  $("update-sub").textContent = tr("Updating to {0}. Please keep the app open.", u.version);
   try {
     await api.invoke("update_install");
     // The app relaunches; nothing more to do here.
@@ -2148,10 +2149,10 @@ async function installUpdate() {
     update.busy = false;
     $("update-progress").hidden = true;
     $("update-msg").hidden = false;
-    $("update-msg").textContent = "The update could not be installed here. You can download it from the release page instead.";
+    $("update-msg").textContent = tr("The update could not be installed here. You can download it from the release page instead.");
     $("update-buttons").hidden = false;
-    $("update-now").textContent = "Download";
-    $("update-later").textContent = "Close";
+    $("update-now").textContent = tr("Download");
+    $("update-later").textContent = tr("Close");
     update.info = { ...u, can_install: false };
   }
 }
@@ -2202,8 +2203,8 @@ function initProxies() {
   box.checked = !!settings.proxies;
   const enc = (info && info.proxyEncoder) || "";
   const usable = enc && !/ffmpeg|no working/i.test(enc);
-  sub.textContent = "10-bit Rec.709, up to 1920 wide, in a Proxies folder next to each output." +
-    (enc ? (usable ? ` Encoder: ${enc}.` : ` ${enc}.`) : "");
+  sub.textContent = tr("10-bit Rec.709, up to 1920 wide, in a Proxies folder next to each output.") +
+    (enc ? (usable ? tr(" Encoder: {0}.", enc) : ` ${enc}.`) : "");
   box.addEventListener("change", () => {
     settings.proxies = box.checked;
     saveSettings();
@@ -2217,14 +2218,14 @@ function initUpdates() {
   auto.addEventListener("change", () => {
     settings.autoUpdate = auto.checked;
     saveSettings();
-    setUpdateStatus(auto.checked ? "" : "Automatic checks are off.");
+    setUpdateStatus(auto.checked ? "" : tr("Automatic checks are off."));
   });
-  if (!auto.checked) setUpdateStatus("Automatic checks are off.");
+  if (!auto.checked) setUpdateStatus(tr("Automatic checks are off."));
   $("btn-check-update").addEventListener("click", () => checkForUpdates(true));
   $("update-later").addEventListener("click", hideUpdatePrompt);
   $("update-skip").addEventListener("click", () => {
     if (update.info) { settings.skipVersion = update.info.version; saveSettings(); }
-    setUpdateStatus(update.info ? `Skipped version ${update.info.version}.` : "");
+    setUpdateStatus(update.info ? tr("Skipped version {0}.", update.info.version) : "");
     hideUpdatePrompt();
   });
   $("update-now").addEventListener("click", () => {
@@ -2236,13 +2237,13 @@ function initUpdates() {
   });
   api.listen("update-progress", (p) => {
     const [got, total] = Array.isArray(p) ? p : [0, null];
-    const mb = (b) => (b / 1e6).toFixed(1);
+    const mb = (b) => num(b / 1e6, 1, 1);
     if (total) $("update-bar").style.width = `${Math.min(100, (got / total) * 100)}%`;
-    $("update-progress-text").textContent = total ? `Downloading ${mb(got)} of ${mb(total)} MB` : `Downloading ${mb(got)} MB`;
+    $("update-progress-text").textContent = total ? tr("Downloading {0} of {1} MB", mb(got), mb(total)) : tr("Downloading {0} MB", mb(got));
   });
   api.listen("update-installing", () => {
     $("update-bar").style.width = "100%";
-    $("update-progress-text").textContent = "Installing. The app reopens by itself.";
+    $("update-progress-text").textContent = tr("Installing. The app reopens by itself.");
   });
   api.listen("queue-finished", () => {
     if (update.whenDone && update.info) setTimeout(installUpdate, 800);
@@ -2266,7 +2267,7 @@ function initUpdateBanner() {
     try { dismissed = localStorage.getItem(dismissedKey) || ""; } catch { /* ignore */ }
     if (dismissed === s.latest) { banner.hidden = true; return; }
     shown = s.latest;
-    $("update-banner-text").textContent = `Blue Compressor ${s.latest} is available (this server runs ${s.current}).`;
+    $("update-banner-text").textContent = tr("Blue Compressor {0} is available (this server runs {1}).", s.latest, s.current);
     $("update-banner-tag").textContent = s.latest;
     if (s.url) $("update-banner-link").href = s.url;
     banner.hidden = false;
@@ -2274,7 +2275,7 @@ function initUpdateBanner() {
   $("update-banner-how").addEventListener("click", () => {
     const steps = $("update-banner-steps");
     steps.hidden = !steps.hidden;
-    $("update-banner-how").textContent = steps.hidden ? "How to update" : "Hide steps";
+    $("update-banner-how").textContent = steps.hidden ? tr("How to update") : tr("Hide steps");
   });
   $("update-banner-close").addEventListener("click", () => {
     banner.hidden = true;
@@ -2492,7 +2493,7 @@ function webApi() {
     selAllBtn.hidden = !(fsState.mode === "clips" && clipsInDir.length > 0);
     if (!selAllBtn.hidden) {
       const allSelected = clipsInDir.every((c) => fsState.selected.has(c.path));
-      selAllBtn.textContent = allSelected ? "Clear Selection" : `Select All Clips (${clipsInDir.length})`;
+      selAllBtn.textContent = allSelected ? tr("Clear Selection") : tr("Select All Clips ({0})", clipsInDir.length);
     }
 
     $("fs-mkdir-toggle").hidden = fsState.mode !== "output";
@@ -2503,7 +2504,7 @@ function webApi() {
     if (!fsState.entries.length) {
       const empty = document.createElement("div");
       empty.className = "fs-empty";
-      empty.textContent = "No subfolders or .NEV / .R3D clips in this folder";
+      empty.textContent = tr("No subfolders or .NEV / .R3D clips in this folder");
       listEl.append(empty);
     } else {
       for (const item of fsState.entries) {
@@ -2516,7 +2517,7 @@ function webApi() {
           if (fsState.mode === "clips" || fsState.mode === "input-folder") {
             const addBtn = document.createElement("button");
             addBtn.className = "link-btn";
-            addBtn.textContent = "Add Folder";
+            addBtn.textContent = tr("Add Folder");
             addBtn.addEventListener("click", (e) => {
               e.stopPropagation();
               closeFs(fsState.mode === "clips" ? [item.path] : item.path);
@@ -2546,20 +2547,20 @@ function webApi() {
 
     const n = fsState.selected.size;
     if (fsState.mode === "clips") {
-      $("fs-summary").textContent = n ? `${n} clip${n === 1 ? "" : "s"} selected` : `Folder: ${fsState.path}`;
-      $("fs-confirm").textContent = n ? `Add ${n} Clip${n === 1 ? "" : "s"}` : "Add Folder";
+      $("fs-summary").textContent = n ? tp("{0} clip selected", "{0} clips selected", n) : tr("Folder: {0}", fsState.path);
+      $("fs-confirm").textContent = n ? tp("Add {0} Clip", "Add {0} Clips", n) : tr("Add Folder");
       $("fs-confirm").disabled = !fsState.path;
     } else if (fsState.mode === "input-folder") {
       $("fs-summary").textContent = fsState.path;
-      $("fs-confirm").textContent = "Add This Folder";
+      $("fs-confirm").textContent = tr("Add This Folder");
       $("fs-confirm").disabled = !fsState.path;
     } else if (fsState.mode === "output") {
       $("fs-summary").textContent = fsState.path;
-      $("fs-confirm").textContent = "Select Output Folder";
+      $("fs-confirm").textContent = tr("Select Output Folder");
       $("fs-confirm").disabled = !fsState.path;
     } else {
       $("fs-summary").textContent = fsState.path;
-      $("fs-confirm").textContent = "Done";
+      $("fs-confirm").textContent = tr("Done");
       $("fs-confirm").disabled = false;
     }
   }
@@ -2664,8 +2665,8 @@ function webApi() {
       if (cmd === "pick_clips") {
         return openFsModal(
           "clips",
-          "Add Clips",
-          "Select one or more .NEV / .R3D clips, or add a whole folder",
+          tr("Add Clips"),
+          tr("Select one or more .NEV / .R3D clips, or add a whole folder"),
           lastDir
         );
       }
@@ -2673,8 +2674,8 @@ function webApi() {
         const isOutput = a && a.title && /save|output/i.test(a.title);
         return openFsModal(
           isOutput ? "output" : "input-folder",
-          (a && a.title) || "Choose Folder",
-          isOutput ? "Choose where compressed clips should be saved" : "Subfolders are scanned recursively for .NEV and .R3D clips",
+          (a && a.title) || tr("Choose Folder"),
+          isOutput ? tr("Choose where compressed clips should be saved") : tr("Subfolders are scanned recursively for .NEV and .R3D clips"),
           isOutput && settings.outputFolder ? settings.outputFolder : lastDir
         );
       }
@@ -2682,7 +2683,7 @@ function webApi() {
         const p = (a && a.path) || "";
         const slash = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
         const dir = slash > 0 ? p.slice(0, slash) : "/";
-        return openFsModal("reveal", "Clip Location", p, dir, p);
+        return openFsModal("reveal", tr("Clip Location"), p, dir, p);
       }
       const r = await fetch(`/api/invoke/${cmd}`, {
         method: "POST",

@@ -1266,3 +1266,12 @@ body.web #updates-section { display: none; }
 .badge-exp { display: inline-block; padding: 0 6px; border-radius: 4px; font-size: 0.85em; background: rgba(255, 170, 0, 0.18); color: #c77d00; }
 .switch-row.dim { opacity: 0.5; }
 .select-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 0 8px; }
+.lang-pick { display: inline-flex; align-items: center; gap: 4px; color: var(--muted, #888); }
+.lang-pick select { background: transparent; color: inherit; border: 1px solid rgba(127, 127, 127, 0.3); border-radius: 6px; padding: 2px 4px; font: inherit; font-size: 12px; max-width: 150px; }
+.lang-pick svg { fill: none; stroke: currentColor; stroke-width: 1.2; }
+:lang(ja), :lang(ko), :lang(zh-Hans), :lang(zh-Hant) { line-break: strict; }
+html:lang(ja) body { font-family: -apple-system, "Hiragino Sans", "Yu Gothic UI", "Noto Sans JP", sans-serif; }
+html:lang(ko) body { font-family: -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif; }
+html:lang(zh-Hans) body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif; }
+html:lang(zh-Hant) body { font-family: -apple-system, "PingFang TC", "Microsoft JhengHei", "Noto Sans TC", sans-serif; }
+.switch-title, .switch-sub, .field-label, .btn, .job-pill { overflow-wrap: anywhere; hyphens: auto; }

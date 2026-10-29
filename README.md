@@ -226,6 +226,22 @@ the ZR camera matrix. The Z6III shares the ZR's sensor, so its matrix should be 
 the Z8 and Z9 it is an approximation and colours may be off. This has only been tested on
 synthetic clips so far and needs checking with real ones. The app marks it Experimental.
 
+## Languages
+
+The app and the Web UI are in English, Svenska, Deutsch, Français, Español, Português
+(Brasil), Italiano, Nederlands, Polski, Русский, 日本語, 한국어, 简体中文 and 繁體中文. They
+follow the system or browser language; the globe menu at the top right picks another
+one, and the choice is remembered. Numbers and sizes are written the way the language
+writes them.
+
+Everything except English is a **machine translation** and has not been checked by
+native speakers yet. If something reads wrong in your language, please fix it: the
+strings are in [`app/ui/locales.js`](app/ui/locales.js), keyed by the English text.
+Terms such as HE, HE*, bpp, R3D NE, N-RAW and Log3G10 stay as they are in every
+language. `node app/check-locales.mjs` (also run by CI) checks that every language has
+every string with the same placeholders and markup. To add a language, add it to
+`locales.js` and to the list at the top of [`app/ui/i18n.js`](app/ui/i18n.js).
+
 ## Repository layout
 
 ```

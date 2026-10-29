@@ -22,6 +22,8 @@ use crate::{is_clip, parse_resolution, ps, resolution_name};
 const INDEX_HTML: &str = include_str!("../../../app/ui/index.html");
 const STYLES_CSS: &str = include_str!("../../../app/ui/styles.css");
 const APP_JS: &str = include_str!("../../../app/ui/app.js");
+const I18N_JS: &str = include_str!("../../../app/ui/i18n.js");
+const LOCALES_JS: &str = include_str!("../../../app/ui/locales.js");
 const ICON_PNG: &[u8] = include_bytes!("../../../app/ui/icon.png");
 
 pub struct ServeConfig {
@@ -1474,6 +1476,14 @@ fn handle_client(mut stream: TcpStream, state: Arc<ServerState>) {
         }
         ("GET", "/app.js") => {
             HttpResponse::bytes(200, "application/javascript; charset=utf-8", APP_JS.as_bytes().to_vec())
+                .write_to(stream);
+        }
+        ("GET", "/i18n.js") => {
+            HttpResponse::bytes(200, "application/javascript; charset=utf-8", I18N_JS.as_bytes().to_vec())
+                .write_to(stream);
+        }
+        ("GET", "/locales.js") => {
+            HttpResponse::bytes(200, "application/javascript; charset=utf-8", LOCALES_JS.as_bytes().to_vec())
                 .write_to(stream);
         }
         ("GET", "/icon.png" | "/favicon.ico") => {

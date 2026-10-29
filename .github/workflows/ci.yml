@@ -23,6 +23,8 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
+      - name: Every language has every UI string
+        run: node app/check-locales.mjs
       - run: cargo clippy --release -p bluecompress -p bluecompress-cli --all-targets
       - run: cargo test --release -p bluecompress
       - name: CUDA and OpenCL backends compile
