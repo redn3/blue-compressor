@@ -80,7 +80,7 @@ const resizes = (j, r) => r !== "original" && !(r === "6k" && j.width <= 6060) &
 const settingLabel = (c, r) => `${compText(c)}${r !== "original" ? " · " + RES_LABEL[r] : ""}`;
 
 const settings = Object.assign(
-  { resolution: "original", compression: "light", backend: "gpu", outputFolder: null, dest: "next", sameForAll: true, squeeze: 1, autoUpdate: true, skipVersion: null, proxies: false, r3d: false, cbr: false, toNev: false, rewrap: false, rmd: true, rmdEv: null },
+  { resolution: "original", compression: "light", backend: "gpu", outputFolder: null, dest: "next", sameForAll: true, squeeze: 1, autoUpdate: true, skipVersion: null, r3d: false, cbr: false, toNev: false, rewrap: false, rmd: true, rmdEv: null },
   migrateSettings(readSettings()),
 );
 let jobs = [];
@@ -148,7 +148,7 @@ function resolvedSpan(list, c = settings.compression) {
   return v.length ? [Math.min(...v), Math.max(...v)] : null;
 }
 const spanText = (sp) => (!sp ? "" : sp[0] === sp[1] ? tr("{0} bpp", bppText(sp[0])) : tr("{0} to {1} bpp", bppText(sp[0]), bppText(sp[1])));
-const settingOf = (j) => ({ compression: compOf(j), resolution: resolutionOf(j), proxy: !!settings.proxies, r3d: !!settings.r3d && isNev(j), cbr: !!settings.cbr, toNev: !!settings.toNev && isR3d(j), rewrap: !!settings.rewrap, rmd: settings.rmd !== false, rmdEv: settings.rmdEv ?? null });
+const settingOf = (j) => ({ compression: compOf(j), resolution: resolutionOf(j), r3d: !!settings.r3d && isNev(j), cbr: !!settings.cbr, toNev: !!settings.toNev && isR3d(j), rewrap: !!settings.rewrap, rmd: settings.rmd !== false, rmdEv: settings.rmdEv ?? null });
 // The R3D NE toggle only acts on .nev clips, the N-RAW one on .R3D clips.
 function isR3d(j) { return /\.r3d$/i.test((j && j.path) || ""); }
 function isNev(j) { return /\.nev$/i.test((j && j.path) || ""); }
@@ -672,7 +672,7 @@ function updateCard(j) {
   el.title = j.ok ? tr("{0}\nClick to preview the quality", j.path) : j.path;
 
   const pill = el.querySelector(".job-pill");
-  const pills = { waiting: tr("Waiting"), running: j.ran && j.ran.rewrap ? tr("Rewrap") : j.r3dPhase ? (isNev(j) ? tr("R3D NE") : "N-RAW") : j.proxyPhase ? tr("Proxy") : tr("Compressing"), done: tr("Done"), failed: tr("Failed"), cancelled: tr("Cancelled") };
+  const pills = { waiting: tr("Waiting"), running: j.ran && j.ran.rewrap ? tr("Rewrap") : j.r3dPhase ? (isNev(j) ? tr("R3D NE") : "N-RAW") : tr("Compressing"), done: tr("Done"), failed: tr("Failed"), cancelled: tr("Cancelled") };
   const skipped = j.state === "done" && j.result && j.result.skipped;
   pill.textContent = j.state === "failed" && !j.ok ? tr("Unreadable") : isPaused ? tr("Paused") : skipped || already ? tr("Already done") : pills[j.state];
   pill.className = `job-pill ${isPaused ? "paused" : already ? "done" : j.state}`;
@@ -709,8 +709,6 @@ function updateCard(j) {
       info.innerHTML = `${esc(settingLabel(j.ran.compression, j.ran.resolution))}<span class="sep">·</span>` +
         `<span class="job-out" title="${esc(j.output || "")}">${esc(folder)}/</span>`;
       const r = j.result || {};
-      if (r.proxy) info.innerHTML += `<span class="sep">·</span><span class="job-out" title="${esc(r.proxy)}">${tr("Proxy")}</span>`;
-      else if (r.proxyError) info.innerHTML += `<span class="sep">·</span><span class="job-proxy-error" title="${esc(r.proxyError)}">${tr("Proxy failed")}</span>`;
       if (r.r3d) info.innerHTML += `<span class="sep">·</span><span class="job-out" title="${esc(r.r3d)}">${isNev(j) ? "R3D NE" : "N-RAW"}</span>`;
       else if (r.r3dError) info.innerHTML += `<span class="sep">·</span><span class="job-proxy-error" title="${esc(r.r3dError)}">${tr("{0} failed", isNev(j) ? "R3D NE" : "N-RAW")}</span>`;
       else if (r.r3dSkipped) info.innerHTML += `<span class="sep">·</span><span class="job-r3d-skipped" title="${esc(r.r3dSkipped)}">${tr("Not converted")}</span>`;
@@ -856,6 +854,7 @@ function clearList() {
 }
 
 function renderAll() {
+  syncOptionRows();
   const list = $("list");
   $("empty").hidden = jobs.length > 0;
   list.hidden = jobs.length === 0;
@@ -998,7 +997,6 @@ function renderFooter() {
 
 const jobRequest = (j) => ({
   id: j.id, path: j.path, ...compFields(j.ran.compression), resolution: j.ran.resolution, force: !!j.force,
-  proxy: !!(j.ran && j.ran.proxy),
   r3d: !!(j.ran && j.ran.r3d),
   cbr: !!(j.ran && j.ran.cbr),
   to_nev: !!(j.ran && j.ran.toNev),
@@ -1090,7 +1088,7 @@ function fromServer(s) {
     path: s.path, name: c.name || s.name, ok: true, codec: c.codec || "", width: c.width || 0, height: c.height || 0,
     frames: c.frames || 0, fps: c.fps || 0, bytes: c.bytes || s.bytes, bpp: c.bpp || 0, error: s.error,
     id: s.id, state: s.state, fraction: s.fraction, rate: s.fps, target: null, force: s.force,
-    resolution: s.resolution, compression: comp, ran: { compression: comp, resolution: s.resolution, proxy: !!s.proxy, r3d: !!s.r3d, cbr: !!s.cbr, toNev: !!s.toNev, rewrap: !!s.rewrap, rmd: s.rmd !== false, rmdEv: s.rmdEv ?? null },
+    resolution: s.resolution, compression: comp, ran: { compression: comp, resolution: s.resolution, r3d: !!s.r3d, cbr: !!s.cbr, toNev: !!s.toNev, rewrap: !!s.rewrap, rmd: s.rmd !== false, rmdEv: s.rmdEv ?? null },
     output: s.output, result: s.result, onServer: true,
   };
 }
@@ -1144,17 +1142,12 @@ function onEvents() {
   });
   api.listen("job-progress", (p) => {
     const j = find(p.id); if (!j) return;
-    j.fraction = p.fraction; j.rate = p.fps; j.proxyPhase = false; j.r3dPhase = false;
-    updateCard(j); renderFooter();
-  });
-  api.listen("job-proxy", (p) => {
-    const j = find(p.id); if (!j) return;
-    j.fraction = p.fraction; j.rate = p.fps; j.proxyPhase = true;
+    j.fraction = p.fraction; j.rate = p.fps; j.r3dPhase = false;
     updateCard(j); renderFooter();
   });
   api.listen("job-r3d", (p) => {
     const j = find(p.id); if (!j) return;
-    j.fraction = p.fraction; j.rate = 0; j.proxyPhase = false; j.r3dPhase = true;
+    j.fraction = p.fraction; j.rate = 0; j.r3dPhase = true;
     updateCard(j); renderFooter();
   });
   api.listen("job-done", (p) => {
@@ -1162,7 +1155,7 @@ function onEvents() {
     if (p.skipped) batch.skipped++;
     else { batch.inputBytes += p.inputBytes; batch.outputBytes += p.outputBytes; }
     const j = find(p.id); if (!j) { renderFooter(); return; }
-    j.state = "done"; j.result = p; j.output = p.output; j.resultTarget = j.target; j.existKey = null; j.proxyPhase = false; j.r3dPhase = false;
+    j.state = "done"; j.result = p; j.output = p.output; j.resultTarget = j.target; j.existKey = null; j.r3dPhase = false;
     updateCard(j); renderFooter();
   });
   api.listen("job-error", (p) => {
@@ -1922,7 +1915,6 @@ async function init() {
       if (info.defaultBpp != null && clampBpp(info.defaultBpp) != null) settings.compression = clampBpp(info.defaultBpp);
       else if (LEGACY_PICK[info.defaultQuality]) settings.compression = LEGACY_PICK[info.defaultQuality];
       if (RES_LABEL[info.defaultResolution]) settings.resolution = info.defaultResolution;
-      if (info.defaultProxies) settings.proxies = true;
       if (info.defaultR3d) settings.r3d = true;
       if (info.defaultCbr) settings.cbr = true;
       if (info.defaultToNev) settings.toNev = true;
@@ -2043,7 +2035,6 @@ async function init() {
   await restoreQueue();
   renderAll();
   addPaths(await api.invoke("initial_paths"));
-  initProxies();
   initR3d();
   initCbr();
   initUpdates();
@@ -2157,6 +2148,34 @@ async function installUpdate() {
   }
 }
 
+// One switch row: checked state from settings, disabled with a short note when it does not
+// apply. The setting itself is kept, so it comes back when the row applies again.
+function setRow(id, disabled, note) {
+  const row = $(`${id}-row`), box = $(id), el = $(`${id}-note`);
+  if (row) row.classList.toggle("dim", !!disabled);
+  if (box) box.disabled = !!disabled || running;
+  if (el) { el.hidden = !note; el.textContent = note || ""; }
+}
+
+// Disabled states and notes of the conversion and bitrate rows, from the settings
+// and the clips in the queue.
+function syncOptionRows() {
+  if (!$("r3d")) return;
+  const nev = jobs.some(isNev), r3d = jobs.some(isR3d), any = jobs.length > 0;
+  setRow("r3d", false, any && !nev ? tr("No .nev clips in the queue.") : "");
+  setRow("to-nev", false, any && !r3d ? tr("No .R3D clips in the queue.") : "");
+  const sidecar = !!settings.r3d;
+  setRow("rmd", !sidecar, sidecar ? "" : tr("Turn on Convert .nev to R3D NE to write it."));
+  const ev = $("rmd-ev"), evRow = $("rmd-ev-row");
+  const evOff = !sidecar || settings.rmd === false;
+  if (ev) ev.disabled = evOff || running;
+  if (evRow) evRow.classList.toggle("dim", evOff);
+  const conv = !!settings.r3d || !!settings.toNev;
+  setRow("rewrap", !conv, conv ? "" : tr("Turn on a conversion above to use it."));
+  const rewrapOnly = conv && !!settings.rewrap;
+  setRow("cbr", rewrapOnly, rewrapOnly ? tr("Rewrap only keeps the source bitrate.") : "");
+}
+
 function initCbr() {
   const box = $("cbr");
   if (!box) return;
@@ -2164,18 +2183,12 @@ function initCbr() {
   box.addEventListener("change", () => {
     settings.cbr = box.checked;
     saveSettings();
+    syncOptionRows();
   });
 }
 
 function initR3d() {
   const toggles = [["r3d", "r3d", false], ["to-nev", "toNev", false], ["rewrap", "rewrap", false], ["rmd", "rmd", true]];
-  const sync = () => {
-    // Rewrap only needs a conversion to run; the sidecar only applies to R3D NE.
-    const rmd = $("rmd-row");
-    if (rmd) rmd.classList.toggle("dim", !settings.r3d);
-    const ev = $("rmd-ev-row");
-    if (ev) ev.hidden = !settings.r3d || settings.rmd === false;
-  };
   const ev = $("rmd-ev");
   if (ev) {
     ev.value = settings.rmdEv == null ? "" : String(settings.rmdEv);
@@ -2191,24 +2204,10 @@ function initR3d() {
     box.addEventListener("change", () => {
       settings[key] = box.checked;
       saveSettings();
-      sync();
+      syncOptionRows();
     });
   }
-  sync();
-}
-
-function initProxies() {
-  const box = $("proxies"), sub = $("proxies-sub");
-  if (!box) return;
-  box.checked = !!settings.proxies;
-  const enc = (info && info.proxyEncoder) || "";
-  const usable = enc && !/ffmpeg|no working/i.test(enc);
-  sub.textContent = tr("10-bit Rec.709, up to 1920 wide, in a Proxies folder next to each output.") +
-    (enc ? (usable ? tr(" Encoder: {0}.", enc) : ` ${enc}.`) : "");
-  box.addEventListener("change", () => {
-    settings.proxies = box.checked;
-    saveSettings();
-  });
+  syncOptionRows();
 }
 
 function initUpdates() {
@@ -2346,7 +2345,7 @@ function browserStandIn() {
     onDragDrop: () => {},
     invoke: async (cmd, a) => {
       switch (cmd) {
-        case "app_info": return { version: "0.2.0", gpu: "Metal: Apple GPU", cpu: "CPU (12 threads)", platform: "macos", proxyEncoder: "hevc_videotoolbox (GPU)" };
+        case "app_info": return { version: "0.2.0", gpu: "Metal: Apple GPU", cpu: "CPU (12 threads)", platform: "macos" };
         case "is_running": return false;
         case "initial_paths": return location.hash === "#demo" ? ["demo"] : [];
         case "scan": return sample.map(([path, codec, width, height, frames, bytes], i) => ({

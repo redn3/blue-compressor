@@ -184,8 +184,6 @@ struct Cli {
     overwrite: bool,
     skip_existing: bool,
     once: bool,
-    /// --proxies / --no-proxies; None reads PROXIES (watch: WATCH_PROXIES first).
-    proxies: Option<bool>,
     /// --r3d / --no-r3d; None reads R3D (watch: WATCH_R3D first).
     r3d: Option<bool>,
     /// --cbr / --no-cbr; None reads CBR (watch: WATCH_CBR first).
@@ -230,17 +228,10 @@ options:
       --suffix S          append S to output file names (before the extension)
       --overwrite         replace existing outputs (default: fail)
       --skip-existing     skip clips whose output already exists
-      --proxies           also write a 10-bit H.265 (Main10) Rec.709 proxy of each clip to
-                          Proxies/<name>.mov next to its output, up to 1920 wide, encoded on
-                          the GPU when ffmpeg has a working encoder (VideoToolbox, NVENC,
-                          Quick Sync, AMF), else libx265. Needs ffmpeg (next to bluecompress,
-                          on the PATH, or BLUECOMPRESS_FFMPEG). Default: PROXIES, else off
-      --cbr               constant bitrate for every output: compressed clips get every
-                          frame padded to exactly the bpp budget (lossless repacks stay
-                          variable), proxies use the encoder's CBR mode at about 0.4 bits
-                          per pixel (about 20 Mb/s at 1080p25). Off: frames take what they
-                          need up to the budget and proxies use quality based VBR. R3D NE
-                          is always constant bitrate. Default: CBR, else off
+      --cbr               constant bitrate: compressed clips get every frame padded to
+                          exactly the bpp budget (lossless repacks stay variable). Off:
+                          frames take what they need up to the budget. R3D NE is always
+                          constant bitrate. Default: CBR, else off
       --r3d               also make an R3D NE copy of each Nikon .nev in R3D NE/<name>.R3D
                           next to its output, at the same compression and resolution (a
                           lossless job copies the image data as it is). Log3G10 and
@@ -267,9 +258,8 @@ serve and watch options:
       --once              watch: run one scan pass on stable files and exit
                           watch and serve also read WATCH_BPP (or BPP), WATCH_PRESET (or
                           PRESET), or the legacy WATCH_QUALITY (or QUALITY) with the
-                          meaning of -q; the watch folder defaults to light. WATCH_PROXIES
-                          (or PROXIES) = 1 also writes proxies, WATCH_R3D (or R3D) = 1
-                          also converts .nev clips to R3D NE
+                          meaning of -q; the watch folder defaults to light. WATCH_R3D
+                          (or R3D) = 1 also converts .nev clips to R3D NE
 
 Folders are searched recursively for .nev and .r3d files. Originals are never modified;
 outputs are written to <name>.partial and renamed when complete.
@@ -623,12 +613,6 @@ fn compress_cmd(o: &Cli) -> u8 {
             );
         }
         let _ = stdout.flush();
-        if env_proxies(o.proxies, false)
-            && !CANCEL.load(Ordering::Relaxed)
-            && !write_proxy(input, &out, env_cbr(o.cbr, false), o.json, o.quiet)
-        {
-            failed += 1;
-        }
         let conv = env_convert(o, false);
         if (conv.to_r3d || conv.to_nev) && !CANCEL.load(Ordering::Relaxed) && !write_r3d(&opt, &conv, o.json, o.quiet) {
             failed += 1;
@@ -656,13 +640,6 @@ fn compress_cmd(o: &Cli) -> u8 {
     } else {
         0
     }
-}
-
-/// Proxies on: the command line, else WATCH_PROXIES (watch only), else PROXIES, else off.
-pub(crate) fn env_proxies(cli: Option<bool>, watch: bool) -> bool {
-    cli.or_else(|| if watch { env_nonempty("WATCH_PROXIES").and_then(|v| parse_bool(&v)) } else { None })
-        .or_else(|| env_nonempty("PROXIES").and_then(|v| parse_bool(&v)))
-        .unwrap_or(false)
 }
 
 /// Constant bitrate on: the command line, else WATCH_CBR (watch only), else CBR, else off.
@@ -768,68 +745,6 @@ pub(crate) fn write_r3d(job: &Options, conv: &bluecompress::Convert, json: bool,
     }
 }
 
-/// Writes the proxy of `source` next to its output `out` (see [`bluecompress::proxy_path`]),
-/// reporting like a compress job. Returns false on failure (cancel is not a failure).
-pub(crate) fn write_proxy(source: &Path, out: &Path, cbr: bool, json: bool, quiet: bool) -> bool {
-    let target = bluecompress::proxy_path(out);
-    let (ins, outs) = (ps(source), ps(&target));
-    if json {
-        println!("{{\"event\":\"proxy_start\",\"input\":{},\"output\":{}}}", q(&ins), q(&outs));
-    } else if !quiet {
-        eprintln!("{ins}: proxy -> {outs} [{}]", bluecompress::proxy::encoder_description());
-    }
-    let opts = bluecompress::ProxyOptions { cbr, ..bluecompress::ProxyOptions::new(source, &target) };
-    let mut last = -1i64;
-    let r = bluecompress::make_proxy(&opts, &CANCEL, &mut |fraction, fps| {
-        let pm = (fraction * 100.0) as i64;
-        if pm == last {
-            return;
-        }
-        last = pm;
-        if json {
-            println!(
-                "{{\"event\":\"proxy_progress\",\"input\":{},\"fraction\":{fraction:.3},\"fps\":{fps:.2}}}",
-                q(&ins)
-            );
-            let _ = std::io::stdout().flush();
-        } else if !quiet {
-            eprint!("\r  proxy {:5.1}%  {fps:6.1} fps", fraction * 100.0);
-        }
-    });
-    if !json && !quiet {
-        eprintln!();
-    }
-    match r {
-        Ok(p) => {
-            if json {
-                println!(
-                    "{{\"event\":\"proxy_done\",\"input\":{},\"output\":{},\"width\":{},\"height\":{},\"frames\":{},\"output_bytes\":{},\"seconds\":{:.3},\"encoder\":{}}}",
-                    q(&ins), q(&outs), p.width, p.height, p.frames, p.output_bytes, p.seconds, q(&p.encoder)
-                );
-            } else if !quiet {
-                eprintln!(
-                    "proxy: {}x{}, {:.1} MB in {:.1} s [{}]",
-                    p.width,
-                    p.height,
-                    p.output_bytes as f64 / 1e6,
-                    p.seconds,
-                    p.encoder
-                );
-            }
-            true
-        }
-        Err(_) if CANCEL.load(Ordering::Relaxed) => true,
-        Err(e) => {
-            if json {
-                println!("{{\"event\":\"proxy_error\",\"input\":{},\"error\":{}}}", q(&ins), q(&e.0));
-            } else {
-                eprintln!("{ins}: proxy error: {e}");
-            }
-            false
-        }
-    }
-}
-
 /// A preset from PRESET-style or legacy QUALITY-style variables, the first one set wins.
 fn env_preset(preset_key: &str, quality_key: &str) -> Option<u8> {
     env_nonempty(preset_key)
@@ -910,7 +825,6 @@ fn watch_cmd(o: &Cli) -> u8 {
         threads: o.threads,
         poll_seconds: env_watch_poll(o.poll_seconds),
         clear_after_process: env_watch_clear(o.clear_watch),
-        proxies: env_proxies(o.proxies, true),
         r3d: env_r3d(o.r3d, true),
         cbr: env_cbr(o.cbr, true),
         to_nev: env_convert(o, true).to_nev,
@@ -979,7 +893,6 @@ fn serve_cmd(o: &Cli) -> u8 {
             threads: o.threads,
             poll_seconds: env_watch_poll(o.poll_seconds),
             clear_after_process: env_watch_clear(o.clear_watch),
-            proxies: env_proxies(o.proxies, true),
             r3d: env_r3d(o.r3d, true),
             cbr: env_cbr(o.cbr, true),
             to_nev: env_convert(o, true).to_nev,
@@ -1000,7 +913,6 @@ fn serve_cmd(o: &Cli) -> u8 {
             threads: o.threads,
             poll_seconds: env_watch_poll(o.poll_seconds),
             clear_after_process: env_watch_clear(o.clear_watch),
-            proxies: env_proxies(o.proxies, true),
             r3d: env_r3d(o.r3d, true),
             cbr: env_cbr(o.cbr, true),
             to_nev: env_convert(o, true).to_nev,
@@ -1030,7 +942,6 @@ fn serve_cmd(o: &Cli) -> u8 {
         default_bpp,
         default_resolution,
         default_backend: env_watch_backend(o.backend),
-        default_proxies: env_proxies(o.proxies, false),
         default_r3d: env_r3d(o.r3d, false),
         default_to_nev: env_convert(o, false).to_nev,
         default_rewrap: env_convert(o, false).rewrap,
@@ -1212,7 +1123,6 @@ fn main() -> ExitCode {
         overwrite: false,
         skip_existing: false,
         once: false,
-        proxies: None,
         r3d: None,
         cbr: None,
         to_nev: None,
@@ -1317,8 +1227,6 @@ fn main() -> ExitCode {
             "--clear-watch" | "--delete-source" => o.clear_watch = Some(true),
             "--no-clear-watch" | "--keep-source" => o.clear_watch = Some(false),
             "--once" => o.once = true,
-            "--proxies" | "--proxy" => o.proxies = Some(true),
-            "--no-proxies" | "--no-proxy" => o.proxies = Some(false),
             "--r3d" => o.r3d = Some(true),
             "--no-r3d" => o.r3d = Some(false),
             "--to-nev" => o.to_nev = Some(true),
@@ -1626,7 +1534,6 @@ mod tests {
                 overwrite: false,
                 skip_existing: false,
                 once: false,
-                proxies: Some(false),
                 r3d: Some(false),
                 cbr: Some(cbr),
                 to_nev: None,
@@ -1686,7 +1593,6 @@ mod tests {
             overwrite: false,
             skip_existing: false,
             once: false,
-            proxies: Some(false),
             r3d: Some(true),
             cbr: None,
             to_nev: None,
@@ -1697,66 +1603,6 @@ mod tests {
         assert_eq!(compress_cmd(&o), 0);
         assert!(out_dir.join("A001_C001.NEV").is_file());
         assert!(!out_dir.join("R3D NE").exists());
-        let _ = std::fs::remove_dir_all(base);
-    }
-
-    #[test]
-    fn compress_with_proxies() {
-        let Ok((ffmpeg, _)) = bluecompress::proxy::default_encoder() else {
-            eprintln!("no ffmpeg, skipped");
-            return;
-        };
-        let base = std::env::temp_dir().join(format!("bluecomp_proxy_{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&base);
-        std::fs::create_dir_all(&base).unwrap();
-        let clip = base.join("A001_C001.NEV");
-        make_synthetic_nev(&clip, 128, 64, 3);
-        let out_dir = base.join("out");
-        let o = Cli {
-            quality: Some(1),
-            bpp: None,
-            legacy_q: false,
-            resolution: None,
-            backend: Some(Backend::Cpu),
-            threads: 2,
-            inputs: vec![clip.to_string_lossy().into_owned()],
-            input_dir: None,
-            output_dir: Some(out_dir.to_string_lossy().into_owned()),
-            output_file: None,
-            watch_input: None,
-            watch_output: None,
-            listen: None,
-            browse_root: None,
-            poll_seconds: None,
-            clear_watch: None,
-            suffix: String::new(),
-            json: false,
-            quiet: true,
-            overwrite: false,
-            skip_existing: false,
-            once: false,
-            proxies: Some(true),
-            r3d: None,
-            cbr: None,
-            to_nev: None,
-            rewrap: None,
-            rmd: None,
-            rmd_ev: None,
-        };
-        assert_eq!(compress_cmd(&o), 0);
-        let proxy = out_dir.join("Proxies").join("A001_C001.mov");
-        let probe = ffmpeg.with_file_name("ffprobe");
-        let info = std::process::Command::new(probe)
-            .args(["-v", "error", "-select_streams", "v:0", "-show_entries"])
-            .arg("stream=codec_name,profile,pix_fmt,width,height,nb_frames")
-            .args(["-of", "default=nw=1"])
-            .arg(&proxy)
-            .output()
-            .unwrap();
-        let info = String::from_utf8_lossy(&info.stdout);
-        for want in ["codec_name=hevc", "profile=Main 10", "width=64", "height=32", "nb_frames=3"] {
-            assert!(info.contains(want), "{want} missing in:\n{info}");
-        }
         let _ = std::fs::remove_dir_all(base);
     }
 
@@ -1777,9 +1623,6 @@ mod tests {
         let bad_path = watch_in.join("CORRUPT.NEV");
         std::fs::write(&bad_path, b"not a valid nev clip").unwrap();
 
-        // Proxies go along when this machine has ffmpeg (with libx265 at least).
-        let have_ffmpeg = bluecompress::proxy::default_encoder().is_ok();
-
         // 1. Test watch --once (with 1s stability check and clear_after_process = true).
         let state = Arc::new(Mutex::new(watch::WatchSnapshot::default()));
         let cancel = AtomicBool::new(false);
@@ -1794,7 +1637,6 @@ mod tests {
                 threads: 2,
                 poll_seconds: 1,
                 clear_after_process: true,
-                proxies: have_ffmpeg,
                 r3d: false,
                 cbr: false,
                 to_nev: false,
@@ -1813,13 +1655,6 @@ mod tests {
         assert_eq!(rc, 1);
         let expected_out = watch_out.join("Day1").join("A001").join("CLIP_0001.NEV");
         assert!(expected_out.is_file(), "watch output clip should exist at relative path");
-        if have_ffmpeg {
-            let proxy = watch_out.join("Day1").join("A001").join("Proxies").join("CLIP_0001.mov");
-            assert!(
-                std::fs::metadata(&proxy).map(|m| m.len() > 0).unwrap_or(false),
-                "proxy should exist next to the output"
-            );
-        }
         assert!(!clip_path.exists(), "source clip should be deleted when clear_after_process is true");
         assert!(!sub_in.exists(), "empty parent subfolder should be cleaned up after source deletion");
         assert!(watch_in.is_dir(), "watch_in root folder itself must never be removed");
@@ -1849,7 +1684,6 @@ mod tests {
             default_bpp: None,
             default_resolution: Resolution::Original,
             default_backend: Backend::Cpu,
-            default_proxies: false,
             default_r3d: false,
             default_to_nev: false,
             default_rewrap: false,
@@ -1866,7 +1700,6 @@ mod tests {
                 threads: 2,
                 poll_seconds: 60,
                 clear_after_process: false,
-                proxies: false,
                 r3d: false,
                 cbr: false,
                 to_nev: false,

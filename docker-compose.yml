@@ -23,11 +23,6 @@ services:
       # Set to true (or toggle "Clear watch folder after process" in the Web UI)
       # to delete source clips from /watch/in once compression succeeds:
       - WATCH_CLEAR=false
-      # true also writes a 10-bit H.265 Rec.709 proxy (up to 1920 wide) of every clip to a
-      # Proxies folder next to its output; on a NAS without a GPU it encodes with libx265
-      # on the CPU. PROXIES sets the Web UI toggle's default, WATCH_PROXIES the watch folder:
-      - PROXIES=false
-      - WATCH_PROXIES=false
       # true also converts every Nikon .nev to R3D NE in an "R3D NE" folder next to its
       # output (Z8, Z9 and Z6III experimental). R3D sets the Web UI toggle's default,
       # WATCH_R3D the watch folder:
@@ -41,8 +36,8 @@ services:
       # false: no exposure .RMD sidecar (+1 stop on the ZR) next to R3D NE outputs:
       - RMD=true
       - WATCH_RMD=true
-      # true pads every compressed frame to the bpp budget (all frames the same size) and
-      # encodes proxies at a constant bitrate; R3D NE is always constant. CBR sets the
+      # true pads every compressed frame to the bpp budget (all frames the same size);
+      # R3D NE is always constant. CBR sets the
       # Web UI toggle's default, WATCH_CBR the watch folder:
       - CBR=false
       - WATCH_CBR=false

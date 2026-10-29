@@ -1264,7 +1264,9 @@ body.per-clip .job-settings { display: flex; }
 body.web #updates-section { display: none; }
 
 .badge-exp { display: inline-block; padding: 0 6px; border-radius: 4px; font-size: 0.85em; background: rgba(255, 170, 0, 0.18); color: #c77d00; }
-.switch-row.dim { opacity: 0.5; }
+.switch-row.dim, .select-row.dim { opacity: 0.5; }
+.switch-note { display: block; color: var(--warn, #d9a441); font-size: 11px; line-height: 1.35; margin-top: 2px; }
+.switch-note[hidden] { display: none; }
 .select-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 0 8px; }
 .lang-pick { display: inline-flex; align-items: center; gap: 4px; color: var(--muted, #888); }
 .lang-pick select { background: transparent; color: inherit; border: 1px solid rgba(127, 127, 127, 0.3); border-radius: 6px; padding: 2px 4px; font: inherit; font-size: 12px; max-width: 150px; }

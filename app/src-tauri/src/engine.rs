@@ -4,14 +4,14 @@
 pub use bluecompress::{Backend, Codec, Options, Resolution, Target};
 
 #[cfg(not(feature = "mock"))]
-pub use bluecompress::{backend_description, output_size, preview_region_for, probe, thumbnail, transcode_staged};
+pub use bluecompress::r3d_job;
 #[cfg(not(feature = "mock"))]
-pub use bluecompress::{make_proxy, proxy::encoder_description as proxy_encoder, r3d_job};
+pub use bluecompress::{backend_description, output_size, preview_region_for, probe, thumbnail, transcode_staged};
 
 #[cfg(feature = "mock")]
-pub use mock::{backend_description, output_size, preview_region_for, probe, thumbnail, transcode_staged};
+pub use mock::r3d_job;
 #[cfg(feature = "mock")]
-pub use mock::{make_proxy, proxy_encoder, r3d_job};
+pub use mock::{backend_description, output_size, preview_region_for, probe, thumbnail, transcode_staged};
 
 #[cfg(feature = "mock")]
 mod mock {
@@ -227,40 +227,6 @@ mod mock {
             width,
         )?;
         Ok(Thumbnail { width: p.width, height: p.height, rgba: p.before_rgba })
-    }
-
-    pub fn proxy_encoder() -> String {
-        "hevc_videotoolbox (GPU)".into()
-    }
-
-    /// Stand-in proxy: progress at about 200 fps, no file.
-    pub fn make_proxy(
-        o: &bluecompress::ProxyOptions,
-        cancel: &AtomicBool,
-        progress: &mut dyn FnMut(f64, f64),
-    ) -> bluecompress::Result<bluecompress::ProxyOutcome> {
-        let info = probe(&o.input)?;
-        let start = Instant::now();
-        for f in 0..info.frames {
-            if cancel.load(Ordering::Relaxed) {
-                return Err(bluecompress::Error("cancelled".into()));
-            }
-            std::thread::sleep(Duration::from_secs_f64(1.0 / 200.0));
-            progress(
-                f64::from(f + 1) / f64::from(info.frames),
-                f64::from(f + 1) / start.elapsed().as_secs_f64().max(1e-3),
-            );
-        }
-        let (width, height) = bluecompress::proxy::proxy_size(info.width, info.height, o.max_width);
-        Ok(bluecompress::ProxyOutcome {
-            output: o.output.clone(),
-            width,
-            height,
-            frames: info.frames,
-            encoder: "hevc_videotoolbox".into(),
-            seconds: start.elapsed().as_secs_f64(),
-            output_bytes: u64::from(info.frames) * 60_000,
-        })
     }
 
     /// Stand-in R3D NE / N-RAW step: progress over about half a second, no file.

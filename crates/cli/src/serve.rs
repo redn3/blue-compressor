@@ -37,8 +37,6 @@ pub struct ServeConfig {
     pub default_bpp: Option<f64>,
     pub default_resolution: Resolution,
     pub default_backend: Backend,
-    /// Proxies toggle for new clips (PROXIES or --proxies).
-    pub default_proxies: bool,
     /// R3D NE toggle for new clips (R3D or --r3d).
     pub default_r3d: bool,
     /// R3D NE to N-RAW, rewrap-only and exposure sidecar toggles (NEV, REWRAP, RMD).
@@ -57,7 +55,6 @@ struct ServerState {
     default_bpp: Option<f64>,
     default_resolution: Resolution,
     default_backend: Backend,
-    default_proxies: bool,
     default_r3d: bool,
     default_to_nev: bool,
     default_rewrap: bool,
@@ -105,14 +102,11 @@ struct AppInfo {
     default_quality: u8,
     default_bpp: Option<f64>,
     default_resolution: String,
-    default_proxies: bool,
     default_r3d: bool,
     default_to_nev: bool,
     default_rewrap: bool,
     default_rmd: bool,
     default_cbr: bool,
-    /// The encoder proxies use here ("hevc_nvenc (GPU)", "libx265 (CPU)") or why none.
-    proxy_encoder: String,
     watch: WatchSnapshot,
 }
 
@@ -153,13 +147,10 @@ struct JobRequest {
     /// Compress even when a compressed copy already exists ("Compress again").
     #[serde(default)]
     force: bool,
-    /// Also write a 10-bit H.265 proxy to Proxies/ next to the output.
-    #[serde(default)]
-    proxy: bool,
     /// Also convert a .nev source to R3D NE in "R3D NE/" next to the output.
     #[serde(default)]
     r3d: bool,
-    /// Constant bitrate for the compressed clip and the proxy (R3D NE always is).
+    /// Constant bitrate for the compressed clip (R3D NE always is).
     #[serde(default)]
     cbr: bool,
     /// Also rewrap a .R3D (R3D NE) source back to N-RAW in "N-RAW/" next to the output.
@@ -208,7 +199,6 @@ struct QueueJob {
     lossless: bool,
     resolution: String,
     force: bool,
-    proxy: bool,
     r3d: bool,
     cbr: bool,
     to_nev: bool,
@@ -369,11 +359,6 @@ struct JobDone {
     seconds: f64,
     fps: f64,
     backend: String,
-    /// The proxy written for this clip, if one was asked for and made.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    proxy: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    proxy_error: Option<String>,
     /// The R3D NE clip written for this .nev, if asked for and made.
     #[serde(skip_serializing_if = "Option::is_none")]
     r3d: Option<String>,
@@ -776,8 +761,6 @@ fn start_queue(state: &Arc<ServerState>, args: StartArgs) -> Result<(), String> 
                         seconds: 0.0,
                         fps: 0.0,
                         backend: String::new(),
-                        proxy: None,
-                        proxy_error: None,
                         r3d: None,
                         r3d_skipped: None,
                         r3d_error: None,
@@ -797,7 +780,6 @@ fn start_queue(state: &Arc<ServerState>, args: StartArgs) -> Result<(), String> 
                 lossless: target.is_lossless(),
                 resolution: job.resolution,
                 force: job.force,
-                proxy: job.proxy,
                 r3d: job.r3d,
                 cbr: job.cbr,
                 to_nev: job.to_nev,
@@ -887,8 +869,6 @@ fn run_job(st: &Arc<ServerState>, job: &QueueJob, settings: &Settings) {
                 seconds: 0.0,
                 fps: 0.0,
                 backend: String::new(),
-                proxy: None,
-                proxy_error: None,
                 r3d: None,
                 r3d_skipped: None,
                 r3d_error: None,
@@ -1001,8 +981,6 @@ fn run_job(st: &Arc<ServerState>, job: &QueueJob, settings: &Settings) {
                     seconds: d.seconds,
                     fps: if d.seconds > 0.0 { d.frames as f64 / d.seconds } else { 0.0 },
                     backend: "rewrap".into(),
-                    proxy: None,
-                    proxy_error: None,
                     r3d: Some(ps(&d.output)),
                     r3d_skipped: None,
                     r3d_error: None,
@@ -1030,34 +1008,6 @@ fn run_job(st: &Arc<ServerState>, job: &QueueJob, settings: &Settings) {
         return;
     }
     let result = bluecompress::transcode_staged(&options, &st.cancel, &mut on_progress);
-    // The proxy (from the source, next to the output) runs under the same lock.
-    let proxy = match &result {
-        Ok(_) if job.proxy && !st.cancel.load(Ordering::SeqCst) => {
-            let target = bluecompress::proxy_path(&options.output);
-            broadcast_event(&st.sse_clients, "job-proxy", JobProgress { id: job.id, fraction: 0.0, fps: 0.0 });
-            let mut last = Instant::now() - Duration::from_secs(1);
-            let clients = st.sse_clients.clone();
-            let r = bluecompress::make_proxy(
-                &bluecompress::ProxyOptions {
-                    cbr: job.cbr,
-                    ..bluecompress::ProxyOptions::new(&options.input, &target)
-                },
-                &st.cancel,
-                &mut |fraction, fps| {
-                    if fraction >= 1.0 || last.elapsed().as_millis() >= 100 {
-                        last = Instant::now();
-                        broadcast_event(&clients, "job-proxy", JobProgress { id: job.id, fraction, fps });
-                    }
-                },
-            );
-            match r {
-                Ok(p) => (Some(ps(&p.output)), None),
-                Err(_) if st.cancel.load(Ordering::SeqCst) => (None, None),
-                Err(e) => (None, Some(e.0)),
-            }
-        }
-        _ => (None, None),
-    };
     // R3D NE from the original .nev, next to the output, under the same lock.
     let r3d = match &result {
         Ok(_)
@@ -1087,8 +1037,6 @@ fn run_job(st: &Arc<ServerState>, job: &QueueJob, settings: &Settings) {
     match result {
         Ok(o) => {
             let done = JobDone {
-                proxy: proxy.0,
-                proxy_error: proxy.1,
                 r3d: r3d.0,
                 r3d_skipped: r3d.1,
                 r3d_error: r3d.2,
@@ -1135,13 +1083,11 @@ fn invoke_command(state: &Arc<ServerState>, cmd: &str, body: &[u8]) -> HttpRespo
                 default_quality: state.default_quality,
                 default_bpp: state.default_bpp,
                 default_resolution: resolution_name(state.default_resolution).into(),
-                default_proxies: state.default_proxies,
                 default_r3d: state.default_r3d,
                 default_to_nev: state.default_to_nev,
                 default_rewrap: state.default_rewrap,
                 default_rmd: state.default_rmd,
                 default_cbr: state.default_cbr,
-                proxy_encoder: bluecompress::proxy::encoder_description(),
                 watch: state.watch_state.lock().unwrap().clone(),
             };
             HttpResponse::json(200, &info)
@@ -1580,7 +1526,6 @@ pub fn run_serve(cfg: ServeConfig, cancel: &'static AtomicBool) -> u8 {
         default_bpp: cfg.default_bpp,
         default_resolution: cfg.default_resolution,
         default_backend: cfg.default_backend,
-        default_proxies: cfg.default_proxies,
         default_r3d: cfg.default_r3d,
         default_to_nev: cfg.default_to_nev,
         default_rewrap: cfg.default_rewrap,

@@ -57,8 +57,6 @@ struct AppInfo {
     gpu: String,
     cpu: String,
     platform: String,
-    /// The encoder proxies use ("hevc_videotoolbox (GPU)", "libx265 (CPU)") or why none.
-    proxy_encoder: String,
 }
 
 /// Queue-wide settings; quality and resolution travel with each job.
@@ -86,13 +84,10 @@ struct JobRequest {
     /// Compress even when a compressed copy already exists ("Compress again").
     #[serde(default)]
     force: bool,
-    /// Also write a 10-bit H.265 proxy to Proxies/ next to the output.
-    #[serde(default)]
-    proxy: bool,
     /// Also convert a .nev source to R3D NE in "R3D NE/" next to the output.
     #[serde(default)]
     r3d: bool,
-    /// Constant bitrate for the compressed clip and the proxy (R3D NE always is).
+    /// Constant bitrate for the compressed clip (R3D NE always is).
     #[serde(default)]
     cbr: bool,
     /// Also rewrap a .R3D (R3D NE) source back to N-RAW in "N-RAW/" next to the output.
@@ -144,11 +139,6 @@ struct JobDone {
     seconds: f64,
     fps: f64,
     backend: String,
-    /// The proxy written for this clip, if one was asked for and made.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    proxy: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    proxy_error: Option<String>,
     /// The R3D NE clip written for this .nev, if asked for and made.
     #[serde(skip_serializing_if = "Option::is_none")]
     r3d: Option<String>,
@@ -286,7 +276,6 @@ fn app_info() -> AppInfo {
         gpu: engine::backend_description(Backend::Auto),
         cpu: engine::backend_description(Backend::Cpu),
         platform: std::env::consts::OS.into(),
-        proxy_encoder: engine::proxy_encoder(),
     }
 }
 
@@ -482,8 +471,6 @@ fn start(app: AppHandle, state: State<'_, Runner>, jobs: Vec<JobRequest>, settin
                             seconds: 0.0,
                             fps: 0.0,
                             backend: String::new(),
-                            proxy: None,
-                            proxy_error: None,
                             r3d: None,
                             r3d_skipped: None,
                             r3d_error: None,
@@ -573,8 +560,6 @@ fn start(app: AppHandle, state: State<'_, Runner>, jobs: Vec<JobRequest>, settin
                                 seconds: d.seconds,
                                 fps: if d.seconds > 0.0 { f64::from(d.frames) / d.seconds } else { 0.0 },
                                 backend: "rewrap".into(),
-                                proxy: None,
-                                proxy_error: None,
                                 r3d: Some(out),
                                 r3d_skipped: None,
                                 r3d_error: None,
@@ -592,36 +577,6 @@ fn start(app: AppHandle, state: State<'_, Runner>, jobs: Vec<JobRequest>, settin
                 continue;
             }
             let result = engine::transcode_staged(&options, &cancel, &mut on_progress);
-            // The proxy is made from the source and written to Proxies/ next to the output.
-            let (proxy, proxy_error) = match &result {
-                Ok(_) if job.proxy && !cancel.load(Ordering::SeqCst) => {
-                    let target = bluecompress::proxy_path(&options.output);
-                    let _ = app.emit("job-proxy", JobProgress { id: job.id, fraction: 0.0, fps: 0.0 });
-                    let mut last = Instant::now() - std::time::Duration::from_secs(1);
-                    let r = engine::make_proxy(
-                        &bluecompress::ProxyOptions {
-                            cbr: job.cbr,
-                            ..bluecompress::ProxyOptions::new(&options.input, &target)
-                        },
-                        &cancel,
-                        &mut |fraction, fps| {
-                            if fraction >= 1.0 || last.elapsed().as_millis() >= 100 {
-                                last = Instant::now();
-                                let _ = app.emit("job-proxy", JobProgress { id: job.id, fraction, fps });
-                            }
-                            if paused.load(Ordering::SeqCst) {
-                                wait_while_paused(&paused, &cancel);
-                            }
-                        },
-                    );
-                    match r {
-                        Ok(p) => (Some(p.output.to_string_lossy().into_owned()), None),
-                        Err(_) if cancel.load(Ordering::SeqCst) => (None, None),
-                        Err(e) => (None, Some(e.0)),
-                    }
-                }
-                _ => (None, None),
-            };
             // R3D NE from the original .nev (not the compressed copy), next to the output.
             let (r3d, r3d_skipped, r3d_error) = match &result {
                 Ok(_)
@@ -665,8 +620,6 @@ fn start(app: AppHandle, state: State<'_, Runner>, jobs: Vec<JobRequest>, settin
                             seconds: active_seconds(o.seconds, paused_for),
                             fps: active_fps(o.frames, o.seconds, o.fps, paused_for),
                             backend: o.backend,
-                            proxy,
-                            proxy_error,
                             r3d,
                             r3d_skipped,
                             r3d_error,

@@ -153,38 +153,18 @@ Format analysis and decoding reference* (sections 2.1 and 2.2), copyright (c) 20
 patrol_taking_9j (RdWing), licensed under
 [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
 
-### Proxies
-
-Turn on **Make H.265 proxies** (or pass `--proxies`, or set `PROXIES` / `WATCH_PROXIES`
-in Docker) to also write an editing proxy of each clip to a `Proxies` folder next to its
-output, as `Proxies/<clip name>.mov`, so editors that relink proxies by name find them.
-Each proxy is 10-bit H.265 (HEVC Main10, 4:2:0) in Rec.709, up to 1920 wide (half the
-sensor resolution at most), with the clip's first audio track as AAC. The picture is
-debayered at half resolution (one pixel per 2x2 sensor block) with a simple display
-grade (white balance and exposure measured once per clip), so it is meant for cutting,
-not for judging color.
-
-Encoding runs in a separate `ffmpeg`, on the GPU when one of its encoders works
-(VideoToolbox on a Mac, NVENC, Quick Sync or AMF elsewhere) and with libx265 on the CPU
-otherwise, which is what a NAS without a GPU uses. The Docker image includes ffmpeg; on
-a computer, Blue Compressor uses an `ffmpeg` next to itself, the one in
-`BLUECOMPRESS_FFMPEG`, or one on the PATH (Homebrew's folders included).
-
 ### Constant bitrate
 
 **Constant bitrate** (or `--cbr`, or `CBR` / `WATCH_CBR` in Docker) applies to every
-output:
+output. The toggle is always shown in the settings panel, under the conversion options;
+with **Rewrap only** it is dimmed, since a rewrap keeps the source's frame sizes:
 
 - **Compressed clips:** with a bpp target, every frame is padded to exactly the frame
   budget, so all frames are the same size, as the cameras write them. Off (the default
   and what earlier versions did), each frame takes what it needs up to the budget, so
-  simple frames come in smaller; Nikon's and RED's decoders and Resolve read either,
+  simple frames come in smaller; Nikon's and RED's decoders read either,
   since the container lists each frame's size. Lossless repacks are always variable:
   padding them to one size would give back what the repack saves.
-- **Proxies:** on, ffmpeg encodes at a constant rate of about 0.4 bits per pixel (about
-  20 Mb/s for 1920x1080 at 25 fps, 2 to 80 Mb/s), with the encoder's CBR mode
-  (VideoToolbox `constant_bit_rate`, NVENC and AMF `-rc cbr`, Quick Sync with equal
-  average and maximum rate, libx265 strict CBR). Off, proxies use quality based VBR.
 - **R3D NE:** always constant bitrate, whatever the toggle says. Camera R3D NE files
   have every frame at the same size (7,750,656 bytes on the ZR). A compressed or resized
   R3D NE is padded to one frame size; a rewrap copies the frames as they are, so it is
@@ -199,13 +179,13 @@ video codec (`NRAW` and `NR3D`), the format codes, the gamma and gamut (N-LOG an
 or Log3G10 and REDWideGamutRGB, which decoders apply when debayering), the RED clip
 metadata, the camera matrix and a few constants. The image data is copied as it is.
 
-- **N-RAW to R3D NE** (or `--r3d`, `R3D` / `WATCH_R3D` in Docker) acts on `.nev`
+- **Convert .nev to R3D NE** (or `--r3d`, `R3D` / `WATCH_R3D` in Docker) acts on `.nev`
   clips and writes `R3D NE/<clip name>.R3D` next to each output (ZR names such as
   `A007_C002_10299S` are already RED style; other names get one). It follows the
   compression and resolution settings: a lossless job copies the image data as it is, a
   compressed or resized one is recompressed from the original and padded to constant
   frames. N-RAW High and Normal both work.
-- **R3D NE to N-RAW** (or `--to-nev`, `NEV` / `WATCH_NEV`) acts on `.R3D` clips and
+- **Convert .R3D to N-RAW** (or `--to-nev`, `NEV` / `WATCH_NEV`) acts on `.R3D` clips and
   rewraps them back to N-RAW (`N-RAW/<clip name>.NEV`): NRAW codec, N-LOG, the N-RAW
   constants and matrix, and the RED blocks cleared. A round trip, N-RAW to R3D NE and
   back, gives identical image data.
@@ -428,13 +408,11 @@ services:
 | `WATCH_RESOLUTION` | `original` | Output resolution for watch-folder jobs (`original`, `6k`, `4k`), also adjustable live in the Web UI. |
 | `WATCH_POLL_SECONDS` | `5` | Seconds between watch-folder scans and file-copy stability checks. |
 | `WATCH_CLEAR` | `false` | Set to `true` (or toggle **Clear watch folder after process** in the Web UI) to delete source clips from `WATCH_INPUT` once compression succeeds. |
-| `PROXIES` | `false` | Set to `true` to turn on **Make H.265 proxies** for new Web UI jobs (see Proxies above). |
-| `WATCH_PROXIES` | `false` | Set to `true` to also write a proxy of every watch-folder clip. A proxy that fails keeps the source even with `WATCH_CLEAR`. |
 | `CBR` | `false` | Set to `true` to turn on **Constant bitrate** for new Web UI jobs (see Constant bitrate above). |
 | `WATCH_CBR` | `false` | Set to `true` for constant bitrate watch-folder outputs. |
-| `R3D` | `false` | Set to `true` to turn on **N-RAW to R3D NE** for new Web UI jobs (see R3D NE and N-RAW above). |
+| `R3D` | `false` | Set to `true` to turn on **Convert .nev to R3D NE** for new Web UI jobs (see R3D NE and N-RAW above). |
 | `WATCH_R3D` | `false` | Set to `true` to also convert every watch-folder `.nev` to R3D NE. A failed conversion keeps the source even with `WATCH_CLEAR`. |
-| `NEV` / `WATCH_NEV` | `false` | Set to `true` to turn on **R3D NE to N-RAW** for Web UI jobs / the watch folder (see R3D NE and N-RAW above). |
+| `NEV` / `WATCH_NEV` | `false` | Set to `true` to turn on **Convert .R3D to N-RAW** for Web UI jobs / the watch folder (see R3D NE and N-RAW above). |
 | `REWRAP` | `false` | Set to `true` to turn on **Rewrap only** for new Web UI jobs. |
 | `RMD` / `WATCH_RMD` | `true` | Set to `false` for no exposure `.RMD` sidecar next to R3D NE outputs. |
 | `RMD_EV` / `WATCH_RMD_EV` | | Exposure in the `.RMD` in stops (-4 to 4) instead of +1 (ZR) or +0.5 (other cameras). |
