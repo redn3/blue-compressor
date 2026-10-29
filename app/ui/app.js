@@ -87,7 +87,7 @@ let jobs = [];
 let nextId = 1;
 let running = false;
 // Re-renders the text after a language change (see i18n.js).
-window.bcRerender = () => { renderSettings(); renderCompression(); renderAll(); renderFooter(); };
+window.bcRerender = () => { sendMenuLabels(); renderSettings(); renderCompression(); renderAll(); renderFooter(); };
 let paused = false;
 // Totals of the current batch for the "saved so far" counter. Clips skipped at run time
 // because their output already existed count as done, not towards the bytes.
@@ -1428,6 +1428,7 @@ function renderEstimate() {
   $("v-est-sub").textContent = (layer
     ? tr("This frame {0} → {1}, extrapolated to the clip", gb(layer.src), gb(layer.out))
     : tr("From another frame, extrapolated to the clip")) + (flow ? ` · ${flow}` : "");
+  $("v-est-sub").title = $("v-est-sub").textContent;
 }
 
 // Pick the layers to show for the current frame and settings from the caches. Layers of an
@@ -1464,6 +1465,13 @@ function clampView() {
 }
 
 // The frame's rectangle on the canvas in device pixels.
+// The split line in canvas pixels: viewer.split is a fraction of the image width, so the
+// line stays on the same image column whatever the window size, letterboxing or zoom.
+function splitCanvasX() {
+  const c = $("v-canvas"), f = frameRect();
+  return Math.min(c.width, Math.max(0, f.x + viewer.split * f.w));
+}
+
 function frameRect() {
   const c = $("v-canvas");
   const w = dispW() * viewer.scale, h = quadH() * viewer.scale;
@@ -1522,9 +1530,9 @@ function draw() {
     const c = $("v-canvas");
     const ctx = c.getContext("2d");
     ctx.clearRect(0, 0, c.width, c.height);
-    const splitX = Math.round(viewer.split * c.width);
-    $("v-split").style.left = `${viewer.split * 100}%`;
     const f = frameRect();
+    const splitX = Math.round(splitCanvasX());
+    $("v-split").style.left = `${splitX / dpr()}px`;
     const layers = [];
     if (viewer.base) layers.push({ l: viewer.base, x: f.x, y: f.y, w: f.w, h: f.h });
     if (viewer.region && !viewer.fit) {
@@ -1679,7 +1687,7 @@ function bindStage() {
   const st = $("stage");
   let drag = null;
   const local = (e) => { const r = st.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
-  const nearSplit = (p) => Math.abs(p.x - viewer.split * st.clientWidth) < 14;
+  const nearSplit = (p) => Math.abs(p.x - splitCanvasX() / dpr()) < 14;
   st.addEventListener("pointermove", (e) => {
     if (e.target.closest(".v-mini")) return;
     const p = local(e);
@@ -1688,7 +1696,8 @@ function bindStage() {
     drag.last = p;
     if (Math.abs(p.x - drag.start.x) + Math.abs(p.y - drag.start.y) > 3) drag.moved = true;
     if (drag.mode === "split") {
-      viewer.split = Math.min(1, Math.max(0, p.x / st.clientWidth));
+      const f = frameRect();
+      viewer.split = Math.min(1, Math.max(0, (p.x * dpr() - f.x) / f.w));
       draw();
     } else if (!viewer.fit) {
       viewer.cx -= (dx * dpr()) / (dispW() * viewer.scale);
@@ -2101,9 +2110,67 @@ function hideUpdatePrompt() {
   $("update-modal").classList.remove("show");
 }
 
+// A short message with an OK button (feedback of the menu's update check).
+function showNotice(title, text) {
+  $("notice-title").textContent = title;
+  $("notice-text").textContent = text || "";
+  $("notice-text").hidden = !text;
+  $("notice-modal").classList.add("show");
+  $("notice-ok").focus();
+}
+
+// Labels of the native menu, translated; keys are the English labels the Rust side uses.
+function sendMenuLabels() {
+  if (!T) return;
+  const labels = {
+    "About Blue Compressor": tr("About Blue Compressor"),
+    "Check for Updates...": tr("Check for Updates..."),
+    "Services": tr("Services"),
+    "Hide Blue Compressor": tr("Hide Blue Compressor"),
+    "Hide Others": tr("Hide Others"),
+    "Show All": tr("Show All"),
+    "Quit Blue Compressor": tr("Quit Blue Compressor"),
+    "Edit": tr("Edit"),
+    "Undo": tr("Undo"),
+    "Redo": tr("Redo"),
+    "Cut": tr("Cut"),
+    "Copy": tr("Copy"),
+    "Paste": tr("Paste"),
+    "Select All": tr("Select All"),
+    "Window": tr("Window"),
+    "Minimize": tr("Minimize"),
+    "Zoom": tr("Zoom"),
+    "Close Window": tr("Close Window"),
+    "Help": tr("Help"),
+  };
+  api.invoke("set_menu_labels", { labels }).catch(() => {});
+}
+
+// Check for Updates... from the menu: works with automatic checks off, and always answers.
+// An update found while the queue runs is installed when it has finished (see installUpdate).
+async function checkFromMenu() {
+  if (info.web) return;
+  setUpdateStatus(tr("Checking..."));
+  let u;
+  try {
+    u = await api.invoke("update_check");
+  } catch (e) {
+    setUpdateStatus(tr("Could not check right now. Try again later."));
+    showNotice(tr("Could not check for updates"), String((e && e.message) || e || ""));
+    return;
+  }
+  if (!u) {
+    setUpdateStatus(tr("You have the newest version{0}.", info.version ? ` (${info.version})` : ""));
+    showNotice(tr("You're up to date ({0})", info.version || ""), "");
+    return;
+  }
+  setUpdateStatus(tr("Version {0} is available.", u.version));
+  showUpdatePrompt(u);
+}
+
 async function checkForUpdates(manual) {
   if (info.web) return;
-  if (manual) setUpdateStatus("Checking...");
+  if (manual) setUpdateStatus(tr("Checking..."));
   let u = null;
   try {
     u = await api.invoke("update_check");
@@ -2244,6 +2311,9 @@ function initUpdates() {
   });
   if (!auto.checked) setUpdateStatus(tr("Automatic checks are off."));
   $("btn-check-update").addEventListener("click", () => checkForUpdates(true));
+  $("notice-ok").addEventListener("click", () => $("notice-modal").classList.remove("show"));
+  api.listen("menu-check-updates", () => checkFromMenu());
+  sendMenuLabels();
   $("update-later").addEventListener("click", hideUpdatePrompt);
   $("update-skip").addEventListener("click", () => {
     if (update.info) { settings.skipVersion = update.info.version; saveSettings(); }
@@ -2321,6 +2391,9 @@ function browserStandIn() {
     ["/Volumes/CARD/DCIM/CLIP_0002.NEV", "N-RAW", 8268, 4652, 1210, 8.74e9],
     ["/Volumes/CARD/A001/A001_C001_0101AB.R3D", "R3D NE", 6060, 3410, 276, 2.14e9],
   ];
+  // Demo of another frame size (?size=WxH), for checking the preview layout.
+  const demoSize = /^(\d+)x(\d+)$/.exec(new URLSearchParams(location.search).get("size") || "");
+  if (demoSize) sample.unshift(["/Volumes/CARD/DCIM/SIZE_TEST.NEV", "N-RAW", +demoSize[1], +demoSize[2], 120, 1.2e9]);
   // Bits per pixel as the core measures it: 8 x the frames' codestream bytes over frames x
   // width x height. The stand-in leaves out about 5 MB of container (audio, metadata,
   // index) and a 4 KiB NRAW header per frame, as the demo engine does.

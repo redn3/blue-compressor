@@ -18,7 +18,7 @@
         </div>
       </div>
       <div class="titlebar-right" data-tauri-drag-region>
-        <label class="lang-pick" title="Language" data-i18n-title="Language">
+        <label class="lang-pick">
           <svg viewBox="0 0 16 16" class="ico-sm" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M2 8h12M8 2c1.8 1.7 2.6 3.7 2.6 6S9.8 12.3 8 14M8 2C6.2 3.7 5.4 5.7 5.4 8S6.2 12.3 8 14"/></svg>
           <select id="lang" aria-label="Language" data-i18n-aria-label="Language"></select>
         </label>
@@ -365,6 +365,16 @@
       <p data-i18n="It has been tested on only a few cameras and clips. Do not delete your digital negatives (the original clips) until you have opened the compressed copies in your own software and checked them yourself.">It has been tested on only a few cameras and clips. Do not delete your digital negatives (the original clips) until you have opened the compressed copies in your own software and checked them yourself.</p>
       <div class="modal-buttons">
         <button class="btn primary" id="beta-ok" data-i18n="I understand">I understand</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="notice-modal" role="dialog" aria-modal="true" aria-labelledby="notice-title">
+    <div class="modal-card">
+      <h3 id="notice-title"></h3>
+      <p id="notice-text"></p>
+      <div class="modal-buttons">
+        <button class="btn primary" id="notice-ok">OK</button>
       </div>
     </div>
   </div>

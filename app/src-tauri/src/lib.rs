@@ -11,6 +11,7 @@
 //! [downloaded, total], update-installing {}.
 
 mod engine;
+mod menu;
 mod updater;
 
 use std::path::{Path, PathBuf};
@@ -734,8 +735,13 @@ pub fn run() {
             confirm_quit,
             updater::update_check,
             updater::update_install,
-            updater::open_release_page
+            updater::open_release_page,
+            menu::set_menu_labels
         ])
+        .setup(|app| {
+            menu::install(app.handle())?;
+            Ok(())
+        })
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 let state = window.state::<Runner>();
