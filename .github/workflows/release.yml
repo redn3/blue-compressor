@@ -37,8 +37,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: macOS Apple silicon, os: macos-latest, target: aarch64-apple-darwin, arch: arm64 }
-          - { name: macOS Intel, os: macos-latest, target: x86_64-apple-darwin, arch: x64 }
+          - { name: macOS Apple silicon, os: macos-latest, target: aarch64-apple-darwin, arch: arm64, ffmpeg: "https://ffmpeg.martin-riedl.de/download/macos/arm64/1789931890_9.0.2/ffmpeg.zip" }
+          - { name: macOS Intel, os: macos-latest, target: x86_64-apple-darwin, arch: x64, ffmpeg: "https://ffmpeg.martin-riedl.de/download/macos/amd64/1789931006_9.0.2/ffmpeg.zip" }
           - { name: Windows x64, os: windows-latest, target: x86_64-pc-windows-msvc, arch: x64 }
           - { name: Linux x64, os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, arch: x64 }
     steps:
@@ -61,6 +61,19 @@ jobs:
         with:
           tool: tauri-cli@2
 
+      # The Develop export encoder on macOS: a static ffmpeg 9.0.2 (GPL, see NOTICE) bundled
+      # in Contents/Resources, as in the test builds.
+      - name: Fetch ffmpeg
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          mkdir -p app/src-tauri/bin
+          curl -fsSL -o /tmp/ffmpeg.zip "${{ matrix.ffmpeg }}"
+          unzip -o -q /tmp/ffmpeg.zip -d /tmp/ffmpeg
+          mv /tmp/ffmpeg/ffmpeg app/src-tauri/bin/ffmpeg
+          chmod +x app/src-tauri/bin/ffmpeg
+          app/src-tauri/bin/ffmpeg -hide_banner -encoders | grep -E "hevc_videotoolbox|libx265"
+
       - name: Build desktop app
         working-directory: app/src-tauri
         shell: bash
@@ -69,7 +82,12 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: cargo tauri build --target ${{ matrix.target }} --config '{"bundle":{"createUpdaterArtifacts":true}}'
+        run: |
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            cargo tauri build --target ${{ matrix.target }} --config '{"bundle":{"createUpdaterArtifacts":true,"resources":{"bin/ffmpeg":"ffmpeg"}}}'
+          else
+            cargo tauri build --target ${{ matrix.target }} --config '{"bundle":{"createUpdaterArtifacts":true}}'
+          fi
 
       - name: Build command line tool
         shell: bash

@@ -1,3 +1,16 @@
+**What's new in 0.2.3**
+- New **Develop** tab for quick turnaround: basic tools for developing the digital negatives (RAWs) to a 10-bit HEVC MOV in Log3G10, N-Log or Rec.709, on the GPU. Controls follow the familiar raw panels for R3D and N-RAW: white balance per clip, ISO, exposure, auto exposure, highlight roll off, tone map, contrast and more. Every clip starts from what it recorded, including its .RMD sidecar. ISO uses the same values as RED's tools (50 to 25600).
+- **Rewrap** N-RAW (.NEV) to R3D NE and back, losslessly, with **Skip compression (lossless)**. An .RMD exposure sidecar is always written so the rewrapped clip looks like the original.
+- **Experimental:** Z8, Z9 and Z6III clips to R3D NE, with an .RMD sidecar (+0.5 EV; +1 stop for ZR clips).
+- **Constant bitrate** option for all formats.
+- The app is now in **14 languages**.
+- **Check for Updates...** is now in the menu bar (the Blue Compressor menu on a Mac, the Help menu on Windows and Linux), with **Check Automatically** to turn the daily check on or off. The sidebar Updates section is gone.
+- Proxies are removed: Nikon cameras record their own, and the Develop tab covers quick deliverables.
+- Preview fixes: the preview no longer clips the window when it is narrower than 16:9 or than the clip.
+- Develop export on Windows and Linux uses an ffmpeg installed on your computer; the Mac app includes one.
+
+**FFmpeg license and source.** The macOS app bundles an unmodified static FFmpeg 9.0.2 executable (from https://www.martin-riedl.de, with libx265) that runs as a separate program for Develop exports. It is licensed under the GNU General Public License (https://www.gnu.org/licenses/gpl-3.0.html), FFmpeg is Copyright (c) 2000-2026 the FFmpeg developers. The complete corresponding source is at https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz and the build scripts at https://ffmpeg.martin-riedl.de. On request (open an issue) we will provide that source for at least three years after we last distribute this build. See NOTICE.
+
 **What's new in 0.2.0**
 - The desktop app now checks for updates by itself and asks before installing one: Update, Later or Skip this version. It downloads, checks the signature, installs and reopens, and never interrupts a batch that is compressing (it offers to update when the queue is done). The check is anonymous: it only asks GitHub for the newest version, nothing about you or your clips is sent. Turn it off with Check for updates in the sidebar, or use Check Now.
 - Docker and NAS: the Web UI shows a banner when a new version is out, with the steps to update on Synology, Docker Compose and Docker. Set `UPDATE_CHECK=false` to turn the check off. The container never updates itself.

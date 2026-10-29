@@ -2,19 +2,19 @@
 
 ## Download
 
-**[Latest release (v0.2.0 beta)](https://github.com/redn3/blue-compressor/releases/tag/v0.2.0)**. Pick the file for your computer:
+**[Latest release (v0.2.3 beta)](https://github.com/redn3/blue-compressor/releases/tag/v0.2.3)**. Pick the file for your computer:
 
 | Your computer | Download |
 | --- | --- |
-| Mac with Apple silicon (M1, M2, M3, M4, M5) | [Blue-Compressor_0.2.0_macOS_arm64.dmg](https://github.com/redn3/blue-compressor/releases/download/v0.2.0/Blue-Compressor_0.2.0_macOS_arm64.dmg) |
-| Mac with Intel processor | [Blue-Compressor_0.2.0_macOS_x64.dmg](https://github.com/redn3/blue-compressor/releases/download/v0.2.0/Blue-Compressor_0.2.0_macOS_x64.dmg) |
-| Windows 10 or 11 | [Blue-Compressor_0.2.0_Windows_x64-setup.exe](https://github.com/redn3/blue-compressor/releases/download/v0.2.0/Blue-Compressor_0.2.0_Windows_x64-setup.exe) |
-| Linux (any distribution) | [Blue-Compressor_0.2.0_Linux_x64.AppImage](https://github.com/redn3/blue-compressor/releases/download/v0.2.0/Blue-Compressor_0.2.0_Linux_x64.AppImage) |
+| Mac with Apple silicon (M1, M2, M3, M4, M5) | [Blue-Compressor_0.2.3_macOS_arm64.dmg](https://github.com/redn3/blue-compressor/releases/download/v0.2.3/Blue-Compressor_0.2.3_macOS_arm64.dmg) |
+| Mac with Intel processor | [Blue-Compressor_0.2.3_macOS_x64.dmg](https://github.com/redn3/blue-compressor/releases/download/v0.2.3/Blue-Compressor_0.2.3_macOS_x64.dmg) |
+| Windows 10 or 11 | [Blue-Compressor_0.2.3_Windows_x64-setup.exe](https://github.com/redn3/blue-compressor/releases/download/v0.2.3/Blue-Compressor_0.2.3_Windows_x64-setup.exe) |
+| Linux (any distribution) | [Blue-Compressor_0.2.3_Linux_x64.AppImage](https://github.com/redn3/blue-compressor/releases/download/v0.2.3/Blue-Compressor_0.2.3_Linux_x64.AppImage) |
 | Docker / Synology NAS (`amd64` and `arm64`) | `docker pull ghcr.io/redn3/blue-compressor:latest` ([setup guide](#docker-and-synology-nas)) |
 
 Not sure which Mac you have? Open the Apple menu and choose About This Mac. If it says "Chip", get Apple silicon; if it says "Processor" with Intel, get Intel.
 
-Other formats (Windows `.msi`, Linux `.deb` and `.rpm`) and the command line tool are on the [release page](https://github.com/redn3/blue-compressor/releases/tag/v0.2.0).
+Other formats (Windows `.msi`, Linux `.deb` and `.rpm`) and the command line tool are on the [release page](https://github.com/redn3/blue-compressor/releases/tag/v0.2.3).
 
 Blue Compressor makes Nikon **N-RAW** (`.NEV`, e.g. Z8, Z9, Z6III) and **R3D NE**
 (`.R3D`, e.g. Nikon ZR) clips smaller. It re-encodes the TICO RAW (JPEG XS) data inside
@@ -52,8 +52,9 @@ it is open. When there is one it asks **Blue Compressor 0.2.1 is available. Upda
 with a few lines on what is new: **Update** downloads it, checks its signature, installs it
 and reopens the app; **Later** asks again next time; **Skip this version** waits for the
 one after. It never updates in the middle of a batch: while the queue is compressing it
-offers to update when the queue has finished. Turn **Check for updates** off in the
-sidebar to stop the daily check, or use **Check Now** at any time. The Linux `.deb` and
+offers to update when the queue has finished. Use **Check for Updates...** in the menu bar
+(the Blue Compressor menu on a Mac, the Help menu on Windows and Linux) to check at any
+time, and turn **Check Automatically** off in the same menu to stop the daily check. The Linux `.deb` and
 `.rpm` packages cannot replace themselves, so there (and if an install fails) the prompt
 opens the release page instead. Versions before 0.2.0 have no updater: install 0.2.0 once
 by hand and later versions can update themselves.
@@ -215,7 +216,7 @@ The Develop tab is a quick turnaround with basic tools for developing your digit
 - N-RAW: White Balance presets (Temperature and Tint unlock on Custom), Exposure, Highlights, Shadows, Saturation, Color Boost and Sharpness (20 leaves the image as it is).
 - **Auto exposure** sets exposure so the frame averages middle gray.
 - Output: the clip's own log (Log3G10 / REDWideGamutRGB or N-Log / Rec.2020) or Rec.709. The preview can show log through a Rec.709 view.
-- Export: 10-bit HEVC MOV (VideoToolbox on a Mac, else the first ffmpeg HEVC encoder that works, libx265 last), 100 Mb/s at UHD by default, optional constant bitrate, audio as 32-bit float PCM. Files go to a `Developed` folder next to each clip.
+- Export: 10-bit HEVC MOV (VideoToolbox on a Mac, else the first ffmpeg HEVC encoder that works, libx265 last), 100 Mb/s at 4K by default, optional constant bitrate, audio as 32-bit float PCM. Files go to a `Developed` folder next to each clip.
 - Command line: `bluecompress develop <clip> [--rec709] [--exposure EV] [--kelvin K] [--tint T] [--iso N] [--auto] [--width 3840|1920] [--kbps N] [--cbr] [-o file.mov]`.
 
 ## Languages

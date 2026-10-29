@@ -18,6 +18,18 @@ HE / HE* decoder of rawmakase (https://github.com/pch/rawmakase):
   Copyright (c) 2026 RAWmakase contributors
   Licensed under the MIT License; the full license text is in LICENSES/rawmakase-MIT.txt.
 
+FFmpeg (macOS desktop app only)
+-------------------------------
+The macOS desktop app bundles an unmodified static FFmpeg 9.0.2 executable
+(Contents/Resources/ffmpeg) from https://www.martin-riedl.de, used as a separate program
+to encode Develop exports. FFmpeg is Copyright (c) 2000-2026 the FFmpeg developers and
+this build, which includes libx265, is licensed under the GNU General Public License
+(https://www.gnu.org/licenses/gpl-3.0.html). It is not linked into Blue Compressor.
+The complete corresponding source code is available at https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz
+and the build scripts at https://ffmpeg.martin-riedl.de. On written request to the
+project (https://github.com/redn3/blue-compressor/issues) we will also provide that
+source for at least three years after we last distribute this build.
+
 References
 ----------
 The following public works were also consulted and are acknowledged with thanks; no code
