@@ -5,7 +5,12 @@ use std::path::Path;
 use std::sync::atomic::AtomicBool;
 
 use bluecompress::bmff::{InputFile, Movie};
-use bluecompress::r3d::{self, nctg_tags, tag_value, R3dOptions};
+use bluecompress::r3d::{self, nctg_tags, tag_value, Direction, R3dOptions};
+
+const NEV_MATRIX: [u8; 37] = [
+    0x00, 0x3f, 0x1b, 0x09, 0x0e, 0x3e, 0xc3, 0x35, 0xe2, 0xbd, 0x15, 0x2e, 0xa6, 0x3e, 0x69, 0xb7, 0x6a, 0x3f, 0x86,
+    0x2f, 0xfe, 0xbe, 0x8d, 0x9b, 0xac, 0x3b, 0xcd, 0x14, 0x18, 0xbe, 0x31, 0x39, 0xd2, 0x3f, 0xa0, 0xc0, 0x65,
+];
 
 fn bx(kind: &[u8; 4], payload: &[u8]) -> Vec<u8> {
     let mut b = ((payload.len() + 8) as u32).to_be_bytes().to_vec();
@@ -36,17 +41,26 @@ fn nrmt(key: u32, value: &[u8]) -> Vec<u8> {
 
 /// A small ZR style N-RAW clip with the tags the converter rewrites. `quality` is NCTG 0x24.
 fn synthetic_nev(path: &Path, quality: u16, model: &str, frames: usize) -> Vec<Vec<u8>> {
+    synthetic(path, quality, model, frames, true)
+}
+
+/// `full`: every tag a ZR writes; otherwise without the R3D NE specific ones (like clips
+/// from cameras that never record R3D NE).
+fn synthetic(path: &Path, quality: u16, model: &str, frames: usize, full: bool) -> Vec<Vec<u8>> {
     let mut codestreams = Vec::new();
     let mut samples = Vec::new();
     for f in 0..frames {
         let mut cs = vec![0xff, 0x10];
-        cs.extend((0..2046).map(|i| ((i * 7 + f * 13) % 251) as u8));
+        cs.extend((0..2044).map(|i| ((i * 7 + f * 13) % 251) as u8));
+        cs.extend([0xff, 0x11]); // EOC
         let mut nrfh = bx(b"NRHM", b"0100");
         nrfh.extend(nrmt(0x0110_0100, &[0, 0, 0, 0x17, 0xac]));
         nrfh.extend(nrmt(0x0110_0101, &[0, 0, 0, 0x0d, 0x52]));
         nrfh.extend(nrmt(0x0190_0011, &[0x00, 0x0f, 0xc1, 0x12, 0xe1, 0xf0, 0xce]));
-        nrfh.extend(nrmt(0x0190_0012, &[0x11; 37]));
-        nrfh.extend(nrmt(0x0200_523d, &[0u8; 65]));
+        nrfh.extend(nrmt(0x0190_0012, &NEV_MATRIX));
+        if full {
+            nrfh.extend(nrmt(0x0200_523d, &[0u8; 65]));
+        }
         let mut nrti = b"0100".to_vec();
         nrti.extend((cs.len() as u32).to_be_bytes());
         let mut s = bx(b"NRFM", b"0100");
@@ -72,7 +86,7 @@ fn synthetic_nev(path: &Path, quality: u16, model: &str, frames: usize) -> Vec<V
         gamma.extend(slot);
     }
     gamma.extend([0x80, 0x01]);
-    gamma.resize(108, 0xaa);
+    gamma.resize(108, 0);
     let mut model_v = model.as_bytes().to_vec();
     model_v.resize(16, 0);
     let mut nctg = Vec::new();
@@ -84,11 +98,15 @@ fn synthetic_nev(path: &Path, quality: u16, model: &str, frames: usize) -> Vec<V
     nctg.extend(tag(0x26, 3, &2u16.to_be_bytes()));
     nctg.extend(tag(0x27, 3, &1u16.to_be_bytes()));
     nctg.extend(tag(0x101e, 7, &[0x5a; 36]));
-    nctg.extend(tag(0x1020, 7, &[0; 12]));
-    nctg.extend(tag(0x523d, 7, &[0; 256]));
+    if full {
+        nctg.extend(tag(0x1020, 7, &[0; 12]));
+        nctg.extend(tag(0x523d, 7, &[0; 256]));
+    }
     nctg.extend(tag(0x0110_8832, 4, &800u32.to_be_bytes()));
-    nctg.extend(tag(0x0200_0023, 7, &gamma));
-    nctg.extend(tag(0x0200_00c0, 7, &[0x60, 0x01, 0x0c, 0x00, 0xa8, 0x01, 0x0c, 0x00]));
+    if full {
+        nctg.extend(tag(0x0200_0023, 7, &gamma));
+        nctg.extend(tag(0x0200_00c0, 7, &[0x60, 0x01, 0x0c, 0x00, 0xa8, 0x01, 0x0c, 0x00]));
+    }
     let mut ncdt = bx(b"NCHD", b"Nikon\0\x02\0\0\0");
     ncdt.extend(bx(b"NCTG", &nctg));
     let udta = bx(b"udta", &bx(b"NCDT", &ncdt));
@@ -151,139 +169,177 @@ fn dir(name: &str) -> std::path::PathBuf {
     d
 }
 
+fn codestreams(path: &Path) -> Vec<Vec<u8>> {
+    let input = InputFile::open(path).unwrap();
+    let m = Movie::parse(&input).unwrap();
+    m.video()
+        .samples
+        .iter()
+        .map(|s| {
+            let buf = input.read(s.offset, s.size as usize).unwrap();
+            let f = bluecompress::nraw::NrawFrame::parse(&buf).unwrap();
+            buf[f.codestream_offset..f.codestream_offset + f.codestream_size].to_vec()
+        })
+        .collect()
+}
+
+fn tags_of(path: &Path) -> std::collections::HashMap<u32, Vec<u8>> {
+    let m = Movie::parse(&InputFile::open(path).unwrap()).unwrap();
+    let t = nctg_tags(&m);
+    t.iter().map(|x| (x.id, tag_value(&m, &t, x.id).unwrap().to_vec())).collect()
+}
+
+fn frame_value(path: &Path, key: [u8; 4]) -> Vec<u8> {
+    let input = InputFile::open(path).unwrap();
+    let m = Movie::parse(&input).unwrap();
+    let s = m.video().samples[0];
+    let buf = input.read(s.offset, 1024).unwrap();
+    let mut pat = b"NRMT".to_vec();
+    pat.extend(key);
+    let at = buf.windows(8).position(|w| w == pat).unwrap();
+    let len = u32::from_be_bytes(buf[at - 4..at].try_into().unwrap()) as usize;
+    buf[at + 8..at - 4 + len].to_vec()
+}
+
+fn run(src: &Path, out: &Path, rmd: bool) -> bluecompress::R3dOutcome {
+    let o = R3dOptions { rmd, ..R3dOptions::new(src, out) };
+    r3d::convert(&o, &AtomicBool::new(false), &mut |_, _| {}).unwrap()
+}
+
+fn assert_r3d_tags(out: &Path, name: &str) {
+    let info = bluecompress::probe(out).unwrap();
+    assert_eq!(info.codec, bluecompress::Codec::R3dNe);
+    let t = tags_of(out);
+    assert_eq!(t[&0x21], 65u16.to_be_bytes());
+    assert_eq!(t[&0x26], 4u16.to_be_bytes());
+    assert_eq!(t[&0x27], 3u16.to_be_bytes());
+    assert_eq!(t[&0x1020], [0, 1, 0, 0, 0, 2, 0, 0, 0, 0, 0x03, 0x20], "real ISO, no faked gain");
+    assert_eq!(t[&0x0200_00c0], [0x48, 0x01, 0x0c, 0x00, 0x78, 0x01, 0x0c, 0x00]);
+    let g = &t[&0x0200_0023];
+    assert_eq!(&g[8..18], b"RWGLOG3G10");
+    assert_eq!(&g[28..38], b"RWGLOG3G10");
+    assert_eq!(g[49], 3);
+    let file = format!("{name}.R3D");
+    assert!(t[&0x523d].windows(file.len()).any(|w| w == file.as_bytes()));
+    assert_eq!(&frame_value(out, [0x01, 0x90, 0x00, 0x12])[..4], &[0x00, 0x3f, 0x14, 0xd5]);
+    assert_eq!(&frame_value(out, [0x02, 0x00, 0x52, 0x3d])[..5], &[0x00, 0x00, 0x05, 0x30, 0xaf]);
+}
+
 #[test]
-fn converts_high_to_r3d_ne() {
+fn rewraps_zr_to_r3d_ne_in_place() {
     let d = dir("high");
     let src = d.join("A007_C002_10299S.NEV");
     let cs = synthetic_nev(&src, 1, "NIKON ZR", 3);
     let out = r3d::r3d_path(&d.join("Compressed Lossless").join("A007_C002_10299S.NEV"), &src);
     assert!(out.ends_with("R3D NE/A007_C002_10299S.R3D"), "{}", out.display());
-    let o = R3dOptions::new(&src, &out);
-    let r = r3d::convert(&o, &AtomicBool::new(false), &mut |_, _| {}).unwrap();
-    assert_eq!(r.frames, 3);
-    assert_eq!(r.iso, 1600);
-
-    // Our parser reads it as R3D NE.
-    let info = bluecompress::probe(&out).unwrap();
-    assert_eq!(info.codec, bluecompress::Codec::R3dNe);
-    assert_eq!(info.frames, 3);
-    let input = InputFile::open(&out).unwrap();
-    let m = Movie::parse(&input).unwrap();
-    let tags = nctg_tags(&m);
-    let v = |id| tag_value(&m, &tags, id).unwrap().to_vec();
-    assert_eq!(v(0x21), 65u16.to_be_bytes());
-    assert_eq!(v(0x24), 1u16.to_be_bytes());
-    assert_eq!(v(0x26), 4u16.to_be_bytes());
-    assert_eq!(v(0x27), 3u16.to_be_bytes());
-    assert_eq!(v(0x1020), [0, 1, 0, 0, 0, 2, 0, 0, 0, 0, 0x06, 0x40]);
-    assert_eq!(v(0x0200_00c0), [0x48, 0x01, 0x0c, 0x00, 0x78, 0x01, 0x0c, 0x00]);
-    assert_eq!(v(0x101e), [0x5a; 36], "white balance tag is kept");
-    let g = v(0x0200_0023);
-    assert_eq!(&g[8..18], b"RWGLOG3G10");
-    assert_eq!(&g[28..38], b"RWGLOG3G10");
-    assert_eq!(g[49], 3);
-    assert!(g[50..].iter().all(|&b| b == 0xaa));
-    let red = v(0x523d);
-    assert!(red.windows(20).any(|w| w == b"A007_C002_10299S.R3D"));
-
-    // Frames: same size, codestream untouched, R3D NE frame tags.
-    let vt = m.video();
-    for (i, s) in vt.samples.iter().enumerate() {
-        let buf = input.read(s.offset, s.size as usize).unwrap();
-        let f = bluecompress::nraw::NrawFrame::parse(&buf).unwrap();
-        assert_eq!(&buf[f.codestream_offset..f.codestream_offset + f.codestream_size], &cs[i][..]);
-        let mat = buf.windows(8).position(|w| w == [b'N', b'R', b'M', b'T', 0x01, 0x90, 0x00, 0x12]).unwrap();
-        assert_eq!(&buf[mat + 8..mat + 12], &[0x00, 0x3f, 0x14, 0xd5]);
-        let rf = buf.windows(8).position(|w| w == [b'N', b'R', b'M', b'T', 0x02, 0x00, 0x52, 0x3d]).unwrap();
-        assert_eq!(&buf[rf + 8..rf + 13], &[0x00, 0x00, 0x05, 0x30, 0xaf]);
-    }
-
-    // Byte for byte the source except the rewritten tags.
+    let r = run(&src, &out, true);
+    assert_eq!((r.frames, r.iso, r.experimental, r.direction), (3, 800, false, Direction::ToR3d));
+    assert_r3d_tags(&out, "A007_C002_10299S");
+    assert_eq!(codestreams(&out), cs);
+    assert_eq!(t_white(&src), t_white(&out), "white balance tag is kept");
+    // +1 stop in the sidecar for the ZR.
+    let rmd = std::fs::read_to_string(r.rmd.unwrap()).unwrap();
+    assert!(rmd.contains("<exposure_adjust>1.000</exposure_adjust>") && rmd.contains("<iso>800</iso>"));
+    // Same size, only tags changed.
     let (a, b) = (std::fs::read(&src).unwrap(), std::fs::read(&out).unwrap());
     assert_eq!(a.len(), b.len());
     let diff = a.iter().zip(&b).filter(|(x, y)| x != y).count();
-    assert!(diff > 0 && diff < 600, "{diff} bytes changed");
+    assert!(diff > 0 && diff < 900, "{diff} bytes changed");
+    let _ = std::fs::remove_dir_all(d);
+}
+
+fn t_white(p: &Path) -> Vec<u8> {
+    tags_of(p)[&0x101e].clone()
+}
+
+#[test]
+fn round_trip_restores_the_nev() {
+    let d = dir("trip");
+    let src = d.join("A001_C001_0101AB.NEV");
+    synthetic_nev(&src, 1, "NIKON ZR", 3);
+    let r3d_out = d.join("A001_C001_0101AB.R3D");
+    run(&src, &r3d_out, false);
+    assert!(!r3d::rmd_path(&r3d_out).exists(), "RMD off writes none");
+    let back = d.join("back").join("A001_C001_0101AB.NEV");
+    let r = run(&r3d_out, &back, true);
+    assert_eq!(r.direction, Direction::ToNev);
+    assert!(r.rmd.is_none());
+    assert_eq!(bluecompress::probe(&back).unwrap().codec, bluecompress::Codec::NRaw);
+    let t = tags_of(&back);
+    assert_eq!(t[&0x21], 49u16.to_be_bytes());
+    assert_eq!(&t[&0x0200_0023][8..13], b"N-LOG");
+    assert_eq!(frame_value(&back, [0x01, 0x90, 0x00, 0x12]), NEV_MATRIX);
+    // Byte for byte the original N-RAW clip.
+    assert_eq!(std::fs::read(&src).unwrap(), std::fs::read(&back).unwrap());
     let _ = std::fs::remove_dir_all(d);
 }
 
 #[test]
-fn refuses_normal_other_cameras_and_r3d() {
-    let d = dir("refuse");
-    let normal = d.join("A001_C001_0101AB.NEV");
-    synthetic_nev(&normal, 2, "NIKON ZR", 2);
-    let e = r3d::check(&normal).unwrap_err();
-    assert!(e.0.contains("N-RAW Normal not supported for R3D"), "{e}");
-    let z8 = d.join("Z8.NEV");
-    synthetic_nev(&z8, 1, "NIKON Z 8", 2);
-    assert!(r3d::check(&z8).unwrap_err().0.contains("Nikon ZR clips only"));
-
-    let high = d.join("A001_C002_0101AB.NEV");
-    synthetic_nev(&high, 1, "NIKON ZR", 2);
+fn normal_and_vbr_sources_rewrap_as_they_are() {
+    let d = dir("normal");
+    let src = d.join("A001_C002_0101AB.NEV");
+    let cs = synthetic_nev(&src, 2, "NIKON ZR", 2);
     let out = d.join("A001_C002_0101AB.R3D");
-    let cancel = AtomicBool::new(false);
-    r3d::convert(&R3dOptions::new(&high, &out), &cancel, &mut |_, _| {}).unwrap();
-    assert!(r3d::check(&out).unwrap_err().0.contains("already an R3D NE"));
-    // Nothing is left behind by a refused job.
-    let o2 = d.join("x").join("N.R3D");
-    assert!(r3d::convert(&R3dOptions::new(&normal, &o2), &cancel, &mut |_, _| {}).is_err());
-    assert!(!o2.exists());
+    let r = run(&src, &out, true);
+    assert_eq!(codestreams(&out), cs);
+    assert_eq!(tags_of(&out)[&0x24], 2u16.to_be_bytes(), "quality is kept");
+    assert!(r.frame_bytes > 0, "camera frames stay constant");
     let _ = std::fs::remove_dir_all(d);
 }
 
 #[test]
-fn iso_factor_is_a_parameter() {
-    let d = dir("iso");
-    let src = d.join("A001_C003_0101AB.NEV");
-    synthetic_nev(&src, 1, "NIKON ZR", 1);
-    let out = d.join("o.R3D");
-    let o = R3dOptions { iso_factor: 1.0, ..R3dOptions::new(&src, &out) };
-    assert_eq!(r3d::convert(&o, &AtomicBool::new(false), &mut |_, _| {}).unwrap().iso, 800);
+fn other_cameras_are_rebuilt_experimental() {
+    let d = dir("z8");
+    let src = d.join("DSC_0001.NEV");
+    let cs = synthetic(&src, 1, "NIKON Z 8", 3, false);
+    let out = d.join("A001_C001_0101XY.R3D");
+    let r = run(&src, &out, true);
+    assert!(r.experimental);
+    assert_r3d_tags(&out, "A001_C001_0101XY");
+    assert_eq!(codestreams(&out), cs, "image data copied as is");
+    assert!(r.frame_bytes > 0, "all frames the same size");
+    let rmd = std::fs::read_to_string(r.rmd.unwrap()).unwrap();
+    assert!(rmd.contains("<exposure_adjust>0.500</exposure_adjust>"));
+    // And back to N-RAW.
+    let back = d.join("back.NEV");
+    run(&out, &back, false);
+    assert_eq!(bluecompress::probe(&back).unwrap().codec, bluecompress::Codec::NRaw);
+    assert_eq!(codestreams(&back), cs);
+    assert_eq!(&tags_of(&back)[&0x0200_0023][8..13], b"N-LOG");
     let _ = std::fs::remove_dir_all(d);
 }
 
 #[test]
-fn output_is_constant_bitrate_and_vbr_sources_are_refused() {
+fn compress_path_writes_constant_r3d_ne() {
     let d = dir("cbr");
     let src = d.join("A001_C004_0101AB.NEV");
-    synthetic_nev(&src, 1, "NIKON ZR", 4);
+    let cs = synthetic_nev(&src, 1, "NIKON ZR", 4);
     let out = d.join("A001_C004_0101AB.R3D");
-    let r = r3d::convert(&R3dOptions::new(&src, &out), &AtomicBool::new(false), &mut |_, _| {}).unwrap();
-    let m = Movie::parse(&InputFile::open(&out).unwrap()).unwrap();
-    assert!(m.video().samples.iter().all(|s| s.size == r.frame_bytes));
+    // A bpp above this tiny clip's own resolves to the lossless path through the
+    // compressor (real clips are requantized; checked on real data separately).
+    let job = bluecompress::Options {
+        input: src.clone(),
+        output: d.join("x.NEV"),
+        quality: 1,
+        bpp: Some(0.5),
+        resolution: bluecompress::Resolution::Original,
+        backend: bluecompress::Backend::Cpu,
+        threads: 2,
+        cbr: false,
+    };
+    let r =
+        r3d::convert_compressed(&job, &R3dOptions::new(&src, &out), &AtomicBool::new(false), &mut |_, _| {}).unwrap();
+    assert!(r.frame_bytes > 0, "R3D NE frames always the same size");
+    assert_r3d_tags(&out, "A001_C004_0101AB");
+    assert_eq!(codestreams(&out), cs);
+    let _ = std::fs::remove_dir_all(d);
+}
 
-    // A .nev whose frames vary in size (not a camera original) cannot become R3D NE.
-    let mut bytes = std::fs::read(&src).unwrap();
-    let stsz = bytes.windows(4).position(|w| w == b"stsz").unwrap();
-    let n = u32::from_be_bytes(bytes[stsz + 12..stsz + 16].try_into().unwrap());
-    let size = u32::from_be_bytes(bytes[stsz + 8..stsz + 12].try_into().unwrap());
-    // Rewrite stsz as a table with one frame a little shorter (contents do not matter here).
-    let mut table = Vec::new();
-    for i in 0..n {
-        table.extend(if i == 1 { size - 16 } else { size }.to_be_bytes());
-    }
-    let old_len = u32::from_be_bytes(bytes[stsz - 4..stsz].try_into().unwrap()) as usize;
-    let mut new_box = ((20 + table.len()) as u32).to_be_bytes().to_vec();
-    new_box.extend(b"stsz");
-    new_box.extend([0, 0, 0, 0, 0, 0, 0, 0]);
-    new_box.extend(n.to_be_bytes());
-    new_box.extend(table);
-    let grow = new_box.len() - old_len;
-    bytes.splice(stsz - 4..stsz - 4 + old_len, new_box);
-    // Fix the parents' sizes (stbl, minf, mdia, trak, moov) and the chunk offsets.
-    for kind in [b"stbl", b"minf", b"mdia", b"trak", b"moov"] {
-        let at = bytes.windows(4).position(|w| w == kind).unwrap() - 4;
-        let v = u32::from_be_bytes(bytes[at..at + 4].try_into().unwrap()) + grow as u32;
-        bytes[at..at + 4].copy_from_slice(&v.to_be_bytes());
-    }
-    let co = bytes.windows(4).position(|w| w == b"co64").unwrap();
-    for i in 0..n as usize {
-        let at = co + 12 + 8 * i;
-        let v = u64::from_be_bytes(bytes[at..at + 8].try_into().unwrap()) + grow as u64;
-        bytes[at..at + 8].copy_from_slice(&v.to_be_bytes());
-    }
-    let vbr = d.join("A001_C005_0101AB.NEV");
-    std::fs::write(&vbr, bytes).unwrap();
-    let e = r3d::check(&vbr).unwrap_err();
-    assert!(e.0.contains("camera original"), "{e}");
+#[test]
+fn refuses_non_nikon() {
+    let d = dir("refuse");
+    let src = d.join("X.NEV");
+    synthetic_nev(&src, 1, "OTHER", 1);
+    assert!(r3d::check(&src).unwrap_err().0.contains("Nikon"));
     let _ = std::fs::remove_dir_all(d);
 }

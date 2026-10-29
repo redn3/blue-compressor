@@ -50,6 +50,18 @@ struct Shared {
 }
 
 pub fn transcode(opt: &Options, cancel: &AtomicBool, progress: &mut dyn FnMut(f64, f64)) -> Result<Outcome> {
+    transcode_with(opt, None, cancel, progress)
+}
+
+/// [`transcode`], writing R3D NE with `r3d` (see [`crate::r3d`]): R3D NE output is always
+/// constant bitrate. A lossless job copies the camera codestreams as they are (padded to
+/// the largest frame); a resize without a bpp target codes to the source's bpp.
+pub(crate) fn transcode_with(
+    opt: &Options,
+    r3d: Option<&crate::r3d::R3dPlan>,
+    cancel: &AtomicBool,
+    progress: &mut dyn FnMut(f64, f64),
+) -> Result<Outcome> {
     let t0 = Instant::now();
     if same_file(&opt.input, &opt.output) {
         return Err(Error("output must differ from input".into()));
@@ -62,11 +74,17 @@ pub fn transcode(opt: &Options, cancel: &AtomicBool, progress: &mut dyn FnMut(f6
     }
     // Legacy quality steps become a bpp for this clip; a bpp at or above the source's
     // cannot add anything and gives the lossless repack.
-    let target = Target::new(opt.quality, opt.bpp).resolve(source_bpp(&input, &movie));
-    let quality = target.preset();
+    let src_bpp = source_bpp(&input, &movie);
+    let mut target = Target::new(opt.quality, opt.bpp).resolve(src_bpp);
     let src = source_geometry(&movie);
     let dst = target_geometry(src, opt.resolution);
     let resizing = dst.width != video.width || dst.height != video.height;
+    if r3d.is_some() && resizing && target.is_lossless() {
+        // A resized frame has no camera size to keep; code it at the source's density.
+        target = Target::bpp(src_bpp.max(crate::BPP_MIN));
+    }
+    let passthrough = r3d.is_some() && !resizing && target.is_lossless();
+    let quality = target.preset();
 
     let resizer: Option<Box<dyn Resizer>> = if resizing { Some(resize::create(opt.backend, src, dst)?) } else { None };
     let backend = resizer.as_ref().map_or_else(|| "CPU".to_string(), |r| r.name());
@@ -82,6 +100,10 @@ pub fn transcode(opt: &Options, cancel: &AtomicBool, progress: &mut dyn FnMut(f6
         WriteOptions::default()
     };
     let mut writer = OutputWriter::create(&opt.output, &input, &movie, wopt)?;
+    if let Some(p) = r3d {
+        let codec = if p.direction == crate::r3d::Direction::ToR3d { b"NR3D" } else { b"NRAW" };
+        writer.set_metadata(p.udta.clone(), fourcc(codec));
+    }
 
     let threads = if opt.threads > 0 { opt.threads } else { hardware_threads() };
     let nframes = video.samples.len();
@@ -91,10 +113,16 @@ pub fn transcode(opt: &Options, cancel: &AtomicBool, progress: &mut dyn FnMut(f6
     let budget = target.frame_budget(video.width, video.height);
     // Constant bitrate pads to the budget of the frame as written (the resized size when
     // resizing), the same budget the rate control codes to.
-    let pad_to = match (opt.cbr, &resizer) {
-        (false, _) => None,
-        (true, Some(_)) => target.frame_budget(dst.width, dst.height),
-        (true, None) => budget,
+    let pad_to = if passthrough {
+        // Camera codestreams as they are, padded to the largest so every frame matches.
+        let header = crate::nraw::sample_header_len(&input, video.samples[0])?;
+        video.samples.iter().map(|s| (s.size as u64).saturating_sub(header) as usize).max()
+    } else {
+        match (opt.cbr || r3d.is_some(), &resizer) {
+            (false, _) => None,
+            (true, Some(_)) => target.frame_budget(dst.width, dst.height),
+            (true, None) => budget,
+        }
     };
     // Rate controlled frames go to the workers in fixed runs, coded in order within a run,
     // so each frame starts its search from the previous one's choices. The runs do not
@@ -110,11 +138,17 @@ pub fn transcode(opt: &Options, cancel: &AtomicBool, progress: &mut dyn FnMut(f6
         let sample = input.read(s.offset, s.size as usize)?;
         let frame = NrawFrame::parse(&sample)?;
         let cs = &sample[frame.codestream_offset..];
-        if let Some(r) = &resizer {
-            frame.build_padded(&r.process(cs, target, seed)?, Some((dst.width, dst.height)), pad_to)
+        let built = if passthrough {
+            frame.build_padded(cs, None, pad_to)?
+        } else if let Some(r) = &resizer {
+            frame.build_padded(&r.process(cs, target, seed)?, Some((dst.width, dst.height)), pad_to)?
         } else {
             let p = RequantParams { target_rank, budget, ..Default::default() };
-            frame.build_padded(&requant_codestream_seeded(cs, &p, 1, seed)?.0, None, pad_to)
+            frame.build_padded(&requant_codestream_seeded(cs, &p, 1, seed)?.0, None, pad_to)?
+        };
+        match r3d {
+            Some(p) => crate::r3d::rewrite_frame(&built, p.direction),
+            None => Ok(built),
         }
     };
 

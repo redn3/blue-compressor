@@ -39,6 +39,10 @@ pub struct ServeConfig {
     pub default_proxies: bool,
     /// R3D NE toggle for new clips (R3D or --r3d).
     pub default_r3d: bool,
+    /// R3D NE to N-RAW, rewrap-only and exposure sidecar toggles (NEV, REWRAP, RMD).
+    pub default_to_nev: bool,
+    pub default_rewrap: bool,
+    pub default_rmd: bool,
     /// Constant bitrate toggle for new clips (CBR or --cbr).
     pub default_cbr: bool,
     pub threads: usize,
@@ -53,6 +57,9 @@ struct ServerState {
     default_backend: Backend,
     default_proxies: bool,
     default_r3d: bool,
+    default_to_nev: bool,
+    default_rewrap: bool,
+    default_rmd: bool,
     default_cbr: bool,
     threads: usize,
     running: Arc<AtomicBool>,
@@ -98,6 +105,9 @@ struct AppInfo {
     default_resolution: String,
     default_proxies: bool,
     default_r3d: bool,
+    default_to_nev: bool,
+    default_rewrap: bool,
+    default_rmd: bool,
     default_cbr: bool,
     /// The encoder proxies use here ("hevc_nvenc (GPU)", "libx265 (CPU)") or why none.
     proxy_encoder: String,
@@ -150,6 +160,15 @@ struct JobRequest {
     /// Constant bitrate for the compressed clip and the proxy (R3D NE always is).
     #[serde(default)]
     cbr: bool,
+    /// Also rewrap a .R3D (R3D NE) source back to N-RAW in "N-RAW/" next to the output.
+    #[serde(default)]
+    to_nev: bool,
+    /// Rewrap only: no compressed copy, just the conversions above (image data copied).
+    #[serde(default)]
+    rewrap: bool,
+    /// Write the exposure .RMD next to an R3D NE output (on unless turned off).
+    #[serde(default = "yes")]
+    rmd: bool,
     /// Clip details the UI shows on the card (name, codec, size, frames, fps), kept as is so
     /// a reloaded page can rebuild its queue.
     #[serde(default)]
@@ -158,6 +177,10 @@ struct JobRequest {
     /// (so a reloaded page still shows it) without being part of the batch.
     #[serde(default)]
     existing: Option<ExistingRef>,
+}
+
+fn yes() -> bool {
+    true
 }
 
 #[derive(Deserialize, Clone)]
@@ -183,6 +206,9 @@ struct QueueJob {
     proxy: bool,
     r3d: bool,
     cbr: bool,
+    to_nev: bool,
+    rewrap: bool,
+    rmd: bool,
     clip: Option<serde_json::Value>,
     /// waiting, running, done, failed or cancelled.
     state: String,
@@ -768,6 +794,9 @@ fn start_queue(state: &Arc<ServerState>, args: StartArgs) -> Result<(), String> 
                 proxy: job.proxy,
                 r3d: job.r3d,
                 cbr: job.cbr,
+                to_nev: job.to_nev,
+                rewrap: job.rewrap,
+                rmd: job.rmd,
                 clip: job.clip,
                 state: state_name.into(),
                 fraction,
@@ -839,7 +868,7 @@ fn run_job(st: &Arc<ServerState>, job: &QueueJob, settings: &Settings) {
     let res_name = if resized { job.resolution.as_str() } else { "original" };
 
     // Already compressed by an earlier (for example interrupted) run: keep it.
-    if !job.force {
+    if !job.force && !job.rewrap {
         if let Some((out, out_bytes)) = existing_for(&input, folder, target, res_name) {
             let done = JobDone {
                 id: job.id,
@@ -934,6 +963,59 @@ fn run_job(st: &Arc<ServerState>, job: &QueueJob, settings: &Settings) {
             last = Instant::now() - Duration::from_secs(1);
         }
     };
+    let conv = bluecompress::Convert { to_r3d: job.r3d, to_nev: job.to_nev, rewrap: job.rewrap, rmd: job.rmd };
+    if job.rewrap {
+        // Rewrap only: the conversion is the job's output, with its progress as the job's.
+        let mut last = Instant::now() - Duration::from_secs(1);
+        let clients = st.sse_clients.clone();
+        let r = bluecompress::r3d_job(&options, &conv, &st.cancel, &mut |fraction, _| {
+            if fraction >= 1.0 || last.elapsed().as_millis() >= 100 {
+                last = Instant::now();
+                update_job(st, job.id, |j| j.fraction = fraction);
+                broadcast_event(&clients, "job-progress", JobProgress { id: job.id, fraction, fps: 0.0 });
+            }
+        });
+        drop(guard);
+        match r {
+            Ok(bluecompress::R3dJob::Done(d)) => {
+                let done = JobDone {
+                    id: job.id,
+                    skipped: false,
+                    output: ps(&d.output),
+                    input_bytes: d.input_bytes,
+                    output_bytes: d.output_bytes,
+                    frames: d.frames,
+                    seconds: d.seconds,
+                    fps: if d.seconds > 0.0 { d.frames as f64 / d.seconds } else { 0.0 },
+                    backend: "rewrap".into(),
+                    proxy: None,
+                    proxy_error: None,
+                    r3d: Some(ps(&d.output)),
+                    r3d_skipped: None,
+                    r3d_error: None,
+                };
+                update_job(st, job.id, |j| {
+                    j.state = "done".into();
+                    j.fraction = 1.0;
+                    j.output = Some(done.output.clone());
+                    j.result = Some(done.clone());
+                });
+                {
+                    let mut q = st.queue.lock().unwrap();
+                    q.batch.done += 1;
+                    q.batch.input_bytes += done.input_bytes;
+                    q.batch.output_bytes += done.output_bytes;
+                }
+                broadcast_event(&st.sse_clients, "job-done", done);
+            }
+            Ok(bluecompress::R3dJob::Skipped(why)) => job_error(st, job.id, why, false),
+            Err(e) => {
+                let cancelled = st.cancel.load(Ordering::SeqCst);
+                job_error(st, job.id, e.to_string(), cancelled);
+            }
+        }
+        return;
+    }
     let result = bluecompress::transcode_staged(&options, &st.cancel, &mut on_progress);
     // The proxy (from the source, next to the output) runs under the same lock.
     let proxy = match &result {
@@ -965,11 +1047,15 @@ fn run_job(st: &Arc<ServerState>, job: &QueueJob, settings: &Settings) {
     };
     // R3D NE from the original .nev, next to the output, under the same lock.
     let r3d = match &result {
-        Ok(_) if job.r3d && bluecompress::r3d::is_nev(&options.input) && !st.cancel.load(Ordering::SeqCst) => {
+        Ok(_)
+            if ((job.r3d && bluecompress::r3d::is_nev(&options.input))
+                || (job.to_nev && bluecompress::r3d::is_r3d(&options.input)))
+                && !st.cancel.load(Ordering::SeqCst) =>
+        {
             broadcast_event(&st.sse_clients, "job-r3d", JobProgress { id: job.id, fraction: 0.0, fps: 0.0 });
             let mut last = Instant::now() - Duration::from_secs(1);
             let clients = st.sse_clients.clone();
-            let r = bluecompress::r3d_job(&options.input, &options.output, &st.cancel, &mut |fraction, _| {
+            let r = bluecompress::r3d_job(&options, &conv, &st.cancel, &mut |fraction, _| {
                 if fraction >= 1.0 || last.elapsed().as_millis() >= 100 {
                     last = Instant::now();
                     broadcast_event(&clients, "job-r3d", JobProgress { id: job.id, fraction, fps: 0.0 });
@@ -1038,6 +1124,9 @@ fn invoke_command(state: &Arc<ServerState>, cmd: &str, body: &[u8]) -> HttpRespo
                 default_resolution: resolution_name(state.default_resolution).into(),
                 default_proxies: state.default_proxies,
                 default_r3d: state.default_r3d,
+                default_to_nev: state.default_to_nev,
+                default_rewrap: state.default_rewrap,
+                default_rmd: state.default_rmd,
                 default_cbr: state.default_cbr,
                 proxy_encoder: bluecompress::proxy::encoder_description(),
                 watch: state.watch_state.lock().unwrap().clone(),
@@ -1472,6 +1561,9 @@ pub fn run_serve(cfg: ServeConfig, cancel: &'static AtomicBool) -> u8 {
         default_backend: cfg.default_backend,
         default_proxies: cfg.default_proxies,
         default_r3d: cfg.default_r3d,
+        default_to_nev: cfg.default_to_nev,
+        default_rewrap: cfg.default_rewrap,
+        default_rmd: cfg.default_rmd,
         default_cbr: cfg.default_cbr,
         threads: cfg.threads,
         running: Arc::new(AtomicBool::new(false)),

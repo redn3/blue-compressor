@@ -401,6 +401,9 @@ pub struct OutputWriter<'a> {
     new_video_sizes: Vec<u32>,
     copy_buf: Vec<u8>,
     finished: bool,
+    /// Replacement moov/udta box and video sample entry fourcc (R3D NE output).
+    udta: Option<Vec<u8>>,
+    codec: Option<u32>,
 }
 
 impl<'a> OutputWriter<'a> {
@@ -423,6 +426,8 @@ impl<'a> OutputWriter<'a> {
             new_video_sizes: vec![0; movie.video().samples.len()],
             copy_buf: Vec::new(),
             finished: false,
+            udta: None,
+            codec: None,
         };
         let ftyp = find(&movie.top, b"ftyp").unwrap();
         let ftyp_bytes = input.read(ftyp.offset, ftyp.size as usize)?;
@@ -449,6 +454,13 @@ impl<'a> OutputWriter<'a> {
         f.write_all(p).map_err(|e| Error(format!("write error {}: {e}", self.tmp_path.display())))?;
         self.pos += p.len() as u64;
         Ok(())
+    }
+
+    /// Writes `udta` (a whole box) in place of moov/udta and `codec` as the video sample
+    /// entry's fourcc when moov is rebuilt.
+    pub fn set_metadata(&mut self, udta: Vec<u8>, codec: u32) {
+        self.udta = Some(udta);
+        self.codec = Some(codec);
     }
 
     /// Appends the next video sample (samples must arrive in chunk order).
@@ -540,7 +552,19 @@ impl<'a> OutputWriter<'a> {
             wr32(&mut co, 0, n);
             repl.insert(t.stco_offset, co);
         }
+        if let Some(c) = self.codec {
+            let se = movie.video().stsd_entry_offset;
+            wr32(&mut moov, se + 4, c);
+        }
         let tree = parse_boxes(&moov, 0, moov.len() as u64)?;
+        if let Some(u) = self.udta.take() {
+            match find(&tree[0].children, b"udta") {
+                Some(b) => {
+                    repl.insert(b.offset, u);
+                }
+                None => return fail("no udta to replace"),
+            }
+        }
         let mut new_moov = Vec::with_capacity(moov.len() + 64 * 1024);
         serialize(&tree[0], &moov, &repl, &mut new_moov);
 

@@ -34,7 +34,7 @@ mod util;
 pub use preview::{Preview, Thumbnail};
 pub use proxy::{make_proxy, proxy_path, ProxyOptions, ProxyOutcome};
 pub use quality::{bpp_of, bpp_tag, legacy_bpp, Target, BPP_MAX, BPP_MIN, LEGACY_FRACTIONS};
-pub use r3d::{convert as convert_to_r3d, convert_job as r3d_job, r3d_path, R3dJob, R3dOptions, R3dOutcome};
+pub use r3d::{convert as rewrap, convert_job as r3d_job, nev_path, r3d_path, Convert, R3dJob, R3dOptions, R3dOutcome};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 

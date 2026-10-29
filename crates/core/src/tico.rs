@@ -793,7 +793,7 @@ pub fn encode_precinct(
             }
             let mut xw = BitWriter::new(sign);
             for bl in lines {
-                for (m, ng) in bl.mag.as_chunks::<GROUP>().0.iter().zip(bl.neg.chunks_exact(GROUP)) {
+                for (m, ng) in bl.mag.as_chunks::<GROUP>().0.iter().zip(bl.neg.as_chunks::<GROUP>().0.iter()) {
                     if m[0] | m[1] | m[2] | m[3] == 0 {
                         continue;
                     }

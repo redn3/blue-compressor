@@ -30,6 +30,9 @@ pub struct WatchConfig {
     pub proxies: bool,
     /// Also convert .nev clips to R3D NE in "R3D NE/" next to each output.
     pub r3d: bool,
+    /// Also rewrap .R3D clips to N-RAW, and write the exposure .RMD (see `--to-nev`, `--rmd`).
+    pub to_nev: bool,
+    pub rmd: bool,
     /// Constant bitrate for the compressed clip and the proxy.
     pub cbr: bool,
     pub json: bool,
@@ -442,7 +445,11 @@ pub fn run_watch(
                             crate::write_proxy(&clip, &target_out, cfg.cbr, cfg.json, cfg.quiet)
                         };
                         // Same for R3D NE: from the source, and a failure keeps it.
-                        let r3d_ok = !(out_ok && cfg.r3d) || crate::write_r3d(&clip, &target_out, cfg.json, cfg.quiet);
+                        let conv =
+                            bluecompress::Convert { to_r3d: cfg.r3d, to_nev: cfg.to_nev, rewrap: false, rmd: cfg.rmd };
+                        let job = Options { output: target_out.clone(), ..opt.clone() };
+                        let r3d_ok =
+                            !(out_ok && (cfg.r3d || cfg.to_nev)) || crate::write_r3d(&job, &conv, cfg.json, cfg.quiet);
                         let clear_now = state.lock().unwrap().clear_after_process;
                         let mut cleared = false;
                         if out_ok && clear_now && proxy_ok && r3d_ok {

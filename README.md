@@ -186,33 +186,44 @@ output:
   (VideoToolbox `constant_bit_rate`, NVENC and AMF `-rc cbr`, Quick Sync with equal
   average and maximum rate, libx265 strict CBR). Off, proxies use quality based VBR.
 - **R3D NE:** always constant bitrate, whatever the toggle says. Camera R3D NE files
-  have every frame at the same size (7,750,656 bytes on the ZR) and the conversion copies
-  the camera original's frames as they are, so only camera original `.nev` files with
-  constant frames are converted.
+  have every frame at the same size (7,750,656 bytes on the ZR). A compressed or resized
+  R3D NE is padded to one frame size; a rewrap copies the frames as they are, so it is
+  constant if the source is (camera originals are). Variable frame sizes are not valid
+  R3D NE as far as we know, so there is no off mode for it.
 
-### R3D NE from N-RAW
+### R3D NE and N-RAW
 
-Turn on **Convert .nev to R3D NE** (or pass `--r3d`, or set `R3D` / `WATCH_R3D` in
-Docker) to also write an R3D NE copy of each Nikon ZR `.nev` clip in the list to an
-`R3D NE` folder next to its output, as `R3D NE/<clip name>.R3D` (ZR names such as
-`A007_C002_10299S` are already RED style; other names get one). `.r3d` clips in the list
-are left alone.
+R3D NE on the ZR is the same TICO RAW data as N-RAW in a slightly different wrapper.
+Blue Compressor converts between the two by rewriting only the tags that differ: the
+video codec (`NRAW` and `NR3D`), the format codes, the gamma and gamut (N-LOG and Rec.2020,
+or Log3G10 and REDWideGamutRGB, which decoders apply when debayering), the RED clip
+metadata, the camera matrix and a few constants. The image data is copied as it is.
 
-R3D NE on the ZR is the same TICO RAW data as N-RAW High in a slightly different
-wrapper, so the conversion copies the original clip byte for byte and rewrites only the
-tags that differ: the video codec (`NRAW` to `NR3D`), the format codes, the gamma and gamut
-(N-Log to Log3G10, Rec.2020 to REDWideGamutRGB, which decoders apply when debayering), the
-RED clip metadata, the camera matrix and a few RED constants. Nothing is re-encoded, so
-it takes about as long as copying the file.
+- **N-RAW to R3D NE** (or `--r3d`, `R3D` / `WATCH_R3D` in Docker) acts on `.nev`
+  clips and writes `R3D NE/<clip name>.R3D` next to each output (ZR names such as
+  `A007_C002_10299S` are already RED style; other names get one). It follows the
+  compression and resolution settings: a lossless job copies the image data as it is, a
+  compressed or resized one is recompressed from the original and padded to constant
+  frames. N-RAW High and Normal both work.
+- **R3D NE to N-RAW** (or `--to-nev`, `NEV` / `WATCH_NEV`) acts on `.R3D` clips and
+  rewraps them back to N-RAW (`N-RAW/<clip name>.NEV`): NRAW codec, N-LOG, the N-RAW
+  constants and matrix, and the RED blocks cleared. A round trip, N-RAW to R3D NE and
+  back, gives identical image data.
+- **Rewrap only** (or `--rewrap`, `REWRAP`) skips the compressed copy: each job only
+  does the conversions above, as a streaming copy with no decoding, at about disk speed
+  (under a second for a 650 MB clip on an SSD). Not available for the watch folder.
+- **Exposure sidecar** (on by default; `--no-rmd`, `RMD=false`): R3D NE records about one
+  stop brighter than N-RAW at the same ISO. The ISO tag is left as it is; instead an `.RMD`
+  sidecar next to the `.R3D` asks RED decoders for +1 stop of exposure on ZR clips (+0.5
+  for other cameras, a first guess). The sidecar layout follows the public outline of
+  the format (an XML `REDXIF` document); its element names are not verified against
+  real RED software yet, so check that your decoder picks it up.
 
-It always converts the original `.nev`, never the compressed copy, because R3D NE only
-exists at N-RAW High quality (about 3 bits per pixel); the compression setting still
-applies to the normal output. N-RAW Normal clips and clips from other cameras (Z8, Z9),
-which have no R3D NE equivalent, are skipped with a note on the job.
-
-R3D NE records about one stop brighter than N-RAW at the same ISO, so the converted clip
-is tagged with twice the clip's ISO (800 is written as 1600) for RED decoders to
-match the brightness. This is still being checked against real clips.
+**Experimental: Z8, Z9 and Z6III.** These cameras never record R3D NE, so their clips
+also get the RED metadata the ZR writes (clip block, exposure block, gamma and gamut) and
+the ZR camera matrix. The Z6III shares the ZR's sensor, so its matrix should be close; for
+the Z8 and Z9 it is an approximation and colours may be off. This has only been tested on
+synthetic clips so far and needs checking with real ones. The app marks it Experimental.
 
 ## Repository layout
 
@@ -404,8 +415,11 @@ services:
 | `WATCH_PROXIES` | `false` | Set to `true` to also write a proxy of every watch-folder clip. A proxy that fails keeps the source even with `WATCH_CLEAR`. |
 | `CBR` | `false` | Set to `true` to turn on **Constant bitrate** for new Web UI jobs (see Constant bitrate above). |
 | `WATCH_CBR` | `false` | Set to `true` for constant bitrate watch-folder outputs. |
-| `R3D` | `false` | Set to `true` to turn on **Convert .nev to R3D NE** for new Web UI jobs (see R3D NE from N-RAW above). |
+| `R3D` | `false` | Set to `true` to turn on **N-RAW to R3D NE** for new Web UI jobs (see R3D NE and N-RAW above). |
 | `WATCH_R3D` | `false` | Set to `true` to also convert every watch-folder `.nev` to R3D NE. A failed conversion keeps the source even with `WATCH_CLEAR`. |
+| `NEV` / `WATCH_NEV` | `false` | Set to `true` to turn on **R3D NE to N-RAW** for Web UI jobs / the watch folder (see R3D NE and N-RAW above). |
+| `REWRAP` | `false` | Set to `true` to turn on **Rewrap only** for new Web UI jobs. |
+| `RMD` / `WATCH_RMD` | `true` | Set to `false` for no exposure `.RMD` sidecar next to R3D NE outputs. |
 | `UPDATE_CHECK` | `true` | Set to `false` to stop the update check (an anonymous request to the GitHub releases API at start and every 12 hours; the Web UI then shows no update banner). |
 
 ### Updating the container

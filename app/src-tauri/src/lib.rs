@@ -95,6 +95,19 @@ struct JobRequest {
     /// Constant bitrate for the compressed clip and the proxy (R3D NE always is).
     #[serde(default)]
     cbr: bool,
+    /// Also rewrap a .R3D (R3D NE) source back to N-RAW in "N-RAW/" next to the output.
+    #[serde(default)]
+    to_nev: bool,
+    /// Rewrap only: no compressed copy, just the conversions above (image data copied).
+    #[serde(default)]
+    rewrap: bool,
+    /// Write the exposure .RMD next to an R3D NE output (on unless turned off).
+    #[serde(default = "yes")]
+    rmd: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 #[derive(Serialize, Clone)]
@@ -450,7 +463,7 @@ fn start(app: AppHandle, state: State<'_, Runner>, jobs: Vec<JobRequest>, settin
             let target = target_of(&input, job.quality, job.bpp, job.lossless);
             let (quality, bpp) = target.option_fields();
             // Already compressed by an earlier, interrupted run: keep it.
-            if !job.force {
+            if !job.force && !job.rewrap {
                 if let Some((out, out_bytes)) =
                     existing_for(&input, settings.output_folder.as_deref(), target, res_name)
                 {
@@ -524,6 +537,51 @@ fn start(app: AppHandle, state: State<'_, Runner>, jobs: Vec<JobRequest>, settin
                     last = Instant::now() - std::time::Duration::from_secs(1);
                 }
             };
+            let conv = bluecompress::Convert { to_r3d: job.r3d, to_nev: job.to_nev, rewrap: job.rewrap, rmd: job.rmd };
+            if job.rewrap {
+                // Rewrap only: the conversion is the job's output.
+                let r = engine::r3d_job(&options, &conv, &cancel, &mut |fraction, _| {
+                    if fraction >= 1.0 || last.elapsed().as_millis() >= 100 {
+                        last = Instant::now();
+                        let _ = app.emit("job-progress", JobProgress { id: job.id, fraction, fps: 0.0 });
+                    }
+                    if paused.load(Ordering::SeqCst) {
+                        wait_while_paused(&paused, &cancel);
+                    }
+                });
+                match r {
+                    Ok(bluecompress::R3dJob::Done(d)) => {
+                        let out = d.output.to_string_lossy().into_owned();
+                        let _ = app.emit(
+                            "job-done",
+                            JobDone {
+                                id: job.id,
+                                skipped: false,
+                                output: out.clone(),
+                                input_bytes: d.input_bytes,
+                                output_bytes: d.output_bytes,
+                                frames: d.frames,
+                                seconds: d.seconds,
+                                fps: if d.seconds > 0.0 { f64::from(d.frames) / d.seconds } else { 0.0 },
+                                backend: "rewrap".into(),
+                                proxy: None,
+                                proxy_error: None,
+                                r3d: Some(out),
+                                r3d_skipped: None,
+                                r3d_error: None,
+                            },
+                        );
+                    }
+                    Ok(bluecompress::R3dJob::Skipped(why)) => {
+                        let _ = app.emit("job-error", JobError { id: job.id, error: why, cancelled: false });
+                    }
+                    Err(e) => {
+                        let cancelled = cancel.load(Ordering::SeqCst);
+                        let _ = app.emit("job-error", JobError { id: job.id, error: e.to_string(), cancelled });
+                    }
+                }
+                continue;
+            }
             let result = engine::transcode_staged(&options, &cancel, &mut on_progress);
             // The proxy is made from the source and written to Proxies/ next to the output.
             let (proxy, proxy_error) = match &result {
@@ -557,10 +615,14 @@ fn start(app: AppHandle, state: State<'_, Runner>, jobs: Vec<JobRequest>, settin
             };
             // R3D NE from the original .nev (not the compressed copy), next to the output.
             let (r3d, r3d_skipped, r3d_error) = match &result {
-                Ok(_) if job.r3d && bluecompress::r3d::is_nev(&options.input) && !cancel.load(Ordering::SeqCst) => {
+                Ok(_)
+                    if ((job.r3d && bluecompress::r3d::is_nev(&options.input))
+                        || (job.to_nev && bluecompress::r3d::is_r3d(&options.input)))
+                        && !cancel.load(Ordering::SeqCst) =>
+                {
                     let _ = app.emit("job-r3d", JobProgress { id: job.id, fraction: 0.0, fps: 0.0 });
                     let mut last = Instant::now() - std::time::Duration::from_secs(1);
-                    let r = engine::r3d_job(&options.input, &options.output, &cancel, &mut |fraction, _| {
+                    let r = engine::r3d_job(&options, &conv, &cancel, &mut |fraction, _| {
                         if fraction >= 1.0 || last.elapsed().as_millis() >= 100 {
                             last = Instant::now();
                             let _ = app.emit("job-r3d", JobProgress { id: job.id, fraction, fps: 0.0 });

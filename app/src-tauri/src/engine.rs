@@ -263,13 +263,18 @@ mod mock {
         })
     }
 
-    /// Stand-in R3D NE step: progress over about half a second, no file.
+    /// Stand-in R3D NE / N-RAW step: progress over about half a second, no file.
     pub fn r3d_job(
-        source: &std::path::Path,
-        out: &std::path::Path,
+        job: &Options,
+        conv: &bluecompress::Convert,
         cancel: &AtomicBool,
         progress: &mut dyn FnMut(f64, f64),
     ) -> bluecompress::Result<bluecompress::R3dJob> {
+        let source = &job.input;
+        let to_r3d = bluecompress::r3d::is_nev(source);
+        if !(to_r3d && conv.to_r3d) && !(bluecompress::r3d::is_r3d(source) && conv.to_nev) {
+            return Ok(bluecompress::R3dJob::Skipped("nothing to convert".into()));
+        }
         let info = probe(source)?;
         for i in 1..=10 {
             if cancel.load(Ordering::Relaxed) {
@@ -278,12 +283,21 @@ mod mock {
             std::thread::sleep(Duration::from_millis(50));
             progress(f64::from(i) / 10.0, 0.0);
         }
+        let (output, direction) = if to_r3d {
+            (bluecompress::r3d_path(&job.output, source), bluecompress::r3d::Direction::ToR3d)
+        } else {
+            (bluecompress::nev_path(&job.output, source), bluecompress::r3d::Direction::ToNev)
+        };
         Ok(bluecompress::R3dJob::Done(bluecompress::R3dOutcome {
-            output: bluecompress::r3d_path(out, source),
+            rmd: (to_r3d && conv.rmd).then(|| output.with_extension("RMD")),
+            output,
+            direction,
             frames: info.frames,
+            input_bytes: info.file_bytes,
             output_bytes: info.file_bytes,
             seconds: 0.5,
-            iso: 1600,
+            iso: 800,
+            experimental: false,
             frame_bytes: 7_750_656,
         }))
     }

@@ -101,20 +101,41 @@
           <label class="switch-row" id="cbr-row">
             <span class="switch-text">
               <span class="switch-title">Constant bitrate</span>
-              <span class="switch-sub" id="cbr-sub">Every frame the same size in compressed clips (bpp targets; Lossless stays variable) and CBR proxies. Off: frames use what they need up to the target, proxies use quality based VBR.</span>
+              <span class="switch-sub" id="cbr-sub">Every frame the same size in compressed clips (bpp targets; Lossless stays variable) and CBR proxies. Off: frames use what they need up to the target, proxies use quality based VBR. R3D NE is always constant; a rewrap is constant if the source is.</span>
             </span>
             <input type="checkbox" id="cbr" class="switch">
           </label>
         </section>
 
         <section class="field" id="r3d-section">
-          <div class="field-label">R3D NE</div>
+          <div class="field-label">R3D NE and N-RAW</div>
+          <label class="switch-row" id="rewrap-row">
+            <span class="switch-text">
+              <span class="switch-title">Rewrap only</span>
+              <span class="switch-sub" id="rewrap-sub">No compressed copy: just the conversions below, with the image data copied as it is. About disk speed. Constant bitrate if the source is.</span>
+            </span>
+            <input type="checkbox" id="rewrap" class="switch">
+          </label>
           <label class="switch-row" id="r3d-row">
             <span class="switch-text">
-              <span class="switch-title">Convert .nev to R3D NE</span>
-              <span class="switch-sub" id="r3d-sub">Nikon ZR N-RAW High clips only, from the original, into an R3D NE folder next to each output. Log3G10 and REDWideGamutRGB. Always constant bitrate, like the camera.</span>
+              <span class="switch-title">N-RAW to R3D NE</span>
+              <span class="switch-sub" id="r3d-sub">Acts on .nev clips, into an R3D NE folder next to each output, at the chosen compression and resolution. Log3G10 and REDWideGamutRGB. Always constant bitrate. Nikon ZR; Z8, Z9 and Z6III clips are <span class="badge-exp">Experimental</span>.</span>
             </span>
             <input type="checkbox" id="r3d" class="switch">
+          </label>
+          <label class="switch-row" id="to-nev-row">
+            <span class="switch-text">
+              <span class="switch-title">R3D NE to N-RAW</span>
+              <span class="switch-sub" id="to-nev-sub">Acts on .R3D clips: rewraps them back to N-RAW (N-LOG) in an N-RAW folder next to each output.</span>
+            </span>
+            <input type="checkbox" id="to-nev" class="switch">
+          </label>
+          <label class="switch-row" id="rmd-row">
+            <span class="switch-text">
+              <span class="switch-title">Exposure sidecar</span>
+              <span class="switch-sub" id="rmd-sub">.RMD next to each R3D NE clip: +1 stop for the ZR, +0.5 for other cameras.</span>
+            </span>
+            <input type="checkbox" id="rmd" class="switch">
           </label>
         </section>
 
