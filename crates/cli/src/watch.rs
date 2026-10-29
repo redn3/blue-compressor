@@ -28,6 +28,8 @@ pub struct WatchConfig {
     pub clear_after_process: bool,
     /// Also write a proxy to Proxies/ next to each output.
     pub proxies: bool,
+    /// Also convert .nev clips to R3D NE in "R3D NE/" next to each output.
+    pub r3d: bool,
     pub json: bool,
     pub quiet: bool,
     pub once: bool,
@@ -436,9 +438,11 @@ pub fn run_watch(
                             });
                             crate::write_proxy(&clip, &target_out, cfg.json, cfg.quiet)
                         };
+                        // Same for R3D NE: from the source, and a failure keeps it.
+                        let r3d_ok = !(out_ok && cfg.r3d) || crate::write_r3d(&clip, &target_out, cfg.json, cfg.quiet);
                         let clear_now = state.lock().unwrap().clear_after_process;
                         let mut cleared = false;
-                        if out_ok && clear_now && proxy_ok {
+                        if out_ok && clear_now && proxy_ok && r3d_ok {
                             match std::fs::remove_file(&clip) {
                                 Ok(()) => {
                                     cleared = true;

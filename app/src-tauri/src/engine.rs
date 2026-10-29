@@ -6,12 +6,12 @@ pub use bluecompress::{Backend, Codec, Options, Resolution, Target};
 #[cfg(not(feature = "mock"))]
 pub use bluecompress::{backend_description, output_size, preview_region_for, probe, thumbnail, transcode_staged};
 #[cfg(not(feature = "mock"))]
-pub use bluecompress::{make_proxy, proxy::encoder_description as proxy_encoder};
+pub use bluecompress::{make_proxy, proxy::encoder_description as proxy_encoder, r3d_job};
 
 #[cfg(feature = "mock")]
 pub use mock::{backend_description, output_size, preview_region_for, probe, thumbnail, transcode_staged};
 #[cfg(feature = "mock")]
-pub use mock::{make_proxy, proxy_encoder};
+pub use mock::{make_proxy, proxy_encoder, r3d_job};
 
 #[cfg(feature = "mock")]
 mod mock {
@@ -261,6 +261,30 @@ mod mock {
             seconds: start.elapsed().as_secs_f64(),
             output_bytes: u64::from(info.frames) * 60_000,
         })
+    }
+
+    /// Stand-in R3D NE step: progress over about half a second, no file.
+    pub fn r3d_job(
+        source: &std::path::Path,
+        out: &std::path::Path,
+        cancel: &AtomicBool,
+        progress: &mut dyn FnMut(f64, f64),
+    ) -> bluecompress::Result<bluecompress::R3dJob> {
+        let info = probe(source)?;
+        for i in 1..=10 {
+            if cancel.load(Ordering::Relaxed) {
+                return Err(bluecompress::Error("cancelled".into()));
+            }
+            std::thread::sleep(Duration::from_millis(50));
+            progress(f64::from(i) / 10.0, 0.0);
+        }
+        Ok(bluecompress::R3dJob::Done(bluecompress::R3dOutcome {
+            output: bluecompress::r3d_path(out, source),
+            frames: info.frames,
+            output_bytes: info.file_bytes,
+            seconds: 0.5,
+            iso: 1600,
+        }))
     }
 
     /// The mock writes no files, so staging is the same as a plain run.

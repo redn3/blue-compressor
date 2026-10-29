@@ -89,6 +89,9 @@ struct JobRequest {
     /// Also write a 10-bit H.265 proxy to Proxies/ next to the output.
     #[serde(default)]
     proxy: bool,
+    /// Also convert a .nev source to R3D NE in "R3D NE/" next to the output.
+    #[serde(default)]
+    r3d: bool,
 }
 
 #[derive(Serialize, Clone)]
@@ -127,6 +130,14 @@ struct JobDone {
     proxy: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     proxy_error: Option<String>,
+    /// The R3D NE clip written for this .nev, if asked for and made.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    r3d: Option<String>,
+    /// Why the R3D NE conversion was skipped (N-RAW Normal, not a ZR clip).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    r3d_skipped: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    r3d_error: Option<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -454,6 +465,9 @@ fn start(app: AppHandle, state: State<'_, Runner>, jobs: Vec<JobRequest>, settin
                             backend: String::new(),
                             proxy: None,
                             proxy_error: None,
+                            r3d: None,
+                            r3d_skipped: None,
+                            r3d_error: None,
                         },
                     );
                     continue;
@@ -527,6 +541,31 @@ fn start(app: AppHandle, state: State<'_, Runner>, jobs: Vec<JobRequest>, settin
                 }
                 _ => (None, None),
             };
+            // R3D NE from the original .nev (not the compressed copy), next to the output.
+            let (r3d, r3d_skipped, r3d_error) = match &result {
+                Ok(_) if job.r3d && bluecompress::r3d::is_nev(&options.input) && !cancel.load(Ordering::SeqCst) => {
+                    let _ = app.emit("job-r3d", JobProgress { id: job.id, fraction: 0.0, fps: 0.0 });
+                    let mut last = Instant::now() - std::time::Duration::from_secs(1);
+                    let r = engine::r3d_job(&options.input, &options.output, &cancel, &mut |fraction, _| {
+                        if fraction >= 1.0 || last.elapsed().as_millis() >= 100 {
+                            last = Instant::now();
+                            let _ = app.emit("job-r3d", JobProgress { id: job.id, fraction, fps: 0.0 });
+                        }
+                        if paused.load(Ordering::SeqCst) {
+                            wait_while_paused(&paused, &cancel);
+                        }
+                    });
+                    match r {
+                        Ok(bluecompress::R3dJob::Done(d)) => {
+                            (Some(d.output.to_string_lossy().into_owned()), None, None)
+                        }
+                        Ok(bluecompress::R3dJob::Skipped(why)) => (None, Some(why), None),
+                        Err(_) if cancel.load(Ordering::SeqCst) => (None, None, None),
+                        Err(e) => (None, None, Some(e.0)),
+                    }
+                }
+                _ => (None, None, None),
+            };
             match result {
                 Ok(o) => {
                     let _ = app.emit(
@@ -543,6 +582,9 @@ fn start(app: AppHandle, state: State<'_, Runner>, jobs: Vec<JobRequest>, settin
                             backend: o.backend,
                             proxy,
                             proxy_error,
+                            r3d,
+                            r3d_skipped,
+                            r3d_error,
                         },
                     );
                 }

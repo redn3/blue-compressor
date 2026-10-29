@@ -909,6 +909,7 @@ body.per-clip .job-settings { display: flex; }
 .job:not(.done):not(.failed):not(.cancelled) .job-thumb { grid-row: auto; align-self: center; }
 .job-after[hidden] { display: none; }
 .job-proxy-error { color: var(--err); }
+.job-r3d-skipped { color: var(--text-2); }
 .job-after-info { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .job-after .sep { margin: 0 6px; opacity: 0.5; }
 .job-out { font-family: var(--mono); font-size: 11px; color: var(--text-2); }

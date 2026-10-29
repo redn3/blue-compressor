@@ -28,6 +28,11 @@ services:
       # on the CPU. PROXIES sets the Web UI toggle's default, WATCH_PROXIES the watch folder:
       - PROXIES=false
       - WATCH_PROXIES=false
+      # true also converts every Nikon ZR .nev (N-RAW High) to R3D NE in an "R3D NE" folder
+      # next to its output (no re-encoding). R3D sets the Web UI toggle's default,
+      # WATCH_R3D the watch folder:
+      - R3D=false
+      - WATCH_R3D=false
       # Checks GitHub for a new version at start and every 12 hours (an anonymous request,
       # nothing else is sent) and shows a banner in the Web UI. The container never updates
       # itself. Set to false to turn the check off:

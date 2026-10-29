@@ -170,6 +170,30 @@ otherwise, which is what a NAS without a GPU uses. The Docker image includes ffm
 a computer, Blue Compressor uses an `ffmpeg` next to itself, the one in
 `BLUECOMPRESS_FFMPEG`, or one on the PATH (Homebrew's folders included).
 
+### R3D NE from N-RAW
+
+Turn on **Convert .nev to R3D NE** (or pass `--r3d`, or set `R3D` / `WATCH_R3D` in
+Docker) to also write an R3D NE copy of each Nikon ZR `.nev` clip in the list to an
+`R3D NE` folder next to its output, as `R3D NE/<clip name>.R3D` (ZR names such as
+`A007_C002_10299S` are already RED style; other names get one). `.r3d` clips in the list
+are left alone.
+
+R3D NE on the ZR is the same TICO RAW data as N-RAW High in a slightly different
+wrapper, so the conversion copies the original clip byte for byte and rewrites only the
+tags that differ: the video codec (`NRAW` to `NR3D`), the format codes, the gamma and gamut
+(N-Log to Log3G10, Rec.2020 to REDWideGamutRGB, which decoders apply when debayering), the
+RED clip metadata, the camera matrix and a few RED constants. Nothing is re-encoded, so
+it takes about as long as copying the file.
+
+It always converts the original `.nev`, never the compressed copy, because R3D NE only
+exists at N-RAW High quality (about 3 bits per pixel); the compression setting still
+applies to the normal output. N-RAW Normal clips and clips from other cameras (Z8, Z9),
+which have no R3D NE equivalent, are skipped with a note on the job.
+
+R3D NE records about one stop brighter than N-RAW at the same ISO, so the converted clip
+is tagged with twice the clip's ISO (800 is written as 1600) for RED decoders to
+match the brightness. This is still being checked against real clips.
+
 ## Repository layout
 
 ```
@@ -358,6 +382,8 @@ services:
 | `WATCH_CLEAR` | `false` | Set to `true` (or toggle **Clear watch folder after process** in the Web UI) to delete source clips from `WATCH_INPUT` once compression succeeds. |
 | `PROXIES` | `false` | Set to `true` to turn on **Make H.265 proxies** for new Web UI jobs (see Proxies above). |
 | `WATCH_PROXIES` | `false` | Set to `true` to also write a proxy of every watch-folder clip. A proxy that fails keeps the source even with `WATCH_CLEAR`. |
+| `R3D` | `false` | Set to `true` to turn on **Convert .nev to R3D NE** for new Web UI jobs (see R3D NE from N-RAW above). |
+| `WATCH_R3D` | `false` | Set to `true` to also convert every watch-folder `.nev` to R3D NE. A failed conversion keeps the source even with `WATCH_CLEAR`. |
 | `UPDATE_CHECK` | `true` | Set to `false` to stop the update check (an anonymous request to the GitHub releases API at start and every 12 hours; the Web UI then shows no update banner). |
 
 ### Updating the container

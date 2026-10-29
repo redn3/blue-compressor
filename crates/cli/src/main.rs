@@ -186,6 +186,8 @@ struct Cli {
     once: bool,
     /// --proxies / --no-proxies; None reads PROXIES (watch: WATCH_PROXIES first).
     proxies: Option<bool>,
+    /// --r3d / --no-r3d; None reads R3D (watch: WATCH_R3D first).
+    r3d: Option<bool>,
 }
 
 fn usage() -> String {
@@ -225,6 +227,11 @@ options:
                           the GPU when ffmpeg has a working encoder (VideoToolbox, NVENC,
                           Quick Sync, AMF), else libx265. Needs ffmpeg (next to bluecompress,
                           on the PATH, or BLUECOMPRESS_FFMPEG). Default: PROXIES, else off
+      --r3d               also convert each Nikon ZR .nev (N-RAW High) to R3D NE in
+                          R3D NE/<name>.R3D next to its output: the original codestream
+                          is copied unchanged and the tags are rewritten (N-Log to
+                          Log3G10, Rec.2020 to REDWideGamutRGB). N-RAW Normal and other
+                          cameras are skipped. Default: R3D, else off
       --json              JSON lines on stdout (start, progress, done, skipped, error, summary)
       --quiet             no progress on stderr
 
@@ -240,7 +247,8 @@ serve and watch options:
                           watch and serve also read WATCH_BPP (or BPP), WATCH_PRESET (or
                           PRESET), or the legacy WATCH_QUALITY (or QUALITY) with the
                           meaning of -q; the watch folder defaults to light. WATCH_PROXIES
-                          (or PROXIES) = 1 also writes proxies
+                          (or PROXIES) = 1 also writes proxies, WATCH_R3D (or R3D) = 1
+                          also converts .nev clips to R3D NE
 
 Folders are searched recursively for .nev and .r3d files. Originals are never modified;
 outputs are written to <name>.partial and renamed when complete.
@@ -590,6 +598,9 @@ fn compress_cmd(o: &Cli) -> u8 {
         {
             failed += 1;
         }
+        if env_r3d(o.r3d, false) && !CANCEL.load(Ordering::Relaxed) && !write_r3d(input, &out, o.json, o.quiet) {
+            failed += 1;
+        }
     }
     let cancelled = CANCEL.load(Ordering::Relaxed);
     if o.json {
@@ -620,6 +631,68 @@ pub(crate) fn env_proxies(cli: Option<bool>, watch: bool) -> bool {
     cli.or_else(|| if watch { env_nonempty("WATCH_PROXIES").and_then(|v| parse_bool(&v)) } else { None })
         .or_else(|| env_nonempty("PROXIES").and_then(|v| parse_bool(&v)))
         .unwrap_or(false)
+}
+
+/// R3D conversion on: the command line, else WATCH_R3D (watch only), else R3D, else off.
+pub(crate) fn env_r3d(cli: Option<bool>, watch: bool) -> bool {
+    cli.or_else(|| if watch { env_nonempty("WATCH_R3D").and_then(|v| parse_bool(&v)) } else { None })
+        .or_else(|| env_nonempty("R3D").and_then(|v| parse_bool(&v)))
+        .unwrap_or(false)
+}
+
+/// Converts `source` to R3D NE next to its output `out` when it is a .nev (see
+/// [`bluecompress::r3d::convert_job`]). Skipped clips are reported, not failed. Returns
+/// false on failure (cancel is not a failure).
+pub(crate) fn write_r3d(source: &Path, out: &Path, json: bool, quiet: bool) -> bool {
+    if !bluecompress::r3d::is_nev(source) {
+        return true;
+    }
+    let ins = ps(source);
+    let mut last = -1i64;
+    let r = bluecompress::r3d_job(source, out, &CANCEL, &mut |fraction, mbs| {
+        let pm = (fraction * 100.0) as i64;
+        if pm == last {
+            return;
+        }
+        last = pm;
+        if json {
+            println!("{{\"event\":\"r3d_progress\",\"input\":{},\"fraction\":{fraction:.3}}}", q(&ins));
+            let _ = std::io::stdout().flush();
+        } else if !quiet {
+            eprint!("\r  R3D NE {:5.1}%  {mbs:6.0} MB/s", fraction * 100.0);
+        }
+    });
+    match r {
+        Ok(bluecompress::R3dJob::Done(d)) => {
+            let outs = ps(&d.output);
+            if json {
+                println!(
+                    "{{\"event\":\"r3d_done\",\"input\":{},\"output\":{},\"frames\":{},\"output_bytes\":{},\"iso\":{},\"seconds\":{:.3}}}",
+                    q(&ins), q(&outs), d.frames, d.output_bytes, d.iso, d.seconds
+                );
+            } else if !quiet {
+                eprintln!("\r{ins}: R3D NE -> {outs} (ISO tagged {})", d.iso);
+            }
+            true
+        }
+        Ok(bluecompress::R3dJob::Skipped(why)) => {
+            if json {
+                println!("{{\"event\":\"r3d_skipped\",\"input\":{},\"reason\":{}}}", q(&ins), q(&why));
+            } else if !quiet {
+                eprintln!("{ins}: R3D NE skipped: {why}");
+            }
+            true
+        }
+        Err(_) if CANCEL.load(Ordering::Relaxed) => true,
+        Err(e) => {
+            if json {
+                println!("{{\"event\":\"r3d_error\",\"input\":{},\"error\":{}}}", q(&ins), q(&e.0));
+            } else {
+                eprintln!("\n{ins}: R3D NE error: {e}");
+            }
+            false
+        }
+    }
 }
 
 /// Writes the proxy of `source` next to its output `out` (see [`bluecompress::proxy_path`]),
@@ -765,6 +838,7 @@ fn watch_cmd(o: &Cli) -> u8 {
         poll_seconds: env_watch_poll(o.poll_seconds),
         clear_after_process: env_watch_clear(o.clear_watch),
         proxies: env_proxies(o.proxies, true),
+        r3d: env_r3d(o.r3d, true),
         json: o.json,
         quiet: o.quiet,
         once: o.once,
@@ -829,6 +903,7 @@ fn serve_cmd(o: &Cli) -> u8 {
             poll_seconds: env_watch_poll(o.poll_seconds),
             clear_after_process: env_watch_clear(o.clear_watch),
             proxies: env_proxies(o.proxies, true),
+            r3d: env_r3d(o.r3d, true),
             json: o.json,
             quiet: o.quiet,
             once: false,
@@ -845,6 +920,7 @@ fn serve_cmd(o: &Cli) -> u8 {
             poll_seconds: env_watch_poll(o.poll_seconds),
             clear_after_process: env_watch_clear(o.clear_watch),
             proxies: env_proxies(o.proxies, true),
+            r3d: env_r3d(o.r3d, true),
             json: o.json,
             quiet: o.quiet,
             once: false,
@@ -870,6 +946,7 @@ fn serve_cmd(o: &Cli) -> u8 {
         default_resolution,
         default_backend: env_watch_backend(o.backend),
         default_proxies: env_proxies(o.proxies, false),
+        default_r3d: env_r3d(o.r3d, false),
         threads: o.threads,
         watch: watch_cfg,
     };
@@ -1047,6 +1124,7 @@ fn main() -> ExitCode {
         skip_existing: false,
         once: false,
         proxies: None,
+        r3d: None,
     };
     let args: Vec<String> = std::env::args_os().skip(1).map(|a| a.to_string_lossy().into_owned()).collect();
     if args.first().map(String::as_str) == Some("calibrate") {
@@ -1147,6 +1225,8 @@ fn main() -> ExitCode {
             "--once" => o.once = true,
             "--proxies" | "--proxy" => o.proxies = Some(true),
             "--no-proxies" | "--no-proxy" => o.proxies = Some(false),
+            "--r3d" => o.r3d = Some(true),
+            "--no-r3d" => o.r3d = Some(false),
             "--suffix" => match it.next() {
                 Some(v) => o.suffix = v,
                 None => return bad("--suffix needs a value"),
@@ -1405,6 +1485,47 @@ mod tests {
     }
 
     #[test]
+    fn r3d_skips_clips_that_are_not_zr_high() {
+        let base = std::env::temp_dir().join(format!("bluecomp_r3d_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let clip = base.join("A001_C001.NEV");
+        // The synthetic clip has no Nikon ZR tags, so the R3D step skips it without failing.
+        make_synthetic_nev(&clip, 128, 64, 2);
+        let out_dir = base.join("out");
+        let o = Cli {
+            quality: Some(1),
+            bpp: None,
+            legacy_q: false,
+            resolution: None,
+            backend: Some(Backend::Cpu),
+            threads: 2,
+            inputs: vec![clip.to_string_lossy().into_owned()],
+            input_dir: None,
+            output_dir: Some(out_dir.to_string_lossy().into_owned()),
+            output_file: None,
+            watch_input: None,
+            watch_output: None,
+            listen: None,
+            browse_root: None,
+            poll_seconds: None,
+            clear_watch: None,
+            suffix: String::new(),
+            json: false,
+            quiet: true,
+            overwrite: false,
+            skip_existing: false,
+            once: false,
+            proxies: Some(false),
+            r3d: Some(true),
+        };
+        assert_eq!(compress_cmd(&o), 0);
+        assert!(out_dir.join("A001_C001.NEV").is_file());
+        assert!(!out_dir.join("R3D NE").exists());
+        let _ = std::fs::remove_dir_all(base);
+    }
+
+    #[test]
     fn compress_with_proxies() {
         let Ok((ffmpeg, _)) = bluecompress::proxy::default_encoder() else {
             eprintln!("no ffmpeg, skipped");
@@ -1440,6 +1561,7 @@ mod tests {
             skip_existing: false,
             once: false,
             proxies: Some(true),
+            r3d: None,
         };
         assert_eq!(compress_cmd(&o), 0);
         let proxy = out_dir.join("Proxies").join("A001_C001.mov");
@@ -1493,6 +1615,7 @@ mod tests {
                 poll_seconds: 1,
                 clear_after_process: true,
                 proxies: have_ffmpeg,
+                r3d: false,
                 json: false,
                 quiet: true,
                 once: true,
@@ -1543,6 +1666,7 @@ mod tests {
             default_resolution: Resolution::Original,
             default_backend: Backend::Cpu,
             default_proxies: false,
+            default_r3d: false,
             threads: 2,
             watch: Some(watch::WatchConfig {
                 input_dir: watch_in.clone(),
@@ -1555,6 +1679,7 @@ mod tests {
                 poll_seconds: 60,
                 clear_after_process: false,
                 proxies: false,
+                r3d: false,
                 json: false,
                 quiet: true,
                 once: false,

@@ -37,6 +37,8 @@ pub struct ServeConfig {
     pub default_backend: Backend,
     /// Proxies toggle for new clips (PROXIES or --proxies).
     pub default_proxies: bool,
+    /// R3D NE toggle for new clips (R3D or --r3d).
+    pub default_r3d: bool,
     pub threads: usize,
     pub watch: Option<WatchConfig>,
 }
@@ -48,6 +50,7 @@ struct ServerState {
     default_resolution: Resolution,
     default_backend: Backend,
     default_proxies: bool,
+    default_r3d: bool,
     threads: usize,
     running: Arc<AtomicBool>,
     cancel: Arc<AtomicBool>,
@@ -91,6 +94,7 @@ struct AppInfo {
     default_bpp: Option<f64>,
     default_resolution: String,
     default_proxies: bool,
+    default_r3d: bool,
     /// The encoder proxies use here ("hevc_nvenc (GPU)", "libx265 (CPU)") or why none.
     proxy_encoder: String,
     watch: WatchSnapshot,
@@ -136,6 +140,9 @@ struct JobRequest {
     /// Also write a 10-bit H.265 proxy to Proxies/ next to the output.
     #[serde(default)]
     proxy: bool,
+    /// Also convert a .nev source to R3D NE in "R3D NE/" next to the output.
+    #[serde(default)]
+    r3d: bool,
     /// Clip details the UI shows on the card (name, codec, size, frames, fps), kept as is so
     /// a reloaded page can rebuild its queue.
     #[serde(default)]
@@ -167,6 +174,7 @@ struct QueueJob {
     resolution: String,
     force: bool,
     proxy: bool,
+    r3d: bool,
     clip: Option<serde_json::Value>,
     /// waiting, running, done, failed or cancelled.
     state: String,
@@ -326,6 +334,14 @@ struct JobDone {
     proxy: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     proxy_error: Option<String>,
+    /// The R3D NE clip written for this .nev, if asked for and made.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    r3d: Option<String>,
+    /// Why the R3D NE conversion was skipped (N-RAW Normal, not a ZR clip).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    r3d_skipped: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    r3d_error: Option<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -722,6 +738,9 @@ fn start_queue(state: &Arc<ServerState>, args: StartArgs) -> Result<(), String> 
                         backend: String::new(),
                         proxy: None,
                         proxy_error: None,
+                        r3d: None,
+                        r3d_skipped: None,
+                        r3d_error: None,
                     }),
                 ),
                 None => ("waiting", 0.0, None, None),
@@ -739,6 +758,7 @@ fn start_queue(state: &Arc<ServerState>, args: StartArgs) -> Result<(), String> 
                 resolution: job.resolution,
                 force: job.force,
                 proxy: job.proxy,
+                r3d: job.r3d,
                 clip: job.clip,
                 state: state_name.into(),
                 fraction,
@@ -824,6 +844,9 @@ fn run_job(st: &Arc<ServerState>, job: &QueueJob, settings: &Settings) {
                 backend: String::new(),
                 proxy: None,
                 proxy_error: None,
+                r3d: None,
+                r3d_skipped: None,
+                r3d_error: None,
             };
             update_job(st, job.id, |j| {
                 j.state = "done".into();
@@ -927,12 +950,36 @@ fn run_job(st: &Arc<ServerState>, job: &QueueJob, settings: &Settings) {
         }
         _ => (None, None),
     };
+    // R3D NE from the original .nev, next to the output, under the same lock.
+    let r3d = match &result {
+        Ok(_) if job.r3d && bluecompress::r3d::is_nev(&options.input) && !st.cancel.load(Ordering::SeqCst) => {
+            broadcast_event(&st.sse_clients, "job-r3d", JobProgress { id: job.id, fraction: 0.0, fps: 0.0 });
+            let mut last = Instant::now() - Duration::from_secs(1);
+            let clients = st.sse_clients.clone();
+            let r = bluecompress::r3d_job(&options.input, &options.output, &st.cancel, &mut |fraction, _| {
+                if fraction >= 1.0 || last.elapsed().as_millis() >= 100 {
+                    last = Instant::now();
+                    broadcast_event(&clients, "job-r3d", JobProgress { id: job.id, fraction, fps: 0.0 });
+                }
+            });
+            match r {
+                Ok(bluecompress::R3dJob::Done(d)) => (Some(ps(&d.output)), None, None),
+                Ok(bluecompress::R3dJob::Skipped(why)) => (None, Some(why), None),
+                Err(_) if st.cancel.load(Ordering::SeqCst) => (None, None, None),
+                Err(e) => (None, None, Some(e.0)),
+            }
+        }
+        _ => (None, None, None),
+    };
     drop(guard);
     match result {
         Ok(o) => {
             let done = JobDone {
                 proxy: proxy.0,
                 proxy_error: proxy.1,
+                r3d: r3d.0,
+                r3d_skipped: r3d.1,
+                r3d_error: r3d.2,
                 id: job.id,
                 skipped: false,
                 output: out_s,
@@ -977,6 +1024,7 @@ fn invoke_command(state: &Arc<ServerState>, cmd: &str, body: &[u8]) -> HttpRespo
                 default_bpp: state.default_bpp,
                 default_resolution: resolution_name(state.default_resolution).into(),
                 default_proxies: state.default_proxies,
+                default_r3d: state.default_r3d,
                 proxy_encoder: bluecompress::proxy::encoder_description(),
                 watch: state.watch_state.lock().unwrap().clone(),
             };
@@ -1409,6 +1457,7 @@ pub fn run_serve(cfg: ServeConfig, cancel: &'static AtomicBool) -> u8 {
         default_resolution: cfg.default_resolution,
         default_backend: cfg.default_backend,
         default_proxies: cfg.default_proxies,
+        default_r3d: cfg.default_r3d,
         threads: cfg.threads,
         running: Arc::new(AtomicBool::new(false)),
         cancel: Arc::new(AtomicBool::new(false)),
