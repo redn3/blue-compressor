@@ -1277,3 +1277,10 @@ html:lang(ko) body { font-family: -apple-system, "Apple SD Gothic Neo", "Malgun 
 html:lang(zh-Hans) body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif; }
 html:lang(zh-Hant) body { font-family: -apple-system, "PingFang TC", "Microsoft JhengHei", "Noto Sans TC", sans-serif; }
 .switch-title, .switch-sub, .field-label, .btn, .job-pill { overflow-wrap: anywhere; hyphens: auto; }
+
+/* Info icon next to a switch title; its text shows in a floating tooltip. */
+.switch-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.info { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; border-radius: 50%; border: 1px solid var(--text-3); color: var(--text-3); font: 600 9.5px/1 Georgia, serif; font-style: italic; cursor: help; user-select: none; }
+.info:hover, .info:focus-visible { color: var(--text); border-color: currentColor; outline: none; }
+.tip { position: fixed; z-index: 1000; padding: 7px 9px; border-radius: 6px; background: #1d2230; color: #e8ecf4; font-size: 11.5px; line-height: 1.4; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35); pointer-events: none; white-space: pre-line; }
+.tip[hidden] { display: none; }

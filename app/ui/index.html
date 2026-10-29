@@ -31,8 +31,7 @@
       <aside class="panel">
         <label class="switch-row" id="same-row">
           <span class="switch-text">
-            <span class="switch-title" data-i18n="Same settings for all clips">Same settings for all clips</span>
-            <span class="switch-sub" id="same-sub" data-i18n="Applies to every clip in the queue">Applies to every clip in the queue</span>
+            <span class="switch-head"><span class="switch-title" data-i18n="Same settings for all clips">Same settings for all clips</span><span class="info" id="same-sub" tabindex="0" role="img" aria-label="Applies to every clip in the queue" data-i18n-aria-label="Applies to every clip in the queue" data-tip-key="Applies to every clip in the queue">i</span></span>
           </span>
           <input type="checkbox" id="same-all" class="switch" checked>
         </label>
@@ -75,44 +74,19 @@
           <div class="field-label" data-i18n="Conversion">Conversion</div>
           <label class="switch-row" id="r3d-row">
             <span class="switch-text">
-              <span class="switch-title" data-i18n="Convert .nev to R3D NE">Convert .nev to R3D NE</span>
-              <span class="switch-sub" id="r3d-sub" data-i18n-html="html.r3d_sub">Acts on .nev clips, into an R3D NE folder next to each output, at the chosen compression and resolution. Log3G10 and REDWideGamutRGB. Always constant bitrate. Nikon ZR; Z8, Z9 and Z6III clips are <span class="badge-exp">Experimental</span>.</span>
-              <span class="switch-note" id="r3d-note" hidden></span>
+              <span class="switch-head"><span class="switch-title" data-i18n="Convert .nev to R3D NE">Convert .nev to R3D NE</span><span class="info" id="r3d-sub" tabindex="0" role="img" aria-label="Acts on .nev clips, into an R3D NE folder next to each output, at the chosen compression and resolution. Log3G10 and REDWideGamutRGB. Always constant bitrate. Writes an exposure .RMD next to each clip: +1 stop for the ZR, +0.5 for other cameras. Nikon ZR; Z8, Z9 and Z6III clips are experimental." data-i18n-aria-label="Acts on .nev clips, into an R3D NE folder next to each output, at the chosen compression and resolution. Log3G10 and REDWideGamutRGB. Always constant bitrate. Writes an exposure .RMD next to each clip: +1 stop for the ZR, +0.5 for other cameras. Nikon ZR; Z8, Z9 and Z6III clips are experimental." data-tip-key="Acts on .nev clips, into an R3D NE folder next to each output, at the chosen compression and resolution. Log3G10 and REDWideGamutRGB. Always constant bitrate. Writes an exposure .RMD next to each clip: +1 stop for the ZR, +0.5 for other cameras. Nikon ZR; Z8, Z9 and Z6III clips are experimental.">i</span></span>
             </span>
             <input type="checkbox" id="r3d" class="switch">
           </label>
           <label class="switch-row" id="to-nev-row">
             <span class="switch-text">
-              <span class="switch-title" data-i18n="Convert .R3D to N-RAW">Convert .R3D to N-RAW</span>
-              <span class="switch-sub" id="to-nev-sub" data-i18n="Acts on .R3D clips: rewraps them back to N-RAW (N-LOG) in an N-RAW folder next to each output.">Acts on .R3D clips: rewraps them back to N-RAW (N-LOG) in an N-RAW folder next to each output.</span>
-              <span class="switch-note" id="to-nev-note" hidden></span>
+              <span class="switch-head"><span class="switch-title" data-i18n="Convert .R3D to N-RAW">Convert .R3D to N-RAW</span><span class="info" id="to-nev-sub" tabindex="0" role="img" aria-label="Acts on .R3D clips: rewraps them back to N-RAW (N-LOG) in an N-RAW folder next to each output." data-i18n-aria-label="Acts on .R3D clips: rewraps them back to N-RAW (N-LOG) in an N-RAW folder next to each output." data-tip-key="Acts on .R3D clips: rewraps them back to N-RAW (N-LOG) in an N-RAW folder next to each output.">i</span></span>
             </span>
             <input type="checkbox" id="to-nev" class="switch">
           </label>
-          <label class="switch-row" id="rmd-row">
-            <span class="switch-text">
-              <span class="switch-title" data-i18n="Exposure sidecar">Exposure sidecar</span>
-              <span class="switch-sub" id="rmd-sub" data-i18n-html="html.rmd_sub">.RMD next to each R3D NE clip: +1 stop for the ZR, +0.5 for other cameras.</span>
-              <span class="switch-note" id="rmd-note" hidden></span>
-            </span>
-            <input type="checkbox" id="rmd" class="switch">
-          </label>
-          <label class="select-row" id="rmd-ev-row" title="Exposure written to the .RMD sidecar" data-i18n-title="Exposure written to the .RMD sidecar">
-            <span class="switch-sub" data-i18n="Exposure">Exposure</span>
-            <select id="rmd-ev">
-              <option value="" data-i18n="Camera default">Camera default</option>
-              <option value="0">0</option>
-              <option value="0.5">+0.5</option>
-              <option value="1">+1</option>
-              <option value="1.5">+1.5</option>
-              <option value="2">+2</option>
-            </select>
-          </label>
           <label class="switch-row" id="rewrap-row">
             <span class="switch-text">
-              <span class="switch-title" data-i18n="Rewrap only">Rewrap only</span>
-              <span class="switch-sub" id="rewrap-sub" data-i18n="No compressed copy: just the conversions above, with the image data copied as it is. About disk speed. Constant bitrate if the source is.">No compressed copy: just the conversions above, with the image data copied as it is. About disk speed. Constant bitrate if the source is.</span>
-              <span class="switch-note" id="rewrap-note" hidden></span>
+              <span class="switch-head"><span class="switch-title" data-i18n="Skip compression (lossless)">Skip compression (lossless)</span><span class="info" id="rewrap-sub" tabindex="0" role="img" aria-label="Converts the format without recompressing, so the image data stays exactly as recorded. No compressed copy is made. About disk speed. Constant bitrate if the source is." data-i18n-aria-label="Converts the format without recompressing, so the image data stays exactly as recorded. No compressed copy is made. About disk speed. Constant bitrate if the source is." data-tip-key="Converts the format without recompressing, so the image data stays exactly as recorded. No compressed copy is made. About disk speed. Constant bitrate if the source is.">i</span></span>
             </span>
             <input type="checkbox" id="rewrap" class="switch">
           </label>
@@ -122,9 +96,7 @@
           <div class="field-label" data-i18n="Bitrate">Bitrate</div>
           <label class="switch-row" id="cbr-row">
             <span class="switch-text">
-              <span class="switch-title" data-i18n="Constant bitrate">Constant bitrate</span>
-              <span class="switch-sub" id="cbr-sub" data-i18n="Every frame the same size in compressed clips (bpp targets; Lossless stays variable). Off: frames use what they need up to the target. R3D NE is always constant; a rewrap is constant if the source is.">Every frame the same size in compressed clips (bpp targets; Lossless stays variable). Off: frames use what they need up to the target. R3D NE is always constant; a rewrap is constant if the source is.</span>
-              <span class="switch-note" id="cbr-note" hidden></span>
+              <span class="switch-head"><span class="switch-title" data-i18n="Constant bitrate">Constant bitrate</span><span class="info" id="cbr-sub" tabindex="0" role="img" aria-label="Every frame the same size in compressed clips (bpp targets; Lossless stays variable). Off: frames use what they need up to the target. R3D NE is always constant; a rewrap is constant if the source is." data-i18n-aria-label="Every frame the same size in compressed clips (bpp targets; Lossless stays variable). Off: frames use what they need up to the target. R3D NE is always constant; a rewrap is constant if the source is." data-tip-key="Every frame the same size in compressed clips (bpp targets; Lossless stays variable). Off: frames use what they need up to the target. R3D NE is always constant; a rewrap is constant if the source is.">i</span></span>
             </span>
             <input type="checkbox" id="cbr" class="switch">
           </label>
@@ -176,8 +148,7 @@
             </div>
             <label class="switch-row watch-clear-row" id="watch-clear-row">
               <span class="switch-text">
-                <span class="switch-title" data-i18n="Clear watch folder after process">Clear watch folder after process</span>
-                <span class="switch-sub" id="watch-clear-sub" data-i18n="Keeps source clips in watch input folder">Keeps source clips in watch input folder</span>
+                <span class="switch-head"><span class="switch-title" data-i18n="Clear watch folder after process">Clear watch folder after process</span><span class="info" id="watch-clear-sub" tabindex="0" role="img" aria-label="Keeps source clips in watch input folder" data-i18n-aria-label="Keeps source clips in watch input folder" data-tip-key="Keeps source clips in watch input folder">i</span></span>
               </span>
               <input type="checkbox" id="watch-clear" class="switch">
             </label>
@@ -188,8 +159,7 @@
           <div class="field-label" data-i18n="Updates">Updates</div>
           <label class="switch-row" id="auto-update-row">
             <span class="switch-text">
-              <span class="switch-title" data-i18n="Check for updates">Check for updates</span>
-              <span class="switch-sub" data-i18n="Once a day. Only asks GitHub for the newest version; nothing about you or your clips is sent.">Once a day. Only asks GitHub for the newest version; nothing about you or your clips is sent.</span>
+              <span class="switch-head"><span class="switch-title" data-i18n="Check for updates">Check for updates</span><span class="info" tabindex="0" role="img" aria-label="Once a day. Only asks GitHub for the newest version; nothing about you or your clips is sent." data-i18n-aria-label="Once a day. Only asks GitHub for the newest version; nothing about you or your clips is sent." data-tip-key="Once a day. Only asks GitHub for the newest version; nothing about you or your clips is sent.">i</span></span>
             </span>
             <input type="checkbox" id="auto-update" class="switch" checked>
           </label>

@@ -148,7 +148,7 @@ function resolvedSpan(list, c = settings.compression) {
   return v.length ? [Math.min(...v), Math.max(...v)] : null;
 }
 const spanText = (sp) => (!sp ? "" : sp[0] === sp[1] ? tr("{0} bpp", bppText(sp[0])) : tr("{0} to {1} bpp", bppText(sp[0]), bppText(sp[1])));
-const settingOf = (j) => ({ compression: compOf(j), resolution: resolutionOf(j), r3d: !!settings.r3d && isNev(j), cbr: !!settings.cbr, toNev: !!settings.toNev && isR3d(j), rewrap: !!settings.rewrap, rmd: settings.rmd !== false, rmdEv: settings.rmdEv ?? null });
+const settingOf = (j) => ({ compression: compOf(j), resolution: resolutionOf(j), r3d: !!settings.r3d && isNev(j), cbr: !!settings.cbr, toNev: !!settings.toNev && isR3d(j), rewrap: !!settings.rewrap, rmd: true, rmdEv: null });
 // The R3D NE toggle only acts on .nev clips, the N-RAW one on .R3D clips.
 function isR3d(j) { return /\.r3d$/i.test((j && j.path) || ""); }
 function isNev(j) { return /\.nev$/i.test((j && j.path) || ""); }
@@ -258,9 +258,9 @@ function renderSettings() {
   document.body.classList.toggle("per-clip", !settings.sameForAll);
   $("same-all").checked = settings.sameForAll;
   $("same-all").disabled = running;
-  $("same-sub").textContent = settings.sameForAll
+  setTip("same-sub", settings.sameForAll
     ? tr("Applies to every clip in the queue")
-    : tr("Each clip keeps its own settings");
+    : tr("Each clip keeps its own settings"));
   $("label-resolution").textContent = settings.sameForAll ? tr("Resolution") : tr("Default resolution");
   $("resolution-note").textContent = RESOLUTION_NOTES[settings.resolution];
   renderCompression();
@@ -672,7 +672,7 @@ function updateCard(j) {
   el.title = j.ok ? tr("{0}\nClick to preview the quality", j.path) : j.path;
 
   const pill = el.querySelector(".job-pill");
-  const pills = { waiting: tr("Waiting"), running: j.ran && j.ran.rewrap ? tr("Rewrap") : j.r3dPhase ? (isNev(j) ? tr("R3D NE") : "N-RAW") : tr("Compressing"), done: tr("Done"), failed: tr("Failed"), cancelled: tr("Cancelled") };
+  const pills = { waiting: tr("Waiting"), running: j.ran && j.ran.rewrap ? tr("Converting") : j.r3dPhase ? (isNev(j) ? tr("R3D NE") : "N-RAW") : tr("Compressing"), done: tr("Done"), failed: tr("Failed"), cancelled: tr("Cancelled") };
   const skipped = j.state === "done" && j.result && j.result.skipped;
   pill.textContent = j.state === "failed" && !j.ok ? tr("Unreadable") : isPaused ? tr("Paused") : skipped || already ? tr("Already done") : pills[j.state];
   pill.className = `job-pill ${isPaused ? "paused" : already ? "done" : j.state}`;
@@ -1001,8 +1001,8 @@ const jobRequest = (j) => ({
   cbr: !!(j.ran && j.ran.cbr),
   to_nev: !!(j.ran && j.ran.toNev),
   rewrap: !!(j.ran && j.ran.rewrap),
-  rmd: !(j.ran && j.ran.rmd === false),
-  rmd_ev: (j.ran && j.ran.rmdEv) ?? null,
+  rmd: true,
+  rmd_ev: null,
   clip: { name: j.name, codec: j.codec, width: j.width, height: j.height, frames: j.frames, fps: j.fps, bytes: j.bytes, bpp: j.bpp },
   existing: j.alreadyRef || null,
 });
@@ -1207,9 +1207,9 @@ function renderWatch(w) {
   if ($("watch-resolution")) setSeg("watch-resolution", res, null);
   if ($("watch-clear")) {
     $("watch-clear").checked = !!w.clearAfterProcess;
-    $("watch-clear-sub").textContent = w.clearAfterProcess
+    setTip("watch-clear-sub", w.clearAfterProcess
       ? tr("Deletes source clip after compression succeeds")
-      : tr("Keeps source clips in watch input folder");
+      : tr("Keeps source clips in watch input folder"));
   }
   $("watch-dirs").textContent = `${w.inputDir} → ${w.outputDir}`;
   $("watch-dirs").title = tr("Input: {0}\nOutput: {1}", w.inputDir, w.outputDir);
@@ -1919,7 +1919,6 @@ async function init() {
       if (info.defaultCbr) settings.cbr = true;
       if (info.defaultToNev) settings.toNev = true;
       if (info.defaultRewrap) settings.rewrap = true;
-      if (info.defaultRmd === false) settings.rmd = false;
     }
     if ($("watch-clear")) {
       $("watch-clear").addEventListener("change", (e) => {
@@ -2035,6 +2034,7 @@ async function init() {
   await restoreQueue();
   renderAll();
   addPaths(await api.invoke("initial_paths"));
+  initTips();
   initR3d();
   initCbr();
   initUpdates();
@@ -2148,32 +2148,60 @@ async function installUpdate() {
   }
 }
 
-// One switch row: checked state from settings, disabled with a short note when it does not
-// apply. The setting itself is kept, so it comes back when the row applies again.
-function setRow(id, disabled, note) {
-  const row = $(`${id}-row`), box = $(id), el = $(`${id}-note`);
-  if (row) row.classList.toggle("dim", !!disabled);
-  if (box) box.disabled = !!disabled || running;
-  if (el) { el.hidden = !note; el.textContent = note || ""; }
+// Text of an info icon's tooltip (also its accessible label).
+function setTip(id, text) {
+  const el = $(id);
+  if (el) el.setAttribute("aria-label", text);
 }
 
-// Disabled states and notes of the conversion and bitrate rows, from the settings
-// and the clips in the queue.
+// One floating tooltip for every info icon, on hover and on keyboard focus.
+function initTips() {
+  const tip = document.createElement("div");
+  tip.className = "tip";
+  tip.hidden = true;
+  document.body.appendChild(tip);
+  const show = (e) => {
+    const el = e.target.closest && e.target.closest(".info");
+    if (!el) return;
+    tip.textContent = el.getAttribute("aria-label") || "";
+    tip.hidden = false;
+    const r = el.getBoundingClientRect();
+    const w = Math.min(280, window.innerWidth - 16);
+    tip.style.maxWidth = `${w}px`;
+    const left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8));
+    tip.style.left = `${left}px`;
+    const below = r.bottom + 6 + tip.offsetHeight < window.innerHeight;
+    tip.style.top = `${below ? r.bottom + 6 : r.top - 6 - tip.offsetHeight}px`;
+  };
+  const hide = (e) => { if (e.target.closest && e.target.closest(".info")) tip.hidden = true; };
+  document.addEventListener("mouseover", show);
+  document.addEventListener("focusin", show);
+  document.addEventListener("mouseout", hide);
+  document.addEventListener("focusout", hide);
+  // Clicking the icon must not flip the switch it sits in.
+  document.addEventListener("click", (e) => { if (e.target.closest && e.target.closest(".info")) e.preventDefault(); }, true);
+}
+
+// One switch row: dimmed and disabled when it does not apply, with the reason added to its
+// tooltip. The setting itself is kept, so it comes back when the row applies again.
+function setRow(id, disabled, note) {
+  const row = $(`${id}-row`), box = $(id), info = $(`${id}-sub`);
+  if (row) row.classList.toggle("dim", !!disabled);
+  if (box) box.disabled = !!disabled || running;
+  if (info) setTip(`${id}-sub`, [tr(info.dataset.tipKey || ""), note].filter(Boolean).join(" "));
+}
+
+// Disabled states and notes of the conversion and bitrate rows, from the settings and the
+// clips in the queue.
 function syncOptionRows() {
   if (!$("r3d")) return;
   const nev = jobs.some(isNev), r3d = jobs.some(isR3d), any = jobs.length > 0;
   setRow("r3d", false, any && !nev ? tr("No .nev clips in the queue.") : "");
   setRow("to-nev", false, any && !r3d ? tr("No .R3D clips in the queue.") : "");
-  const sidecar = !!settings.r3d;
-  setRow("rmd", !sidecar, sidecar ? "" : tr("Turn on Convert .nev to R3D NE to write it."));
-  const ev = $("rmd-ev"), evRow = $("rmd-ev-row");
-  const evOff = !sidecar || settings.rmd === false;
-  if (ev) ev.disabled = evOff || running;
-  if (evRow) evRow.classList.toggle("dim", evOff);
   const conv = !!settings.r3d || !!settings.toNev;
   setRow("rewrap", !conv, conv ? "" : tr("Turn on a conversion above to use it."));
-  const rewrapOnly = conv && !!settings.rewrap;
-  setRow("cbr", rewrapOnly, rewrapOnly ? tr("Rewrap only keeps the source bitrate.") : "");
+  const skip = conv && !!settings.rewrap;
+  setRow("cbr", skip, skip ? tr("Skip compression keeps the source bitrate.") : "");
 }
 
 function initCbr() {
@@ -2188,19 +2216,14 @@ function initCbr() {
 }
 
 function initR3d() {
-  const toggles = [["r3d", "r3d", false], ["to-nev", "toNev", false], ["rewrap", "rewrap", false], ["rmd", "rmd", true]];
-  const ev = $("rmd-ev");
-  if (ev) {
-    ev.value = settings.rmdEv == null ? "" : String(settings.rmdEv);
-    ev.addEventListener("change", () => {
-      settings.rmdEv = ev.value === "" ? null : Number(ev.value);
-      saveSettings();
-    });
-  }
-  for (const [id, key, dflt] of toggles) {
+  // The exposure .RMD is always written next to R3D NE outputs (camera default exposure).
+  settings.rmd = true;
+  settings.rmdEv = null;
+  const toggles = [["r3d", "r3d"], ["to-nev", "toNev"], ["rewrap", "rewrap"]];
+  for (const [id, key] of toggles) {
     const box = $(id);
     if (!box) continue;
-    box.checked = settings[key] === undefined ? dflt : !!settings[key];
+    box.checked = !!settings[key];
     box.addEventListener("change", () => {
       settings[key] = box.checked;
       saveSettings();
@@ -2345,7 +2368,7 @@ function browserStandIn() {
     onDragDrop: () => {},
     invoke: async (cmd, a) => {
       switch (cmd) {
-        case "app_info": return { version: "0.2.0", gpu: "Metal: Apple GPU", cpu: "CPU (12 threads)", platform: "macos" };
+        case "app_info": return { version: "0.2.3", gpu: "Metal: Apple GPU", cpu: "CPU (12 threads)", platform: "macos" };
         case "is_running": return false;
         case "initial_paths": return location.hash === "#demo" ? ["demo"] : [];
         case "scan": return sample.map(([path, codec, width, height, frames, bytes], i) => ({
@@ -2373,8 +2396,8 @@ function browserStandIn() {
         // Demo of the update prompt (?update) and of the Docker banner (?docker).
         case "update_check": return DEMO_PARAMS.has("update") ? DEMO_UPDATE : null;
         case "update_status": return DEMO_PARAMS.has("docker")
-          ? { enabled: true, current: "0.2.0", latest: "0.2.1", available: true, url: "https://github.com/redn3/blue-compressor/releases/tag/v0.2.1", notes: DEMO_UPDATE.notes, checked: 0 }
-          : { enabled: true, current: "0.2.0", available: false };
+          ? { enabled: true, current: "0.2.3", latest: "0.2.4", available: true, url: "https://github.com/redn3/blue-compressor/releases/tag/v0.2.1", notes: DEMO_UPDATE.notes, checked: 0 }
+          : { enabled: true, current: "0.2.3", available: false };
         case "update_install": {
           const total = 9.4e6;
           for (let got = 0; got <= total; got += total / 25) { await new Promise((r) => setTimeout(r, 60)); emit("update-progress", [got, total]); }
@@ -2412,7 +2435,7 @@ function browserStandIn() {
 
 const DEMO_PARAMS = new URLSearchParams(location.search);
 const DEMO_UPDATE = {
-  version: "0.2.1", current: "0.2.0", can_install: true, test: false, date: null,
+  version: "0.2.4", current: "0.2.3", can_install: true, test: false, date: null,
   page: "https://github.com/redn3/blue-compressor/releases/tag/v0.2.1",
   notes: "What's new in 0.2.1\n- Example notes for the demo update prompt.\n- Faster scanning of large folders.",
 };

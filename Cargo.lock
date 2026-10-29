@@ -303,7 +303,7 @@ dependencies = [
 
 [[package]]
 name = "blue-compressor-app"
-version = "0.2.0"
+version = "0.2.3"
 dependencies = [
  "bluecompress",
  "serde",
@@ -317,7 +317,7 @@ dependencies = [
 
 [[package]]
 name = "bluecompress"
-version = "0.2.0"
+version = "0.2.3"
 dependencies = [
  "cudarc",
  "objc2",
@@ -329,7 +329,7 @@ dependencies = [
 
 [[package]]
 name = "bluecompress-cli"
-version = "0.2.0"
+version = "0.2.3"
 dependencies = [
  "bluecompress",
  "ctrlc",

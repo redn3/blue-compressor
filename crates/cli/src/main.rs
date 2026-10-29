@@ -188,7 +188,7 @@ struct Cli {
     r3d: Option<bool>,
     /// --cbr / --no-cbr; None reads CBR (watch: WATCH_CBR first).
     cbr: Option<bool>,
-    /// --to-nev, --rewrap, --no-rmd; None reads NEV, REWRAP, RMD (watch: WATCH_ first).
+    /// --to-nev, --rewrap, --no-rmd (hidden); None reads NEV, REWRAP, RMD (watch: WATCH_ first).
     to_nev: Option<bool>,
     rewrap: Option<bool>,
     rmd: Option<bool>,
@@ -239,11 +239,9 @@ options:
                           clips are experimental. Default: R3D, else off
       --to-nev            also rewrap each .R3D (R3D NE) back to N-RAW in N-RAW/<name>.NEV
                           next to its output. Default: NEV, else off
-      --rewrap            rewrap only: no compressed copy, just the R3D NE / N-RAW
-                          conversions above, copying the image data unchanged (about disk
-                          speed). Default: REWRAP, else off
-      --no-rmd            no exposure sidecar (.RMD, +1 stop for the ZR, +0.5 for other
-                          cameras) next to R3D NE outputs. Default: RMD, else on
+      --rewrap            skip compression (lossless): no compressed copy, just the R3D NE /
+                          N-RAW conversions above, copying the image data exactly as
+                          recorded (about disk speed). Default: REWRAP, else off
       --json              JSON lines on stdout (start, progress, done, skipped, error, summary)
       --quiet             no progress on stderr
 

@@ -157,7 +157,7 @@ patrol_taking_9j (RdWing), licensed under
 
 **Constant bitrate** (or `--cbr`, or `CBR` / `WATCH_CBR` in Docker) applies to every
 output. The toggle is always shown in the settings panel, under the conversion options;
-with **Rewrap only** it is dimmed, since a rewrap keeps the source's frame sizes:
+with **Skip compression (lossless)** it is dimmed, since a rewrap keeps the source's frame sizes:
 
 - **Compressed clips:** with a bpp target, every frame is padded to exactly the frame
   budget, so all frames are the same size, as the cameras write them. Off (the default
@@ -189,16 +189,16 @@ metadata, the camera matrix and a few constants. The image data is copied as it 
   rewraps them back to N-RAW (`N-RAW/<clip name>.NEV`): NRAW codec, N-LOG, the N-RAW
   constants and matrix, and the RED blocks cleared. A round trip, N-RAW to R3D NE and
   back, gives identical image data.
-- **Rewrap only** (or `--rewrap`, `REWRAP`) skips the compressed copy: each job only
-  does the conversions above, as a streaming copy with no decoding, at about disk speed
+- **Skip compression (lossless)** (or `--rewrap`, `REWRAP`) converts the format without
+  recompressing, so the image data stays exactly as recorded: each job only does the
+  conversions above, as a streaming copy with no decoding, at about disk speed
   (under a second for a 650 MB clip on an SSD). Not available for the watch folder.
-- **Exposure sidecar** (on by default; `--no-rmd`, `RMD=false`): R3D NE records about one
-  stop brighter than N-RAW at the same ISO. The ISO tag is left as it is; instead an `.RMD`
-  sidecar next to the `.R3D` asks RED decoders for +1 stop of exposure on ZR clips (+0.5
-  for other cameras, a first guess). Choose another value in the app, or with `--rmd-ev`
-  or `RMD_EV`. The sidecar layout follows the public outline of
-  the format (an XML `REDXIF` document); its element names are not verified against
-  real RED software yet, so check that your decoder picks it up.
+- **Exposure sidecar:** R3D NE records about one stop brighter than N-RAW at the same ISO.
+  The ISO tag is left as it is; instead every R3D NE output gets an `.RMD` sidecar next to
+  the `.R3D` that asks RED decoders for +1 stop of exposure on ZR clips (+0.5 for the Z8,
+  Z9 and Z6III, a first guess). The sidecar layout follows the public outline of the format
+  (an XML `REDXIF` document); its element names are not verified against real RED software
+  yet, so check that your decoder picks it up.
 
 **Experimental: Z8, Z9 and Z6III.** These cameras never record R3D NE, so their clips
 also get the RED metadata the ZR writes (clip block, exposure block, gamma and gamut) and
@@ -413,9 +413,7 @@ services:
 | `R3D` | `false` | Set to `true` to turn on **Convert .nev to R3D NE** for new Web UI jobs (see R3D NE and N-RAW above). |
 | `WATCH_R3D` | `false` | Set to `true` to also convert every watch-folder `.nev` to R3D NE. A failed conversion keeps the source even with `WATCH_CLEAR`. |
 | `NEV` / `WATCH_NEV` | `false` | Set to `true` to turn on **Convert .R3D to N-RAW** for Web UI jobs / the watch folder (see R3D NE and N-RAW above). |
-| `REWRAP` | `false` | Set to `true` to turn on **Rewrap only** for new Web UI jobs. |
-| `RMD` / `WATCH_RMD` | `true` | Set to `false` for no exposure `.RMD` sidecar next to R3D NE outputs. |
-| `RMD_EV` / `WATCH_RMD_EV` | | Exposure in the `.RMD` in stops (-4 to 4) instead of +1 (ZR) or +0.5 (other cameras). |
+| `REWRAP` | `false` | Set to `true` to turn on **Skip compression (lossless)** for new Web UI jobs. |
 | `UPDATE_CHECK` | `true` | Set to `false` to stop the update check (an anonymous request to the GitHub releases API at start and every 12 hours; the Web UI then shows no update banner). |
 
 ### Updating the container

@@ -31,11 +31,9 @@ services:
       # true also rewraps every .R3D (R3D NE) back to N-RAW in an "N-RAW" folder:
       - NEV=false
       - WATCH_NEV=false
-      # true makes Web UI jobs rewrap only (no compressed copy, image data copied):
+      # true turns on Skip compression (lossless) for Web UI jobs (format conversion only,
+      # image data exactly as recorded):
       - REWRAP=false
-      # false: no exposure .RMD sidecar (+1 stop on the ZR) next to R3D NE outputs:
-      - RMD=true
-      - WATCH_RMD=true
       # true pads every compressed frame to the bpp budget (all frames the same size);
       # R3D NE is always constant. CBR sets the
       # Web UI toggle's default, WATCH_CBR the watch folder:
