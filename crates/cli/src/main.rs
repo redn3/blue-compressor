@@ -951,6 +951,7 @@ fn serve_cmd(o: &Cli) -> u8 {
         default_rewrap: env_convert(o, false).rewrap,
         default_rmd: env_convert(o, false).rmd,
         default_cbr: env_cbr(o.cbr, false),
+        template: o.template.clone().or_else(|| env_nonempty("TEMPLATE")).map(PathBuf::from),
         threads: o.threads,
         watch: watch_cfg,
     };
@@ -1703,7 +1704,6 @@ mod tests {
                 clear_watch: None,
                 suffix: String::new(),
                 template: None,
-                template: None,
                 json: false,
                 quiet: true,
                 overwrite: false,
@@ -1865,6 +1865,7 @@ mod tests {
             default_rewrap: false,
             default_rmd: true,
             default_cbr: false,
+            template: None,
             threads: 2,
             watch: Some(watch::WatchConfig {
                 input_dir: watch_in.clone(),

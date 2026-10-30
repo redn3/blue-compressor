@@ -352,3 +352,46 @@ fn refuses_non_nikon() {
     assert!(r3d::check(&src).unwrap_err().0.contains("Nikon"));
     let _ = std::fs::remove_dir_all(d);
 }
+
+/// The ProRes RAW writer's container step: a template's moov with another clip's frame
+/// count, timing and media (here a second synthetic clip stands in for the ProRes RAW one).
+#[test]
+fn template_moov_takes_the_source_timing() {
+    let d = dir("template");
+    let (tp, sp, op) = (d.join("T.NEV"), d.join("S.NEV"), d.join("O.NEV"));
+    synthetic_nev(&tp, 1, "NIKON ZR", 3);
+    let src_cs = synthetic_nev(&sp, 1, "NIKON ZR", 5);
+    let (ti, si) = (InputFile::open(&tp).unwrap(), InputFile::open(&sp).unwrap());
+    let (tm, sm) = (Movie::parse(&ti).unwrap(), Movie::parse(&si).unwrap());
+    assert_eq!(bluecompress::bmff::track_pairs(&tm, &sm), vec![(0, 0)]);
+    let tmp = d.join("O.partial");
+    let mut w = bluecompress::bmff::RawWriter::create(&tmp, &ti, &tm, &sm).unwrap();
+    let v = sm.video();
+    let mut offs = vec![vec![0u64; v.chunks.len()]];
+    let mut sizes = Vec::new();
+    for (c, ch) in v.chunks.iter().enumerate() {
+        offs[0][c] = w.pos();
+        for s in ch.first_sample..ch.first_sample + ch.samples {
+            let smp = v.samples[s as usize];
+            w.copy_from(&si, smp.offset, smp.size as u64).unwrap();
+            sizes.push(smp.size);
+        }
+    }
+    let udta = {
+        let mm = &sm.moov;
+        let at = mm.windows(4).position(|x| x == b"udta").unwrap() - 4;
+        let n = u32::from_be_bytes(mm[at..at + 4].try_into().unwrap()) as usize;
+        mm[at..at + n].to_vec()
+    };
+    let moov =
+        bluecompress::bmff::moov_from_template(&tm, &sm, &sizes, &offs, &udta, bluecompress::bmff::fourcc(b"NRAW"))
+            .unwrap();
+    w.finish(&moov, &op).unwrap();
+    assert!(!tmp.exists());
+    let info = bluecompress::probe(&op).unwrap();
+    assert_eq!((info.frames, info.width, info.height), (5, 6060, 3410));
+    assert!((info.fps - 25.0).abs() < 1e-9);
+    assert_eq!(codestreams(&op), src_cs);
+    assert_eq!(tags_of(&op).get(&0x13).unwrap()[3], 5);
+    let _ = std::fs::remove_dir_all(&d);
+}

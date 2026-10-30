@@ -148,10 +148,13 @@ function resolvedSpan(list, c = settings.compression) {
   return v.length ? [Math.min(...v), Math.max(...v)] : null;
 }
 const spanText = (sp) => (!sp ? "" : sp[0] === sp[1] ? tr("{0} bpp", bppText(sp[0])) : tr("{0} to {1} bpp", bppText(sp[0]), bppText(sp[1])));
-const settingOf = (j) => ({ compression: compOf(j), resolution: resolutionOf(j), r3d: !!settings.r3d && isNev(j), cbr: !!settings.cbr, toNev: !!settings.toNev && isR3d(j), rewrap: !!settings.rewrap, rmd: true, rmdEv: null });
+const settingOf = (j) => ({ compression: compOf(j), resolution: resolutionOf(j), r3d: !!settings.r3d && becomesNev(j), cbr: !!settings.cbr, toNev: !!settings.toNev && isR3d(j), rewrap: !!settings.rewrap, rmd: true, rmdEv: null });
 // The R3D NE toggle only acts on .nev clips, the N-RAW one on .R3D clips.
 function isR3d(j) { return /\.r3d$/i.test((j && j.path) || ""); }
 function isNev(j) { return /\.nev$/i.test((j && j.path) || ""); }
+// ProRes RAW (.mov) clips are re-encoded to N-RAW, so they take the R3D NE toggle too.
+function isPrr(j) { return /\.mov$/i.test((j && j.path) || "") || (j && j.codec === "ProRes RAW"); }
+function becomesNev(j) { return isNev(j) || isPrr(j); }
 const ranComp = (j) => (j.ran ? j.ran.compression : compOf(j));
 // Key of a setting for measured size ratios.
 const measureKey = (path, c, r) => `${path}|${String(c)}|${r}`;
@@ -688,7 +691,7 @@ function updateCard(j) {
   el.title = j.ok ? tr("{0}\nClick to preview the quality", j.path) : j.path;
 
   const pill = el.querySelector(".job-pill");
-  const pills = { waiting: tr("Waiting"), running: j.ran && j.ran.rewrap ? tr("Converting") : j.r3dPhase ? (isNev(j) ? tr("R3D NE") : "N-RAW") : tr("Compressing"), done: tr("Done"), failed: tr("Failed"), cancelled: tr("Cancelled") };
+  const pills = { waiting: tr("Waiting"), running: j.ran && j.ran.rewrap ? tr("Converting") : j.r3dPhase ? (becomesNev(j) ? tr("R3D NE") : "N-RAW") : tr("Compressing"), done: tr("Done"), failed: tr("Failed"), cancelled: tr("Cancelled") };
   const skipped = j.state === "done" && j.result && j.result.skipped;
   pill.textContent = j.state === "failed" && !j.ok ? tr("Unreadable") : isPaused ? tr("Paused") : skipped || already ? tr("Already done") : pills[j.state];
   pill.className = `job-pill ${isPaused ? "paused" : already ? "done" : j.state}`;
@@ -705,6 +708,7 @@ function updateCard(j) {
     if (t && (t[0] !== j.width || t[1] !== j.height)) html += `${sep}<span class="target">→ ${t[0]} × ${t[1]}</span>`;
     else if (t && j.state === "waiting") html += sep + tr("stays at this size");
     if (j.bpp > 0) html += `${sep}<span class="job-bpp">${esc(bppFlow(j))}</span>`;
+    if (isPrr(j)) html += `${sep}<span class="job-prr" title="${esc(tr("ProRes RAW is decoded and coded again as N-RAW (and R3D NE when that is on), written into a clip from the same camera as a template. This is not lossless: Lossless codes at the clip's own bits per pixel."))}">${esc(tr("ProRes RAW, re-encoded (not lossless)"))}</span>`;
     if (j.rmdEv != null) html += `${sep}<span title="${esc(tr("Exposure offset from the clip's .RMD sidecar"))}">${esc(tr("RMD {0} EV", (j.rmdEv >= 0 ? "+" : "") + num(j.rmdEv, 1, 2)))}</span>`;
     meta.innerHTML = html;
   }
@@ -726,8 +730,8 @@ function updateCard(j) {
       info.innerHTML = `${esc(settingLabel(j.ran.compression, j.ran.resolution))}<span class="sep">·</span>` +
         `<span class="job-out" title="${esc(j.output || "")}">${esc(folder)}/</span>`;
       const r = j.result || {};
-      if (r.r3d) info.innerHTML += `<span class="sep">·</span><span class="job-out" title="${esc(r.r3d)}">${isNev(j) ? "R3D NE" : "N-RAW"}</span>`;
-      else if (r.r3dError) info.innerHTML += `<span class="sep">·</span><span class="job-proxy-error" title="${esc(r.r3dError)}">${tr("{0} failed", isNev(j) ? "R3D NE" : "N-RAW")}</span>`;
+      if (r.r3d) info.innerHTML += `<span class="sep">·</span><span class="job-out" title="${esc(r.r3d)}">${becomesNev(j) ? "R3D NE" : "N-RAW"}</span>`;
+      else if (r.r3dError) info.innerHTML += `<span class="sep">·</span><span class="job-proxy-error" title="${esc(r.r3dError)}">${tr("{0} failed", becomesNev(j) ? "R3D NE" : "N-RAW")}</span>`;
       else if (r.r3dSkipped) info.innerHTML += `<span class="sep">·</span><span class="job-r3d-skipped" title="${esc(r.r3dSkipped)}">${tr("Not converted")}</span>`;
     } else {
       info.textContent = j.ran ? settingLabel(j.ran.compression, j.ran.resolution) : "";
@@ -2291,7 +2295,7 @@ function setRow(id, disabled, note) {
 // clips in the queue.
 function syncOptionRows() {
   if (!$("r3d")) return;
-  const nev = jobs.some(isNev), r3d = jobs.some(isR3d), any = jobs.length > 0;
+  const nev = jobs.some(becomesNev), r3d = jobs.some(isR3d), any = jobs.length > 0;
   setRow("r3d", false, any && !nev ? tr("No .nev clips in the queue.") : "");
   setRow("to-nev", false, any && !r3d ? tr("No .R3D clips in the queue.") : "");
   const conv = !!settings.r3d || !!settings.toNev;

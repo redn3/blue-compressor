@@ -45,6 +45,8 @@ pub struct ServeConfig {
     pub default_rmd: bool,
     /// Constant bitrate toggle for new clips (CBR or --cbr).
     pub default_cbr: bool,
+    /// Template for ProRes RAW clips (--template or TEMPLATE); None picks one per clip.
+    pub template: Option<PathBuf>,
     pub threads: usize,
     pub watch: Option<WatchConfig>,
 }
@@ -60,6 +62,7 @@ struct ServerState {
     default_rewrap: bool,
     default_rmd: bool,
     default_cbr: bool,
+    template: Option<PathBuf>,
     threads: usize,
     running: Arc<AtomicBool>,
     cancel: Arc<AtomicBool>,
@@ -925,7 +928,7 @@ fn run_job(st: &Arc<ServerState>, job: &QueueJob, settings: &Settings) {
         backend,
         threads: st.threads,
         cbr: job.cbr,
-        template: None,
+        template: st.template.clone(),
     };
     let mut last = Instant::now() - Duration::from_secs(1);
     let clients = st.sse_clients.clone();
@@ -1539,6 +1542,7 @@ pub fn run_serve(cfg: ServeConfig, cancel: &'static AtomicBool) -> u8 {
         default_rewrap: cfg.default_rewrap,
         default_rmd: cfg.default_rmd,
         default_cbr: cfg.default_cbr,
+        template: cfg.template.clone(),
         threads: cfg.threads,
         running: Arc::new(AtomicBool::new(false)),
         cancel: Arc::new(AtomicBool::new(false)),

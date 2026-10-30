@@ -208,6 +208,23 @@ the ZR camera matrix. The Z6III shares the ZR's sensor, so its matrix should be 
 the Z8 and Z9 it is an approximation and colours may be off. This has only been tested on
 synthetic clips so far and needs checking with real ones. The app marks it Experimental.
 
+### ProRes RAW input (not lossless)
+
+Nikon ProRes RAW clips (`.MOV`) can be added like any other clip. They are decoded to the
+raw Bayer mosaic (ffmpeg 8 or later, which the macOS app bundles), mapped to N-RAW sensor
+values and coded again with the TICO RAW encoder, so this is **not lossless**: the setting
+picks the size (Lossless codes at the clip's own bits per pixel). The output is an N-RAW
+`.NEV` with the same name, and **Convert .nev to R3D NE** also gives the R3D NE.
+
+The output is written into a template: a `.NEV` or `.R3D` recorded by the same camera at
+the same frame size. By default one is picked from the clip's folder, the folder above and
+their subfolders; `--template <clip>` (or `TEMPLATE` in Docker) sets it. The template gives
+the codec layout, frame header and TICO RAW picture header; the ProRes RAW clip gives the
+image, frame count and rate, audio and timecode (copied as they are) and its own camera
+metadata. Nikon writes ProRes RAW at twice the scale of its N-RAW values above black; the
+conversion was checked against a same-scene R3D NE from a ZR (median levels per colour
+within 1 raw unit).
+
 ## Develop
 
 The Develop tab is a quick turnaround with basic tools for developing your digital negatives (the RAW files). It is not for full grading.
@@ -427,6 +444,7 @@ services:
 | `R3D` | `false` | Set to `true` to turn on **Convert .nev to R3D NE** for new Web UI jobs (see R3D NE and N-RAW above). |
 | `WATCH_R3D` | `false` | Set to `true` to also convert every watch-folder `.nev` to R3D NE. A failed conversion keeps the source even with `WATCH_CLEAR`. |
 | `NEV` / `WATCH_NEV` | `false` | Set to `true` to turn on **Convert .R3D to N-RAW** for Web UI jobs / the watch folder (see R3D NE and N-RAW above). |
+| `TEMPLATE` | none | Same-camera `.NEV` or `.R3D` to write ProRes RAW clips into (see ProRes RAW input above); by default one is found next to each clip. Needs an ffmpeg with the ProRes RAW decoder (8 or later). |
 | `REWRAP` | `false` | Set to `true` to turn on **Skip compression (lossless)** for new Web UI jobs. |
 | `UPDATE_CHECK` | `true` | Set to `false` to stop the update check (an anonymous request to the GitHub releases API at start and every 12 hours; the Web UI then shows no update banner). |
 

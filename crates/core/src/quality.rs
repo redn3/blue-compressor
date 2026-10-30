@@ -195,6 +195,11 @@ pub struct Geometry {
 /// cannot be read the whole video samples (headers included) are counted instead, and a
 /// note says so on stderr.
 pub fn source_codestream_bytes(input: &InputFile, m: &Movie) -> (u64, bool) {
+    let v = m.video();
+    if [b"aprh", b"aprn"].iter().any(|c| v.codec == crate::bmff::fourcc(c)) {
+        // ProRes RAW: the whole frames (their headers are a few dozen bytes).
+        return (v.samples.iter().map(|s| s.size as u64).sum(), true);
+    }
     match crate::nraw::codestream_bytes(input, m) {
         Ok(b) => (b, true),
         Err(e) => {

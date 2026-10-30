@@ -5,6 +5,8 @@
 "use strict";
 window.BC_LOCALES = {
   "en": {
+    "ProRes RAW, re-encoded (not lossless)": "ProRes RAW, re-encoded (not lossless)",
+    "ProRes RAW is decoded and coded again as N-RAW (and R3D NE when that is on), written into a clip from the same camera as a template. This is not lossless: Lossless codes at the clip's own bits per pixel.": "ProRes RAW is decoded and coded again as N-RAW (and R3D NE when that is on), written into a clip from the same camera as a template. This is not lossless: Lossless codes at the clip's own bits per pixel.",
     "Lossless": "Lossless",
     "Identical picture, files only a little smaller.": "Identical picture, files only a little smaller.",
     "Light": "Light",
@@ -406,6 +408,8 @@ window.BC_LOCALES = {
     "Starts at {0} from the sidecar {1}.": "Starts at {0} from the sidecar {1}.",
   },
   "sv": {
+    "ProRes RAW, re-encoded (not lossless)": "ProRes RAW, omkodad (inte förlustfri)",
+    "ProRes RAW is decoded and coded again as N-RAW (and R3D NE when that is on), written into a clip from the same camera as a template. This is not lossless: Lossless codes at the clip's own bits per pixel.": "ProRes RAW avkodas och kodas om till N-RAW (och R3D NE när det är på), skrivet i ett klipp från samma kamera som mall. Det här är inte förlustfritt: Förlustfri kodar med klippets egna bitar per pixel.",
     "Lossless": "Förlustfri",
     "Identical picture, files only a little smaller.": "Identisk bild, filerna blir bara lite mindre.",
     "Light": "Lätt",
@@ -807,6 +811,8 @@ window.BC_LOCALES = {
     "Starts at {0} from the sidecar {1}.": "Börjar på {0} från sidofilen {1}.",
   },
   "de": {
+    "ProRes RAW, re-encoded (not lossless)": "ProRes RAW, neu kodiert (nicht verlustfrei)",
+    "ProRes RAW is decoded and coded again as N-RAW (and R3D NE when that is on), written into a clip from the same camera as a template. This is not lossless: Lossless codes at the clip's own bits per pixel.": "ProRes RAW wird dekodiert und neu als N-RAW kodiert (und als R3D NE, wenn aktiviert), in einen Clip derselben Kamera als Vorlage geschrieben. Das ist nicht verlustfrei: Verlustfrei kodiert mit den eigenen Bits pro Pixel des Clips.",
     "Lossless": "Verlustfrei",
     "Identical picture, files only a little smaller.": "Identisches Bild, Dateien nur etwas kleiner.",
     "Light": "Leicht",
@@ -1208,6 +1214,8 @@ window.BC_LOCALES = {
     "Starts at {0} from the sidecar {1}.": "Beginnt bei {0} aus der Begleitdatei {1}.",
   },
   "fr": {
+    "ProRes RAW, re-encoded (not lossless)": "ProRes RAW, réencodé (avec perte)",
+    "ProRes RAW is decoded and coded again as N-RAW (and R3D NE when that is on), written into a clip from the same camera as a template. This is not lossless: Lossless codes at the clip's own bits per pixel.": "Le ProRes RAW est décodé puis réencodé en N-RAW (et en R3D NE si activé), écrit dans un clip de la même caméra servant de modèle. Ce n'est pas sans perte : Sans perte encode aux bits par pixel du clip.",
     "Lossless": "Sans perte",
     "Identical picture, files only a little smaller.": "Image identique, fichiers à peine plus petits.",
     "Light": "Légère",
@@ -1609,6 +1617,8 @@ window.BC_LOCALES = {
     "Starts at {0} from the sidecar {1}.": "Commence à {0} d'après le fichier annexe {1}.",
   },
   "es": {
+    "ProRes RAW, re-encoded (not lossless)": "ProRes RAW, recodificado (no sin pérdida)",
+    "ProRes RAW is decoded and coded again as N-RAW (and R3D NE when that is on), written into a clip from the same camera as a template. This is not lossless: Lossless codes at the clip's own bits per pixel.": "ProRes RAW se decodifica y se vuelve a codificar como N-RAW (y R3D NE si está activado), escrito en un clip de la misma cámara como plantilla. No es sin pérdida: Sin pérdida codifica a los bits por píxel del propio clip.",
     "Lossless": "Sin pérdida",
     "Identical picture, files only a little smaller.": "Imagen idéntica, archivos solo un poco más pequeños.",
     "Light": "Ligera",
@@ -2010,6 +2020,8 @@ window.BC_LOCALES = {
     "Starts at {0} from the sidecar {1}.": "Empieza en {0} según el archivo {1}.",
   },
   "pt-BR": {
+    "ProRes RAW, re-encoded (not lossless)": "ProRes RAW, recodificado (não é sem perdas)",
+    "ProRes RAW is decoded and coded again as N-RAW (and R3D NE when that is on), written into a clip from the same camera as a template. This is not lossless: Lossless codes at the clip's own bits per pixel.": "O ProRes RAW é decodificado e codificado novamente como N-RAW (e R3D NE quando ativado), gravado em um clipe da mesma câmera usado como modelo. Não é sem perdas: Sem perdas codifica nos bits por pixel do próprio clipe.",
     "Lossless": "Sem perdas",
     "Identical picture, files only a little smaller.": "Imagem idêntica, arquivos só um pouco menores.",
     "Light": "Leve",
@@ -2411,6 +2423,8 @@ window.BC_LOCALES = {
     "Starts at {0} from the sidecar {1}.": "Começa em {0} a partir do arquivo {1}.",
   },
   "it": {
+    "ProRes RAW, re-encoded (not lossless)": "ProRes RAW, ricodificato (non senza perdita)",
+    "ProRes RAW is decoded and coded again as N-RAW (and R3D NE when that is on), written into a clip from the same camera as a template. This is not lossless: Lossless codes at the clip's own bits per pixel.": "Il ProRes RAW viene decodificato e ricodificato come N-RAW (e R3D NE se attivo), scritto in una clip della stessa fotocamera usata come modello. Non è senza perdita: Senza perdita codifica ai bit per pixel della clip stessa.",
     "Lossless": "Senza perdita",
     "Identical picture, files only a little smaller.": "Immagine identica, file solo un po' più piccoli.",
     "Light": "Leggera",
@@ -2812,6 +2826,8 @@ window.BC_LOCALES = {
     "Starts at {0} from the sidecar {1}.": "Parte da {0} dal file {1}.",
   },
   "nl": {
+    "ProRes RAW, re-encoded (not lossless)": "ProRes RAW, opnieuw gecodeerd (niet verliesvrij)",
+    "ProRes RAW is decoded and coded again as N-RAW (and R3D NE when that is on), written into a clip from the same camera as a template. This is not lossless: Lossless codes at the clip's own bits per pixel.": "ProRes RAW wordt gedecodeerd en opnieuw als N-RAW gecodeerd (en als R3D NE als dat aan staat), geschreven in een clip van dezelfde camera als sjabloon. Dit is niet verliesvrij: Verliesvrij codeert op de eigen bits per pixel van de clip.",
     "Lossless": "Verliesvrij",
     "Identical picture, files only a little smaller.": "Identiek beeld, bestanden maar iets kleiner.",
     "Light": "Licht",
@@ -3213,6 +3229,8 @@ window.BC_LOCALES = {
     "Starts at {0} from the sidecar {1}.": "Begint bij {0} uit het bestand {1}.",
   },
   "pl": {
+    "ProRes RAW, re-encoded (not lossless)": "ProRes RAW, ponownie zakodowany (nie bezstratnie)",
+    "ProRes RAW is decoded and coded again as N-RAW (and R3D NE when that is on), written into a clip from the same camera as a template. This is not lossless: Lossless codes at the clip's own bits per pixel.": "ProRes RAW jest dekodowany i kodowany ponownie jako N-RAW (oraz R3D NE, gdy włączone), zapisany w klipie z tego samego aparatu jako szablonie. To nie jest bezstratne: Bezstratnie koduje z własną liczbą bitów na piksel klipu.",
     "Lossless": "Bezstratnie",
     "Identical picture, files only a little smaller.": "Identyczny obraz, pliki tylko trochę mniejsze.",
     "Light": "Lekka",
@@ -3614,6 +3632,8 @@ window.BC_LOCALES = {
     "Starts at {0} from the sidecar {1}.": "Zaczyna od {0} z pliku {1}.",
   },
   "ru": {
+    "ProRes RAW, re-encoded (not lossless)": "ProRes RAW, перекодирован (не без потерь)",
+    "ProRes RAW is decoded and coded again as N-RAW (and R3D NE when that is on), written into a clip from the same camera as a template. This is not lossless: Lossless codes at the clip's own bits per pixel.": "ProRes RAW декодируется и заново кодируется в N-RAW (и в R3D NE, если включено) с клипом той же камеры в качестве шаблона. Это не без потерь: «Без потерь» кодирует с собственным числом бит на пиксель клипа.",
     "Lossless": "Без потерь",
     "Identical picture, files only a little smaller.": "Идентичное изображение, файлы лишь немного меньше.",
     "Light": "Лёгкое",
@@ -4015,6 +4035,8 @@ window.BC_LOCALES = {
     "Starts at {0} from the sidecar {1}.": "Начинается с {0} из файла {1}.",
   },
   "ja": {
+    "ProRes RAW, re-encoded (not lossless)": "ProRes RAW、再エンコード(ロスレスではありません)",
+    "ProRes RAW is decoded and coded again as N-RAW (and R3D NE when that is on), written into a clip from the same camera as a template. This is not lossless: Lossless codes at the clip's own bits per pixel.": "ProRes RAW をデコードして N-RAW(オンの場合は R3D NE も)に再エンコードし、同じカメラのクリップをテンプレートとして書き込みます。ロスレスではありません。ロスレスはクリップ自体のビット/ピクセルでエンコードします。",
     "Lossless": "ロスレス",
     "Identical picture, files only a little smaller.": "画質はそのまま、ファイルは少しだけ小さくなります。",
     "Light": "軽め",
@@ -4416,6 +4438,8 @@ window.BC_LOCALES = {
     "Starts at {0} from the sidecar {1}.": "サイドカー {1} の {0} から始まります。",
   },
   "ko": {
+    "ProRes RAW, re-encoded (not lossless)": "ProRes RAW, 재인코딩(무손실 아님)",
+    "ProRes RAW is decoded and coded again as N-RAW (and R3D NE when that is on), written into a clip from the same camera as a template. This is not lossless: Lossless codes at the clip's own bits per pixel.": "ProRes RAW를 디코딩한 뒤 N-RAW(켜져 있으면 R3D NE도)로 다시 인코딩하며, 같은 카메라의 클립을 템플릿으로 사용합니다. 무손실이 아닙니다. 무손실은 클립 자체의 픽셀당 비트로 인코딩합니다.",
     "Lossless": "무손실",
     "Identical picture, files only a little smaller.": "화질은 그대로, 파일만 조금 작아집니다.",
     "Light": "약하게",
@@ -4817,6 +4841,8 @@ window.BC_LOCALES = {
     "Starts at {0} from the sidecar {1}.": "사이드카 {1}의 {0}에서 시작합니다.",
   },
   "zh-Hans": {
+    "ProRes RAW, re-encoded (not lossless)": "ProRes RAW,重新编码(非无损)",
+    "ProRes RAW is decoded and coded again as N-RAW (and R3D NE when that is on), written into a clip from the same camera as a template. This is not lossless: Lossless codes at the clip's own bits per pixel.": "ProRes RAW 会被解码并重新编码为 N-RAW(开启时也生成 R3D NE),写入同一台相机拍摄的片段作为模板。这不是无损的:无损选项按片段自身的每像素位数编码。",
     "Lossless": "无损",
     "Identical picture, files only a little smaller.": "画面完全相同，文件只小一点。",
     "Light": "轻度",
@@ -5218,6 +5244,8 @@ window.BC_LOCALES = {
     "Starts at {0} from the sidecar {1}.": "从附属文件 {1} 中的 {0} 开始。",
   },
   "zh-Hant": {
+    "ProRes RAW, re-encoded (not lossless)": "ProRes RAW,重新編碼(非無損)",
+    "ProRes RAW is decoded and coded again as N-RAW (and R3D NE when that is on), written into a clip from the same camera as a template. This is not lossless: Lossless codes at the clip's own bits per pixel.": "ProRes RAW 會被解碼並重新編碼為 N-RAW(開啟時也產生 R3D NE),寫入同一台相機拍攝的片段作為範本。這不是無損的:無損選項依片段本身的每像素位元數編碼。",
     "Lossless": "無損",
     "Identical picture, files only a little smaller.": "畫面完全相同，檔案只小一點。",
     "Light": "輕度",
