@@ -507,6 +507,22 @@ function bindBppSlider() {
     e.preventDefault();
     step(e.deltaY < 0 ? 0.1 : -0.1);
   }, { passive: false });
+  // WebKit webviews (macOS) deliver trackpad pinches as gesture events rather than
+  // ctrl+wheel. Zoom around the pinch point relative to the scale when the pinch began.
+  let gestureStart = null;
+  st.addEventListener("gesturestart", (e) => {
+    e.preventDefault();
+    gestureStart = viewer.scale;
+  });
+  st.addEventListener("gesturechange", (e) => {
+    e.preventDefault();
+    if (gestureStart == null || (!viewer.base && !viewer.region)) return;
+    zoomTo(gestureStart * e.scale, local(e));
+  });
+  st.addEventListener("gestureend", (e) => {
+    e.preventDefault();
+    gestureStart = null;
+  });
 }
 
 // Queue ------------------------------------------------------------------------
@@ -1405,9 +1421,18 @@ function setSqueeze(v) {
   for (const x of jobs) if (els.has(x.id)) drawThumb(x);
 }
 
+// Zoom percentages are relative to the clip's real pixels on the device's real pixels: the
+// canvas is sized in device pixels (devicePixelRatio is already applied), and one canvas
+// pixel per quad shows the frame at half size, so 100% is two canvas pixels per quad.
+const PX_PER_QUAD = 2;
+const MAX_ZOOM = 8; // 800%
+const zoomPct = () => viewer.scale / PX_PER_QUAD * 100;
+const ZOOM_STEPS = ["0.5", "1", "2", "4"];
+
 function renderZoomControls() {
-  const pct = viewer.scale * 100;
-  setSeg("v-zoom", viewer.fit ? "fit" : Math.abs(pct - 100) < 0.5 ? "1" : Math.abs(pct - 200) < 0.5 ? "2" : "", null);
+  const pct = zoomPct();
+  const step = ZOOM_STEPS.find((v) => Math.abs(pct - Number(v) * 100) < 0.5);
+  setSeg("v-zoom", viewer.fit ? "fit" : step || "", null);
   $("stage").classList.toggle("zoomed", !viewer.fit);
   $("v-zoom-badge").textContent = `${pct >= 99.5 ? Math.round(pct) : pct.toFixed(0)}%`;
 }
@@ -1499,7 +1524,8 @@ function regionKey() {
 function zoomTo(scale, anchor) {
   const c = $("v-canvas");
   const fs = fitScale();
-  scale = Math.min(8, Math.max(fs, scale));
+  if (!Number.isFinite(scale)) return;
+  scale = Math.min(MAX_ZOOM * PX_PER_QUAD, Math.max(fs, scale));
   const ax = anchor ? anchor.x * dpr() : c.width / 2, ay = anchor ? anchor.y * dpr() : c.height / 2;
   const f = frameRect();
   const u = (ax - f.x) / f.w, v = (ay - f.y) / f.h;
@@ -1721,7 +1747,7 @@ function bindStage() {
   const end = (e) => {
     if (!drag) return;
     const p = local(e);
-    if (!drag.moved && drag.mode === "pan" && (viewer.base || viewer.region)) zoomTo(viewer.fit ? 1 : 0, p);
+    if (!drag.moved && drag.mode === "pan" && (viewer.base || viewer.region)) zoomTo(viewer.fit ? PX_PER_QUAD : 0, p);
     drag = null;
     st.classList.remove("dragging-split", "panning");
     syncLayers();
@@ -1810,7 +1836,7 @@ function bindViewer() {
   });
   $("v-zoom").addEventListener("click", (e) => {
     const b = e.target.closest("button"); if (!b) return;
-    zoomTo(b.dataset.value === "fit" ? 0 : Number(b.dataset.value), null);
+    zoomTo(b.dataset.value === "fit" ? 0 : Number(b.dataset.value) * PX_PER_QUAD, null);
   });
   const sqSel = $("v-squeeze"), sqCustom = $("v-squeeze-custom");
   sqSel.addEventListener("change", () => {
@@ -1880,7 +1906,7 @@ function bindViewer() {
     else if (e.key === "ArrowRight") { e.preventDefault(); goFrame(Number(range.value) + (e.shiftKey ? 10 : 1), 90); }
     else if (["1", "2", "3", "4"].includes(e.key)) choosePick(LEGACY_PICK[e.key]);
     else if (k === "f") zoomTo(0, null);
-    else if (k === "z") zoomTo(viewer.fit ? 1 : 0, null);
+    else if (k === "z") zoomTo(viewer.fit ? PX_PER_QUAD : 0, null);
     else if (e.key === "+" || e.key === "=") zoomTo(viewer.scale * 1.5, null);
     else if (e.key === "-") zoomTo(viewer.scale / 1.5, null);
   });
