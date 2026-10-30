@@ -79,8 +79,10 @@ const variantName = (c, r) =>
 const resizes = (j, r) => r !== "original" && !(r === "6k" && j.width <= 6060) && !(r === "4k" && j.width <= 3852);
 const settingLabel = (c, r) => `${compText(c)}${r !== "original" ? " · " + RES_LABEL[r] : ""}`;
 
+// Convert: "off" keeps each clip's format, "nraw" makes every output N-RAW, "r3d" R3D NE.
+const CONVERTS = ["off", "nraw", "r3d"];
 const settings = Object.assign(
-  { resolution: "original", compression: "light", backend: "gpu", outputFolder: null, dest: "next", sameForAll: true, squeeze: 1, autoUpdate: true, skipVersion: null, r3d: false, cbr: false, toNev: false, rewrap: false, rmd: true, rmdEv: null },
+  { resolution: "original", compression: "light", backend: "gpu", outputFolder: null, dest: "next", sameForAll: true, squeeze: 1, autoUpdate: true, skipVersion: null, convert: "off", cbr: false, rewrap: false, rmd: true, rmdEv: null },
   migrateSettings(readSettings()),
 );
 let jobs = [];
@@ -112,6 +114,9 @@ function migrateSettings(s) {
   delete s.quality; delete s.advanced; delete s.bpp;
   if (typeof s.compression === "number") s.compression = clampBpp(s.compression);
   if (!(resolved(s.compression) || PICK[s.compression])) delete s.compression;
+  // The two conversion switches of earlier versions became one Convert choice.
+  if (!CONVERTS.includes(s.convert)) s.convert = s.r3d ? "r3d" : s.toNev ? "nraw" : "off";
+  delete s.r3d; delete s.toNev;
   return s;
 }
 
@@ -148,7 +153,13 @@ function resolvedSpan(list, c = settings.compression) {
   return v.length ? [Math.min(...v), Math.max(...v)] : null;
 }
 const spanText = (sp) => (!sp ? "" : sp[0] === sp[1] ? tr("{0} bpp", bppText(sp[0])) : tr("{0} to {1} bpp", bppText(sp[0]), bppText(sp[1])));
-const settingOf = (j) => ({ compression: compOf(j), resolution: resolutionOf(j), r3d: !!settings.r3d && becomesNev(j), cbr: !!settings.cbr, toNev: !!settings.toNev && isR3d(j), rewrap: !!settings.rewrap, rmd: true, rmdEv: null });
+const convOf = (j) => (settings.sameForAll || !j || !CONVERTS.includes(j.convert) ? settings.convert : j.convert);
+// A clip whose conversion is a rewrap (the same coded data in the other wrapper).
+const rewraps = (j, c = convOf(j)) => (c === "r3d" && isNev(j)) || (c === "nraw" && isR3d(j));
+const settingOf = (j) => {
+  const c = convOf(j);
+  return { compression: compOf(j), resolution: resolutionOf(j), r3d: c === "r3d" && becomesNev(j), cbr: !!settings.cbr, toNev: c === "nraw" && isR3d(j), rewrap: !!settings.rewrap && rewraps(j, c), rmd: true, rmdEv: null };
+};
 // The R3D NE toggle only acts on .nev clips, the N-RAW one on .R3D clips.
 function isR3d(j) { return /\.r3d$/i.test((j && j.path) || ""); }
 function isNev(j) { return /\.nev$/i.test((j && j.path) || ""); }
@@ -638,8 +649,9 @@ function jobCard(j) {
   });
   el.querySelector(".job-preview").addEventListener("click", (e) => { e.stopPropagation(); openViewer(job()); });
   el.querySelector(".job-again").addEventListener("click", (e) => { e.stopPropagation(); again(j.id); });
-  const cSel = el.querySelector(".job-c"), rSel = el.querySelector(".job-r"), bIn = el.querySelector(".job-b");
-  for (const sel of [cSel, rSel, bIn]) sel.addEventListener("click", (e) => e.stopPropagation());
+  const cSel = el.querySelector(".job-c"), rSel = el.querySelector(".job-r"), bIn = el.querySelector(".job-b"), vSel = el.querySelector(".job-v");
+  for (const sel of [cSel, rSel, bIn, vSel]) sel.addEventListener("click", (e) => e.stopPropagation());
+  vSel.addEventListener("change", () => { const x = job(); x.convert = vSel.value; changed(x); syncOptionRows(); });
   bIn.addEventListener("keydown", (e) => { e.stopPropagation(); if (e.key === "Enter") bIn.blur(); });
   const changed = (x) => { updateCard(x); renderFooter(); renderSettings(); };
   bIn.addEventListener("change", () => {
@@ -734,6 +746,9 @@ function updateCard(j) {
   if (!bIn.matches(":focus")) bIn.value = typeof jc === "number" ? bppText(jc) : "";
   bIn.placeholder = isLossless(jc) ? tr("Lossless") : "";
   rSel.value = j.resolution;
+  const vSel = el.querySelector(".job-v");
+  vSel.value = convOf(j);
+  vSel.disabled = running || j.state !== "waiting" || !j.ok;
   rSel.options[1].disabled = j.width <= 6060;
   rSel.options[2].disabled = j.width <= 3852;
   cSel.disabled = rSel.disabled = bIn.disabled = running || j.state !== "waiting" || !j.ok;
@@ -1956,9 +1971,9 @@ async function init() {
       if (info.defaultBpp != null && clampBpp(info.defaultBpp) != null) settings.compression = clampBpp(info.defaultBpp);
       else if (LEGACY_PICK[info.defaultQuality]) settings.compression = LEGACY_PICK[info.defaultQuality];
       if (RES_LABEL[info.defaultResolution]) settings.resolution = info.defaultResolution;
-      if (info.defaultR3d) settings.r3d = true;
+      if (info.defaultR3d) settings.convert = "r3d";
       if (info.defaultCbr) settings.cbr = true;
-      if (info.defaultToNev) settings.toNev = true;
+      else if (info.defaultToNev) settings.convert = "nraw";
       if (info.defaultRewrap) settings.rewrap = true;
     }
     if ($("watch-clear")) {
@@ -2031,7 +2046,7 @@ async function init() {
     settings.sameForAll = e.target.checked;
     // Each clip starts from the settings it was getting until now.
     if (!settings.sameForAll) {
-      for (const j of jobs) { j.compression = rawCompOf(j); j.resolution = settings.resolution; }
+      for (const j of jobs) { j.compression = rawCompOf(j); j.resolution = settings.resolution; j.convert = settings.convert; }
     }
     saveSettings();
     await planTargets();
@@ -2294,13 +2309,15 @@ function setRow(id, disabled, note) {
 // Disabled states and notes of the conversion and bitrate rows, from the settings and the
 // clips in the queue.
 function syncOptionRows() {
-  if (!$("r3d")) return;
-  const nev = jobs.some(becomesNev), r3d = jobs.some(isR3d), any = jobs.length > 0;
-  setRow("r3d", false, any && !nev ? tr("No .nev clips in the queue.") : "");
-  setRow("to-nev", false, any && !r3d ? tr("No .R3D clips in the queue.") : "");
-  const conv = !!settings.r3d || !!settings.toNev;
-  setRow("rewrap", !conv, conv ? "" : tr("Turn on a conversion above to use it."));
-  const skip = conv && !!settings.rewrap;
+  if (!$("seg-convert")) return;
+  setSeg("seg-convert", settings.convert, running);
+  // Skip compression only shows where a clip would be rewrapped (never for ProRes RAW).
+  const can = jobs.length
+    ? jobs.some((j) => rewraps(j))
+    : settings.convert !== "off";
+  $("rewrap-row").hidden = !can;
+  setRow("rewrap", false, "");
+  const skip = can && !!settings.rewrap;
   setRow("cbr", skip, skip ? tr("Skip compression keeps the source bitrate.") : "");
 }
 
@@ -2319,7 +2336,15 @@ function initR3d() {
   // The exposure .RMD is always written next to R3D NE outputs (camera default exposure).
   settings.rmd = true;
   settings.rmdEv = null;
-  const toggles = [["r3d", "r3d"], ["to-nev", "toNev"], ["rewrap", "rewrap"]];
+  $("seg-convert").addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b || running) return;
+    settings.convert = b.dataset.value;
+    saveSettings();
+    syncOptionRows();
+    renderAll();
+  });
+  const toggles = [["rewrap", "rewrap"]];
   for (const [id, key] of toggles) {
     const box = $(id);
     if (!box) continue;

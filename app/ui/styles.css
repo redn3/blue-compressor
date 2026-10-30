@@ -1387,3 +1387,9 @@ body.tab-develop .viewer { display: none; }
   .empty { padding: 6px 16px 16px; }
   .queue-actions .btn { padding: 0 9px; }
 }
+
+/* Convert: one choice for the output format, like the compression picks. */
+.convert-label { display: flex; align-items: center; gap: 6px; }
+.seg-convert { margin-bottom: 8px; }
+@media (max-width: 900px) { .seg-picks.seg-convert { display: flex; } }
+.switch-row[hidden] { display: none; }

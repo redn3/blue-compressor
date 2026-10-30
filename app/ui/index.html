@@ -74,19 +74,10 @@
         </section>
 
         <section class="field" id="r3d-section">
-          <div class="field-label" data-i18n="Conversion">Conversion</div>
-          <label class="switch-row" id="r3d-row">
-            <span class="switch-text">
-              <span class="switch-head"><span class="switch-title" data-i18n="Convert .nev to R3D NE">Convert .nev to R3D NE</span><span class="info" id="r3d-sub" tabindex="0" role="img" aria-label="Acts on .nev clips, into an R3D NE folder next to each output, at the chosen compression and resolution. Log3G10 and REDWideGamutRGB. Always constant bitrate. Writes an exposure .RMD next to each clip: +0.5 stop for the ZR, +0.5 for other cameras. Nikon ZR; Z8, Z9 and Z6III clips are experimental." data-i18n-aria-label="Acts on .nev clips, into an R3D NE folder next to each output, at the chosen compression and resolution. Log3G10 and REDWideGamutRGB. Always constant bitrate. Writes an exposure .RMD next to each clip: +0.5 stop for the ZR, +0.5 for other cameras. Nikon ZR; Z8, Z9 and Z6III clips are experimental." data-tip-key="Acts on .nev clips, into an R3D NE folder next to each output, at the chosen compression and resolution. Log3G10 and REDWideGamutRGB. Always constant bitrate. Writes an exposure .RMD next to each clip: +0.5 stop for the ZR, +0.5 for other cameras. Nikon ZR; Z8, Z9 and Z6III clips are experimental.">i</span></span>
-            </span>
-            <input type="checkbox" id="r3d" class="switch">
-          </label>
-          <label class="switch-row" id="to-nev-row">
-            <span class="switch-text">
-              <span class="switch-head"><span class="switch-title" data-i18n="Convert .R3D to N-RAW">Convert .R3D to N-RAW</span><span class="info" id="to-nev-sub" tabindex="0" role="img" aria-label="Acts on .R3D clips: rewraps them back to N-RAW (N-LOG) in an N-RAW folder next to each output." data-i18n-aria-label="Acts on .R3D clips: rewraps them back to N-RAW (N-LOG) in an N-RAW folder next to each output." data-tip-key="Acts on .R3D clips: rewraps them back to N-RAW (N-LOG) in an N-RAW folder next to each output.">i</span></span>
-            </span>
-            <input type="checkbox" id="to-nev" class="switch">
-          </label>
+          <div class="field-label convert-label"><span data-i18n="Convert">Convert</span><span class="info" id="convert-sub" tabindex="0" role="img" aria-label="Off keeps each clip in its own format. N-RAW: every output is a .NEV (R3D NE clips are rewrapped, ProRes RAW is encoded to N-RAW). R3D NE: every output is a .R3D with an exposure .RMD next to it (N-RAW clips are rewrapped, ProRes RAW is encoded to R3D NE). Log3G10 and REDWideGamutRGB, always constant bitrate. Z8, Z9 and Z6III clips are experimental." data-i18n-aria-label="Off keeps each clip in its own format. N-RAW: every output is a .NEV (R3D NE clips are rewrapped, ProRes RAW is encoded to N-RAW). R3D NE: every output is a .R3D with an exposure .RMD next to it (N-RAW clips are rewrapped, ProRes RAW is encoded to R3D NE). Log3G10 and REDWideGamutRGB, always constant bitrate. Z8, Z9 and Z6III clips are experimental." data-tip-key="Off keeps each clip in its own format. N-RAW: every output is a .NEV (R3D NE clips are rewrapped, ProRes RAW is encoded to N-RAW). R3D NE: every output is a .R3D with an exposure .RMD next to it (N-RAW clips are rewrapped, ProRes RAW is encoded to R3D NE). Log3G10 and REDWideGamutRGB, always constant bitrate. Z8, Z9 and Z6III clips are experimental.">i</span></div>
+          <div class="seg seg-picks seg-convert" id="seg-convert" role="radiogroup" aria-label="Convert" data-i18n-aria-label="Convert">
+            <button data-value="off" role="radio" data-i18n="Off">Off</button><button data-value="nraw" role="radio">N-RAW</button><button data-value="r3d" role="radio">R3D NE</button>
+          </div>
           <label class="switch-row" id="rewrap-row">
             <span class="switch-text">
               <span class="switch-head"><span class="switch-title" data-i18n="Skip compression (lossless)">Skip compression (lossless)</span><span class="info" id="rewrap-sub" tabindex="0" role="img" aria-label="Converts the format without recompressing, so the image data stays exactly as recorded. No compressed copy is made. About disk speed. Constant bitrate if the source is." data-i18n-aria-label="Converts the format without recompressing, so the image data stays exactly as recorded. No compressed copy is made. About disk speed. Constant bitrate if the source is." data-tip-key="Converts the format without recompressing, so the image data stays exactly as recorded. No compressed copy is made. About disk speed. Constant bitrate if the source is.">i</span></span>
@@ -480,6 +471,9 @@
           <input type="number" class="mini-input job-b" min="0.5" max="8" step="0.1" inputmode="decimal" title="Bits per pixel" data-i18n-title="Bits per pixel" aria-label="Bits per pixel" data-i18n-aria-label="Bits per pixel">
           <select class="mini-select job-r" title="Resolution" data-i18n-title="Resolution">
             <option value="original" data-i18n="Original">Original</option><option value="6k">6K</option><option value="4k" data-i18n="4K">4K</option>
+          </select>
+          <select class="mini-select job-v" title="Convert" data-i18n-title="Convert">
+            <option value="off" data-i18n="Convert off">Convert off</option><option value="nraw">N-RAW</option><option value="r3d">R3D NE</option>
           </select>
         </div>
       </div>
