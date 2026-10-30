@@ -44,8 +44,22 @@ pub fn encode_target(
     target: Target,
     seed: &mut Vec<i32>,
 ) -> Result<Vec<u8>> {
+    encode_target_finest(h, ld, coeffs, target, seed, RESIZE_FINEST_RANK)
+}
+
+/// [`encode_target`] with rate control allowed down to rank `finest` (0 is the finest the
+/// coder has). ProRes RAW sources use 0, so a bpp target is filled rather than capped at
+/// the resize truncation.
+pub fn encode_target_finest(
+    h: &TicoHeader,
+    ld: &Layout,
+    coeffs: &[i32],
+    target: Target,
+    seed: &mut Vec<i32>,
+    finest: i32,
+) -> Result<Vec<u8>> {
     match target.frame_budget(ld.width as u32, ld.height as u32) {
-        Some(budget) => encode_frame_budget_seeded(h, ld, coeffs, RESIZE_FINEST_RANK, budget, seed),
+        Some(budget) => encode_frame_budget_seeded(h, ld, coeffs, finest, budget, seed),
         None => encode_frame(h, ld, coeffs, encode_rank_for_quality(target.preset())),
     }
 }

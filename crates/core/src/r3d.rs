@@ -950,7 +950,8 @@ pub fn convert_job(
         if c.r3d_only {
             // Code to a temporary N-RAW at the job's setting, rewrap it, then remove it.
             let t0 = Instant::now();
-            let staged = Options { output: job.output.clone(), ..job.clone() };
+            // R3D NE is always constant bitrate: frames padded to the target, as the N-RAW path does.
+            let staged = Options { output: job.output.clone(), cbr: true, ..job.clone() };
             crate::transcode_staged(&staged, cancel, &mut |f, fps| progress(f * 0.9, fps))?;
             let o = R3dOptions {
                 rmd: c.rmd,

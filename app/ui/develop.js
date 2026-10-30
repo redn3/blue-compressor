@@ -147,7 +147,7 @@ const devEl = (id) => document.getElementById(id);
 const devClip = () => dev.clips.get(dev.path);
 
 function devClipsInQueue() {
-  return jobs.filter((j) => j.ok && (isNev(j) || isR3d(j)));
+  return jobs.filter((j) => j.ok && (isNev(j) || isR3d(j) || (isPrr(j) && j.codec === "ProRes RAW")));
 }
 
 async function devEnsure(path) {
@@ -180,7 +180,7 @@ function devRender() {
     b.className = "dev-clip" + (j.path === dev.path ? " on" : "");
     const c = dev.clips.get(j.path);
     const edited = c && JSON.stringify(c.s) !== JSON.stringify(c.info.asShot);
-    b.innerHTML = `<span class="dev-clip-name">${esc(j.name)}</span><span class="dev-clip-sub">${esc(isR3d(j) ? "R3D NE" : "N-RAW")}${edited ? " · " + esc(tr("Edited")) : ""}</span>`;
+    b.innerHTML = `<span class="dev-clip-name">${esc(j.name)}</span><span class="dev-clip-sub">${esc(isR3d(j) ? "R3D NE" : isPrr(j) ? "ProRes RAW" : "N-RAW")}${edited ? " · " + esc(tr("Edited")) : ""}</span>`;
     b.addEventListener("click", () => { dev.path = j.path; dev.frame = 0; devRender(); });
     ul.append(b);
   }

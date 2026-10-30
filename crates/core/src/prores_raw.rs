@@ -25,7 +25,7 @@ use crate::frame::{forward_star_tetrix, forward_wavelet, Coeffs, Planes, Transfe
 use crate::nraw::NrawFrame;
 use crate::quality::{bpp_of, Target};
 use crate::r3d::{self, nctg_tags, tag_value, Direction};
-use crate::resize::{encode_target, PHASE_X, PHASE_Y};
+use crate::resize::{encode_target_finest, PHASE_X, PHASE_Y};
 use crate::tico::{Layout, TicoHeader};
 use crate::{Error, Outcome, Result};
 
@@ -376,7 +376,9 @@ pub fn convert(o: &PrrOptions, cancel: &AtomicBool, progress: &mut dyn FnMut(f64
     let ff = find_decoder()?;
     let mut cmd = Command::new(&ff);
     crate::proxy::quiet(&mut cmd);
-    cmd.args(["-v", "error", "-nostdin"]).args(decoder_threads()).args(["-apply_cropping", "0", "-i"])
+    cmd.args(["-v", "error", "-nostdin"])
+        .args(decoder_threads())
+        .args(["-apply_cropping", "0", "-i"])
         .arg(&o.input)
         .args(["-map", "0:v:0", "-f", "rawvideo", "-pix_fmt", "bayer_rggb16le", "-"])
         .stdin(Stdio::null())
@@ -407,7 +409,7 @@ pub fn convert(o: &PrrOptions, cancel: &AtomicBool, progress: &mut dyn FnMut(f64
         let mut coeffs = vec![0i32; Coeffs::len(&layout)];
         forward_wavelet(&layout, &pl, &mut coeffs);
         drop(pl);
-        let cs = encode_target(&tpl.tico, &layout, &coeffs, target, &mut Vec::new())?;
+        let cs = encode_target_finest(&tpl.tico, &layout, &coeffs, target, &mut Vec::new(), 0)?;
         tpl.frame.build_padded(&cs, None, pad_to)
     };
 
@@ -585,7 +587,9 @@ fn decode_mosaic(path: &Path, movie: &Movie, frame: usize, w: usize, h: usize) -
     let ff = find_decoder()?;
     let mut cmd = Command::new(&ff);
     crate::proxy::quiet(&mut cmd);
-    cmd.args(["-v", "error", "-nostdin"]).args(decoder_threads()).args(["-apply_cropping", "0", "-ss", &format!("{t:.6}"), "-i"])
+    cmd.args(["-v", "error", "-nostdin"])
+        .args(decoder_threads())
+        .args(["-apply_cropping", "0", "-ss", &format!("{t:.6}"), "-i"])
         .arg(path)
         .args(["-map", "0:v:0", "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "bayer_rggb16le", "-"])
         .stdin(Stdio::null());
@@ -666,7 +670,7 @@ pub fn preview_frame(path: &Path, frame: u32, target: Option<Target>) -> Result<
     let mut coeffs = vec![0i32; Coeffs::len(&layout)];
     forward_wavelet(&layout, &pl, &mut coeffs);
     drop(pl);
-    let cs = encode_target(&tpl.tico, &layout, &coeffs, target, &mut Vec::new())?;
+    let cs = encode_target_finest(&tpl.tico, &layout, &coeffs, target, &mut Vec::new(), 0)?;
     let after = crate::preview::decode_planes(&cs)?;
     Ok(PreviewFrame {
         w: cw,
@@ -739,7 +743,9 @@ impl MosaicStream {
         let ff = find_decoder()?;
         let mut cmd = Command::new(&ff);
         crate::proxy::quiet(&mut cmd);
-        cmd.args(["-v", "error", "-nostdin"]).args(decoder_threads()).args(["-apply_cropping", "0", "-i"])
+        cmd.args(["-v", "error", "-nostdin"])
+            .args(decoder_threads())
+            .args(["-apply_cropping", "0", "-i"])
             .arg(input.path())
             .args(["-map", "0:v:0", "-f", "rawvideo", "-pix_fmt", "bayer_rggb16le", "-"])
             .stdin(Stdio::null())

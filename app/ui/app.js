@@ -164,7 +164,9 @@ const settingOf = (j) => {
 function isR3d(j) { return /\.r3d$/i.test((j && j.path) || ""); }
 function isNev(j) { return /\.nev$/i.test((j && j.path) || ""); }
 // ProRes RAW (.mov) clips are re-encoded to N-RAW, so they take the R3D NE toggle too.
-function isPrr(j) { return /\.mov$/i.test((j && j.path) || "") || (j && j.codec === "ProRes RAW"); }
+// By the codec the scan probed (a .mov is only a clip when it holds ProRes RAW, so the
+// Develop tab's own .mov exports never count); by the extension until the scan is in.
+function isPrr(j) { return !!j && (j.codec ? j.codec === "ProRes RAW" : /\.mov$/i.test(j.path || "")); }
 function becomesNev(j) { return isNev(j) || isPrr(j); }
 const ranComp = (j) => (j.ran ? j.ran.compression : compOf(j));
 // Key of a setting for measured size ratios.
