@@ -274,9 +274,25 @@ pub fn encode_frame_budget_seeded(
     budget: usize,
     seed: &mut Vec<i32>,
 ) -> Result<Vec<u8>> {
-    // First pass at the finest rank: the output when it fits, else the precinct weights.
-    let (first, weights) = encode_uniform(h, l, coeffs, finest)?;
-    if first.len() <= budget {
+    encode_frame_budget_probed(h, l, coeffs, finest, finest, budget, seed)
+}
+
+/// [`encode_frame_budget_seeded`] with the first (weighing) pass at rank `probe`, coarser
+/// than `finest`. A pass at a very fine rank is slow and huge; a coarser one weighs the
+/// precincts as well, and the search still goes down to `finest` where the budget allows.
+pub fn encode_frame_budget_probed(
+    h: &TicoHeader,
+    l: &Layout,
+    coeffs: &[i32],
+    finest: i32,
+    probe: i32,
+    budget: usize,
+    seed: &mut Vec<i32>,
+) -> Result<Vec<u8>> {
+    let probe = probe.max(finest);
+    // First pass at the probe rank: the output when it fits at the finest, else the weights.
+    let (first, weights) = encode_uniform(h, l, coeffs, probe)?;
+    if probe == finest && first.len() <= budget {
         seed.clear();
         return Ok(first);
     }
@@ -298,6 +314,15 @@ pub fn encode_frame_budget_seeded(
     // (computed once, so the output does not depend on the thread count).
     let start = if seeded {
         finest
+    } else if first.len() <= budget {
+        // Fits at the probe rank: the precincts land at or finer than it.
+        finest_fitting(finest, probe, probe, share_mid(l, &budgets, &weights), 0, |rank| {
+            let (mut pd, mut scratch) = (PrecinctData::default(), EncodeScratch::default());
+            let mut enc = PredState::default();
+            enc.reset(nb);
+            code(l.slices / 2 * l.slice_height, rank, &enc, &mut pd, &mut scratch)
+        })?
+        .rank
     } else {
         let s = l.slices / 2;
         let p = s * l.slice_height;
@@ -306,7 +331,7 @@ pub fn encode_frame_budget_seeded(
         let mut enc = PredState::default();
         enc.reset(nb);
         let (mut pd, mut scratch) = (PrecinctData::default(), EncodeScratch::default());
-        finest_fitting(finest, hi, finest, share, 0, |rank| code(p, rank, &enc, &mut pd, &mut scratch))?.rank
+        finest_fitting(finest, hi, probe, share, 0, |rank| code(p, rank, &enc, &mut pd, &mut scratch))?.rank
     };
     let slices: Vec<Result<(Vec<u8>, Vec<i32>)>> = (0..l.slices)
         .into_par_iter()
@@ -344,6 +369,14 @@ pub fn encode_frame_budget_seeded(
         seed.extend(ranks);
     }
     Ok(assemble_codestream(h, l.width as i32, l.height as i32, &parts))
+}
+
+/// The budget share of the first precinct of the middle slice.
+fn share_mid(l: &Layout, budgets: &[usize], weights: &[usize]) -> usize {
+    let s = l.slices / 2;
+    let p = s * l.slice_height;
+    let p1 = l.precincts.min(p + l.slice_height);
+    SliceBudget::new(budgets[s], &weights[p..p1]).share(weights[p])
 }
 
 /// One level of the reversible 5/3 inverse on line[0, len): low half first (the larger

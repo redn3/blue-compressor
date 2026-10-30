@@ -403,13 +403,14 @@ pub fn convert(o: &PrrOptions, cancel: &AtomicBool, progress: &mut dyn FnMut(f64
     let reading_done = AtomicBool::new(false);
     let frame_px = w * h;
 
-    let encode = |mosaic: &[u16]| -> Result<Vec<u8>> {
+    // Each worker keeps the ranks of its last frame as the next one's starting point.
+    let encode = |mosaic: &[u16], seed: &mut Vec<i32>| -> Result<Vec<u8>> {
         let mut pl = mosaic_to_planes(mosaic, w, h, &map, &tr);
         forward_star_tetrix(&mut pl);
         let mut coeffs = vec![0i32; Coeffs::len(&layout)];
         forward_wavelet(&layout, &pl, &mut coeffs);
         drop(pl);
-        let cs = encode_target_finest(&tpl.tico, &layout, &coeffs, target, &mut Vec::new(), 0)?;
+        let cs = encode_target_finest(&tpl.tico, &layout, &coeffs, target, seed, 0)?;
         tpl.frame.build_padded(&cs, None, pad_to)
     };
 
@@ -450,33 +451,36 @@ pub fn convert(o: &PrrOptions, cancel: &AtomicBool, progress: &mut dyn FnMut(f64
             qcv.notify_all();
         });
         for _ in 0..workers {
-            scope.spawn(|| loop {
-                let job = {
-                    let mut q = queue.lock().unwrap();
-                    loop {
-                        if shared.lock().unwrap().stop {
-                            return;
+            scope.spawn(|| {
+                let mut seed = Vec::new();
+                loop {
+                    let job = {
+                        let mut q = queue.lock().unwrap();
+                        loop {
+                            if shared.lock().unwrap().stop {
+                                return;
+                            }
+                            if !q.is_empty() {
+                                // Oldest first, and not too far ahead of the writer.
+                                let k = (0..q.len()).min_by_key(|&k| q[k].0).unwrap();
+                                break q.swap_remove(k);
+                            }
+                            if reading_done.load(Ordering::SeqCst) {
+                                return;
+                            }
+                            q = qcv.wait_timeout(q, Duration::from_millis(50)).unwrap().0;
                         }
-                        if !q.is_empty() {
-                            // Oldest first, and not too far ahead of the writer.
-                            let k = (0..q.len()).min_by_key(|&k| q[k].0).unwrap();
-                            break q.swap_remove(k);
-                        }
-                        if reading_done.load(Ordering::SeqCst) {
-                            return;
-                        }
-                        q = qcv.wait_timeout(q, Duration::from_millis(50)).unwrap().0;
+                    };
+                    qcv.notify_all();
+                    let r = encode(&job.1, &mut seed);
+                    drop(job.1);
+                    let mut g = shared.lock().unwrap();
+                    match r {
+                        Ok(b) => g.done[job.0] = Some(b),
+                        Err(e) => fail(&mut g, format!("frame {}: {e}", job.0)),
                     }
-                };
-                qcv.notify_all();
-                let r = encode(&job.1);
-                drop(job.1);
-                let mut g = shared.lock().unwrap();
-                match r {
-                    Ok(b) => g.done[job.0] = Some(b),
-                    Err(e) => fail(&mut g, format!("frame {}: {e}", job.0)),
+                    cv.notify_all();
                 }
-                cv.notify_all();
             });
         }
 

@@ -59,7 +59,7 @@ pub fn encode_target_finest(
     finest: i32,
 ) -> Result<Vec<u8>> {
     match target.frame_budget(ld.width as u32, ld.height as u32) {
-        Some(budget) => encode_frame_budget_seeded(h, ld, coeffs, finest, budget, seed),
+        Some(budget) => encode_frame_budget_probed(h, ld, coeffs, finest, RESIZE_FINEST_RANK, budget, seed),
         None => encode_frame(h, ld, coeffs, encode_rank_for_quality(target.preset())),
     }
 }
