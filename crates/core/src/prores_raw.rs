@@ -239,6 +239,25 @@ pub fn find_template(clip: &Path) -> Option<PathBuf> {
     found.into_iter().next().map(|f| f.2)
 }
 
+/// Decoder threading: slice threads on every core. ffmpeg's default for this decoder ends up
+/// running frames one at a time on a single core (about 6 fps for 6K); slice threads decode
+/// each frame across all cores (about 60 fps) with identical output.
+fn decoder_threads() -> [String; 4] {
+    let n = crate::transcode::hardware_threads().clamp(1, 32);
+    ["-threads".into(), n.to_string(), "-thread_type".into(), "slice".into()]
+}
+
+/// Reads one little endian 16-bit frame straight into `px` without an extra byte buffer.
+fn read_u16_frame(r: &mut impl Read, px: &mut [u16]) -> std::io::Result<()> {
+    // SAFETY: u16 has no invalid bit patterns and the byte view covers exactly `px`.
+    let bytes = unsafe { std::slice::from_raw_parts_mut(px.as_mut_ptr().cast::<u8>(), px.len() * 2) };
+    r.read_exact(bytes)?;
+    if cfg!(target_endian = "big") {
+        px.iter_mut().for_each(|v| *v = u16::from_le(*v));
+    }
+    Ok(())
+}
+
 /// An ffmpeg with the ProRes RAW decoder (FFmpeg 8 or later).
 pub fn find_decoder() -> Result<PathBuf> {
     let Some(ff) = crate::proxy::find_ffmpeg() else {
@@ -357,7 +376,7 @@ pub fn convert(o: &PrrOptions, cancel: &AtomicBool, progress: &mut dyn FnMut(f64
     let ff = find_decoder()?;
     let mut cmd = Command::new(&ff);
     crate::proxy::quiet(&mut cmd);
-    cmd.args(["-v", "error", "-nostdin", "-apply_cropping", "0", "-i"])
+    cmd.args(["-v", "error", "-nostdin"]).args(decoder_threads()).args(["-apply_cropping", "0", "-i"])
         .arg(&o.input)
         .args(["-map", "0:v:0", "-f", "rawvideo", "-pix_fmt", "bayer_rggb16le", "-"])
         .stdin(Stdio::null())
@@ -373,13 +392,14 @@ pub fn convert(o: &PrrOptions, cancel: &AtomicBool, progress: &mut dyn FnMut(f64
     });
 
     let threads = if o.threads > 0 { o.threads } else { crate::transcode::hardware_threads() };
-    let workers = threads.clamp(1, 4);
+    // Frames are coded in parallel like the N-RAW path; a frame is ~40 MB, so cap the queue.
+    let workers = threads.clamp(1, 12);
     let shared = Mutex::new(Shared { done: vec![None; nframes], written: 0, stop: false, error: None });
     let cv = Condvar::new();
     let queue: Mutex<Vec<(usize, Vec<u16>)>> = Mutex::new(Vec::new());
     let qcv = Condvar::new();
     let reading_done = AtomicBool::new(false);
-    let frame_bytes = w * h * 2;
+    let frame_px = w * h;
 
     let encode = |mosaic: &[u16]| -> Result<Vec<u8>> {
         let mut pl = mosaic_to_planes(mosaic, w, h, &map, &tr);
@@ -408,14 +428,12 @@ pub fn convert(o: &PrrOptions, cancel: &AtomicBool, progress: &mut dyn FnMut(f64
         // Reader: frames from the decoder, a few ahead of the encoders.
         scope.spawn(|| {
             for i in 0..nframes {
-                let mut buf = vec![0u8; frame_bytes];
-                if let Err(e) = stdout.read_exact(&mut buf) {
+                let mut px = vec![0u16; frame_px];
+                if let Err(e) = read_u16_frame(&mut stdout, &mut px) {
                     fail(&mut shared.lock().unwrap(), format!("frame {i}: decoder stopped ({e})"));
                     cv.notify_all();
                     break;
                 }
-                let px: Vec<u16> = buf.as_chunks::<2>().0.iter().map(|b| u16::from_le_bytes(*b)).collect();
-                drop(buf);
                 let mut q = queue.lock().unwrap();
                 while q.len() >= workers && !shared.lock().unwrap().stop {
                     q = qcv.wait_timeout(q, Duration::from_millis(50)).unwrap().0;
@@ -567,7 +585,7 @@ fn decode_mosaic(path: &Path, movie: &Movie, frame: usize, w: usize, h: usize) -
     let ff = find_decoder()?;
     let mut cmd = Command::new(&ff);
     crate::proxy::quiet(&mut cmd);
-    cmd.args(["-v", "error", "-nostdin", "-apply_cropping", "0", "-ss", &format!("{t:.6}"), "-i"])
+    cmd.args(["-v", "error", "-nostdin"]).args(decoder_threads()).args(["-apply_cropping", "0", "-ss", &format!("{t:.6}"), "-i"])
         .arg(path)
         .args(["-map", "0:v:0", "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "bayer_rggb16le", "-"])
         .stdin(Stdio::null());
@@ -721,7 +739,7 @@ impl MosaicStream {
         let ff = find_decoder()?;
         let mut cmd = Command::new(&ff);
         crate::proxy::quiet(&mut cmd);
-        cmd.args(["-v", "error", "-nostdin", "-apply_cropping", "0", "-i"])
+        cmd.args(["-v", "error", "-nostdin"]).args(decoder_threads()).args(["-apply_cropping", "0", "-i"])
             .arg(input.path())
             .args(["-map", "0:v:0", "-f", "rawvideo", "-pix_fmt", "bayer_rggb16le", "-"])
             .stdin(Stdio::null())
@@ -734,9 +752,8 @@ impl MosaicStream {
 
     /// The next frame as raw quad planes.
     pub fn next_planes(&mut self) -> Result<[Vec<f32>; 4]> {
-        let mut buf = vec![0u8; self.w * self.h * 2];
-        self.stdout.read_exact(&mut buf).map_err(|e| Error(format!("ProRes RAW decoder stopped ({e})")))?;
-        let px: Vec<u16> = buf.as_chunks::<2>().0.iter().map(|b| u16::from_le_bytes(*b)).collect();
+        let mut px = vec![0u16; self.w * self.h];
+        read_u16_frame(&mut self.stdout, &mut px).map_err(|e| Error(format!("ProRes RAW decoder stopped ({e})")))?;
         Ok(mosaic_to_raw_planes(&px, self.w, self.h, &self.map))
     }
 }
