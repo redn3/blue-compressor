@@ -1,3 +1,13 @@
+**What's new in 0.2.5**
+- **ProRes RAW input** (Nikon): .MOV ProRes RAW clips can be converted to N-RAW or R3D NE, previewed, and developed in the Develop tab. The conversion is not lossless and hits the bpp you pick. Decoding runs on all CPU cores. Docker and the Web UI need ffmpeg 8 or newer for ProRes RAW; the current image ships an older ffmpeg, so ProRes RAW clips work in the desktop app and the command line tool with a recent ffmpeg.
+- **Convert** choice: Off, N-RAW or R3D NE, for all clips or per clip. With R3D NE chosen, only the .R3D and its .RMD are written (`--r3d-only`, `R3D_ONLY`, `WATCH_R3D_ONLY`). Skip compression is only shown when a lossless rewrap is possible.
+- **.RMD sidecar** now follows RED's RSX layout, so the exposure adjustment is read correctly (+0.5 EV for ZR clips).
+- **Viewer zoom**: true 1:1 at 100%, new 50% and 400% steps, and pinch to zoom on a trackpad.
+- The Compress preview and thumbnails now use the same as-shot look as Develop.
+- Compression targets show as one bar under the bpp slider, with the value as a share (for example Medium 55%), also on the queue cards.
+- Narrow window layout fixes, and a startup fix that made the file and folder pickers unresponsive.
+- 0.2.4 was skipped.
+
 **What's new in 0.2.3**
 - New **Develop** tab for quick turnaround: basic tools for developing the digital negatives (RAWs) to a 10-bit HEVC MOV in Log3G10, N-Log or Rec.709, on the GPU. Controls follow the familiar raw panels for R3D and N-RAW: white balance per clip, ISO, exposure, auto exposure, highlight roll off, tone map, contrast and more. Every clip starts from what it recorded, including its .RMD sidecar. ISO uses the same values as RED's tools (50 to 25600).
 - **Rewrap** N-RAW (.NEV) to R3D NE and back, losslessly, with **Skip compression (lossless)**. An .RMD exposure sidecar is always written so the rewrapped clip looks like the original.
