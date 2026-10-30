@@ -133,6 +133,13 @@ fn xml_value(text: &str, names: &[&str]) -> Option<f32> {
 
 /// Reads an RMD's text. Returns None when it carries nothing we use.
 pub fn parse_rmd(text: &str, path: &Path) -> Option<Sidecar> {
+    // RSX sidecars carry a legacy <looks> block and the IPP2 <looks2> one; R3D NE is IPP2,
+    // so read the <looks2> block when there is one.
+    let lower = text.to_ascii_lowercase();
+    let text = match lower.find("<looks2") {
+        Some(i) => &text[i..i + lower[i..].find("</looks2").unwrap_or(lower.len() - i)],
+        None => text,
+    };
     let s = Sidecar {
         path: path.to_path_buf(),
         exposure: xml_value(text, &["exposure_adjust", "exposureadjust", "exposure_compensation", "exposure"])
@@ -292,10 +299,10 @@ impl Params {
     }
 }
 
-/// Exposure of R3D NE raw values relative to N-RAW. Cameras record R3D NE about one stop
-/// brighter than N-RAW at the same ISO (r3d::zr_exposure_ev), and RED's pipeline renders
-/// those values that much darker, so a camera R3D NE looks like its N-RAW twin. A clip
-/// rewrapped from N-RAW has N-RAW levels; the +1 in the RMD our rewrap writes brings it back.
+/// Exposure of R3D NE raw values relative to N-RAW. At the same ISO RED's decoder renders
+/// R3D NE about half a stop darker than N-RAW (r3d::zr_exposure_ev, from a REDCINE-X PRO
+/// comparison); this follows it. A clip rewrapped from N-RAW gets that offset back from the
+/// RMD our rewrap writes.
 pub fn r3d_scale(c: &ClipInfo) -> f32 {
     if c.r3d {
         2f32.powf(-r3d::zr_exposure_ev(&c.camera) as f32)
@@ -920,8 +927,29 @@ mod tests {
 
     #[test]
     fn reads_our_own_rmd() {
-        let s = parse_rmd(&r3d::rmd_text(800, 1.0), Path::new("a.RMD")).unwrap();
-        assert_eq!((s.exposure, s.iso, s.kelvin, s.tint), (Some(1.0), Some(800), None, None));
+        let l = r3d::RmdLook { iso: 800, kelvin: 4749.0, tint: 0.0, exposure_ev: 0.5 };
+        let s = parse_rmd(&r3d::rmd_text(l), Path::new("a.RMD")).unwrap();
+        assert_eq!((s.exposure, s.iso, s.kelvin, s.tint), (Some(0.5), Some(800), Some(4749.0), Some(0.0)));
+    }
+
+    #[test]
+    fn reads_red_rsx_looks2_over_legacy() {
+        let t = r#"<?xml version="1.0" encoding="UTF-8"?><sidecar version="2.0" type="RSX">
+            <looks><look id="A"><module name="R3DIPS"><iso type="int" value="400"/>
+            <exposurecompensation type="float" value="2.00000"/></module></look></looks>
+            <looks2 colorversion="3"><look id="B"><module name="R3DIPS"><iso type="int" value="800"/>
+            <kelvin type="float" value="4749.00000"/><tint type="float" value="0.00000"/>
+            <exposureadjust type="float" value="0.50000"/><exposurecompensation type="float" value="0.00000"/>
+            </module></look></looks2></sidecar>"#;
+        let s = parse_rmd(t, Path::new("r.RMD")).unwrap();
+        assert_eq!((s.exposure, s.iso, s.kelvin, s.tint), (Some(0.5), Some(800), Some(4749.0), Some(0.0)));
+    }
+
+    #[test]
+    fn reads_the_old_0_2_3_rmd() {
+        let t = "<?xml version=\"1.0\"?>\n<!DOCTYPE REDXIF>\n<rmd><version major=\"1\" minor=\"0\"/><color><iso>800</iso><exposure_adjust>1.000</exposure_adjust></color></rmd>";
+        let s = parse_rmd(t, Path::new("o.RMD")).unwrap();
+        assert_eq!((s.exposure, s.iso), (Some(1.0), Some(800)));
     }
 
     #[test]
@@ -942,7 +970,11 @@ mod tests {
         let clip = dir.join("A001_C001.R3D");
         std::fs::write(&clip, b"").unwrap();
         assert!(find_rmd(&clip).is_none());
-        std::fs::write(dir.join("a001_c001.rmd"), r3d::rmd_text(800, 1.0)).unwrap();
+        std::fs::write(
+            dir.join("a001_c001.rmd"),
+            r3d::rmd_text(r3d::RmdLook { iso: 800, kelvin: 5600.0, tint: 0.0, exposure_ev: 1.0 }),
+        )
+        .unwrap();
         let s = read_sidecar(&clip).unwrap();
         assert_eq!(s.exposure, Some(1.0));
         std::fs::remove_dir_all(&dir).unwrap();
@@ -975,7 +1007,7 @@ mod tests {
 
     #[test]
     fn rewrapped_nev_with_its_rmd_matches_the_nev() {
-        // Same raw values: N-RAW as shot vs R3D NE rewrap with the +1 RMD our rewrap writes.
+        // Same raw values: N-RAW as shot vs R3D NE rewrap with the RMD offset our rewrap writes.
         let nev = clip();
         let mut r3d = clip();
         r3d.r3d = true;
@@ -989,12 +1021,12 @@ mod tests {
         for i in 0..3 {
             assert!((x[i] - y[i]).abs() < 2e-3, "{x:?} vs {y:?}");
         }
-        // Without the RMD the rewrap is a stop darker, as in RED's pipeline.
+        // Without the RMD the rewrap is half a stop darker, as in RED's decoder.
         let mut bare = r3d.clone();
         bare.sidecar = None;
         let pb = Params { output: Output::Rec709, ..Params::as_shot(&bare) };
         let z = shade_pixel(&shade(&bare, &pb, 0.0, 1.0, false), v);
-        assert!(z[1] < x[1] - 0.05, "{z:?} vs {x:?}");
+        assert!(z[1] < x[1] - 0.03, "{z:?} vs {x:?}");
     }
 
     #[test]
