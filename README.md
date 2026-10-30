@@ -186,7 +186,7 @@ metadata, the camera matrix and a few constants. The image data is copied as it 
   With "Same settings for all clips" off, each clip has its own Convert choice.
 - **R3D NE** (or `--r3d-only`, `R3D_ONLY` / `WATCH_R3D_ONLY` in Docker) acts on `.nev`
   and ProRes RAW clips: the only output is `Compressed <setting>/R3D NE/<clip name>.R3D`
-  with its `.RMD`, no N-RAW copy is kept. ZR names such as `A007_C002_10299S` are already
+  with its `.RMD`, no N-RAW copy is kept. ZR names such as `A003_C014_03157K` are already
   RED style, other names get one. It follows the compression and resolution settings: a
   lossless job copies the image data as it is, a compressed or resized one is coded from
   the original straight into R3D NE and padded to constant frames. ProRes RAW is coded

@@ -164,7 +164,7 @@ pub fn r3d_path(out: &Path, source: &Path) -> PathBuf {
 }
 
 /// RED style clip name `A001_C001_MMDDxx` for a source. ZR files are already named that way
-/// (A007_C002_10299S.NEV), so their stem is kept; other names get reel 001, clip 001 and a
+/// (A003_C014_03157K.NEV), so their stem is kept; other names get reel 001, clip 001 and a
 /// two character suffix derived from the name, so different sources do not collide.
 pub fn red_name(source: &Path) -> String {
     let stem = source.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
@@ -195,7 +195,7 @@ fn mmdd_of(secs: u64) -> String {
     format!("{m:02}{d:02}")
 }
 
-/// (camera letter, reel, clip, suffix) of `A007_C002_10299S`.
+/// (camera letter, reel, clip, suffix) of `A003_C014_03157K`.
 pub fn parse_red_name(stem: &str) -> Option<(char, String, String, String)> {
     let b = stem.as_bytes();
     let digits = |r: std::ops::Range<usize>| b[r].iter().all(u8::is_ascii_digit);
@@ -1003,19 +1003,19 @@ mod tests {
 
     #[test]
     fn red_names() {
-        assert_eq!(parse_red_name("A007_C002_10299S"), Some(('A', "007".into(), "002".into(), "9S".into())));
+        assert_eq!(parse_red_name("A003_C014_03157K"), Some(('A', "003".into(), "014".into(), "7K".into())));
         assert_eq!(parse_red_name("DSC_0001"), None);
-        assert_eq!(red_name(Path::new("/x/A007_C002_10299S.NEV")), "A007_C002_10299S");
+        assert_eq!(red_name(Path::new("/x/A003_C014_03157K.NEV")), "A003_C014_03157K");
         let n = red_name(Path::new("/nonexistent/clip one.nev"));
         assert!(parse_red_name(&n).is_some(), "{n}");
     }
 
     #[test]
     fn clip_block_matches_camera_layout() {
-        let b = red_clip_block("A007_C001_1029E2");
+        let b = red_clip_block("A003_C013_0315E2");
         assert_eq!(b.len(), 256);
         assert_eq!(&b[..5], &[0x00, 0x05, 0x10, 0x19, b'A']);
-        let file = b"A007_C001_1029E2.R3D";
+        let file = b"A003_C013_0315E2.R3D";
         let at = b.windows(file.len()).position(|w| w == file).unwrap();
         assert_eq!(&b[at - 4..at], &[0x00, 0x18, 0x10, 0x56]);
         assert_eq!(red_exposure_block(1600), [0, 1, 0, 0, 0, 2, 0, 0, 0, 0, 0x06, 0x40]);

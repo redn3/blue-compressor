@@ -228,13 +228,13 @@ fn assert_r3d_tags(out: &Path, name: &str) {
 #[test]
 fn rewraps_zr_to_r3d_ne_in_place() {
     let d = dir("high");
-    let src = d.join("A007_C002_10299S.NEV");
+    let src = d.join("A003_C014_03157K.NEV");
     let cs = synthetic_nev(&src, 1, "NIKON ZR", 3);
-    let out = r3d::r3d_path(&d.join("Compressed Lossless").join("A007_C002_10299S.NEV"), &src);
-    assert!(out.ends_with("R3D NE/A007_C002_10299S.R3D"), "{}", out.display());
+    let out = r3d::r3d_path(&d.join("Compressed Lossless").join("A003_C014_03157K.NEV"), &src);
+    assert!(out.ends_with("R3D NE/A003_C014_03157K.R3D"), "{}", out.display());
     let r = run(&src, &out, true);
     assert_eq!((r.frames, r.iso, r.experimental, r.direction), (3, 800, false, Direction::ToR3d));
-    assert_r3d_tags(&out, "A007_C002_10299S");
+    assert_r3d_tags(&out, "A003_C014_03157K");
     assert_eq!(codestreams(&out), cs);
     assert_eq!(t_white(&src), t_white(&out), "white balance tag is kept");
     // +0.5 EV in the RSX sidecar for the ZR.
