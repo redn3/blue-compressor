@@ -14,7 +14,7 @@
         <img src="icon.png" alt="" class="brand-icon" draggable="false">
         <div class="brand-text" data-tauri-drag-region>
           <span class="brand-name">Blue Compressor <span class="beta-tag" title="Beta software: keep your originals" data-i18n-title="Beta software: keep your originals" data-i18n="Beta">Beta</span></span>
-          <span class="brand-sub" data-i18n="Raw video recompression for Nikon N-RAW and R3D NE">Raw video recompression for Nikon N-RAW and R3D NE</span>
+          <span class="brand-sub" data-i18n="Raw video recompression for Nikon N-RAW, R3D NE and ProRes RAW">Raw video recompression for Nikon N-RAW, R3D NE and ProRes RAW</span>
         </div>
       </div>
       <div class="seg tabs" id="tabs" role="radiogroup" aria-label="View" data-i18n-aria-label="View">
@@ -44,7 +44,7 @@
           <div class="seg" id="seg-resolution" role="radiogroup" aria-label="Resolution" data-i18n-aria-label="Resolution">
             <button data-value="original" role="radio" data-i18n="Original">Original</button>
             <button data-value="6k" role="radio">6K</button>
-            <button data-value="4k" role="radio" data-i18n="4K UHD">4K UHD</button>
+            <button data-value="4k" role="radio" data-i18n="4K">4K</button>
           </div>
           <p class="hint" id="resolution-note"></p>
         </section>
@@ -146,7 +146,7 @@
               <div class="seg seg-sm" id="watch-resolution" role="radiogroup" aria-label="Watch resolution" data-i18n-aria-label="Watch resolution">
                 <button data-value="original" role="radio" title="Original resolution" data-i18n-title="Original resolution" data-i18n="Orig">Orig</button>
                 <button data-value="6k" role="radio" title="6K">6K</button>
-                <button data-value="4k" role="radio" title="4K UHD" data-i18n-title="4K UHD">4K</button>
+                <button data-value="4k" role="radio" title="4K" data-i18n-title="4K">4K</button>
               </div>
             </div>
             <label class="switch-row watch-clear-row" id="watch-clear-row">
@@ -211,7 +211,7 @@
               <svg viewBox="0 0 24 24" class="drop-arrow"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 19h14"/></svg>
             </div>
             <div class="drop-title" id="drop-title" data-i18n="Drop clips or folders here">Drop clips or folders here</div>
-            <div class="drop-sub" data-i18n-html="html.drop_sub">Nikon N-RAW <span class="kbd">.NEV</span> and R3D NE <span class="kbd">.R3D</span>, any number at once</div>
+            <div class="drop-sub" data-i18n-html="html.drop_sub">Nikon N-RAW <span class="kbd">.NEV</span>, R3D NE <span class="kbd">.R3D</span> and ProRes RAW <span class="kbd">.MOV</span>, any number at once</div>
             <div class="drop-buttons">
               <button class="btn primary-soft" id="empty-add" data-i18n="Choose Clips">Choose Clips</button>
               <button class="btn ghost" id="empty-add-folder" data-i18n="Choose Folder">Choose Folder</button>
@@ -479,7 +479,7 @@
           </select>
           <input type="number" class="mini-input job-b" min="0.5" max="8" step="0.1" inputmode="decimal" title="Bits per pixel" data-i18n-title="Bits per pixel" aria-label="Bits per pixel" data-i18n-aria-label="Bits per pixel">
           <select class="mini-select job-r" title="Resolution" data-i18n-title="Resolution">
-            <option value="original" data-i18n="Original">Original</option><option value="6k">6K</option><option value="4k" data-i18n="4K UHD">4K UHD</option>
+            <option value="original" data-i18n="Original">Original</option><option value="6k">6K</option><option value="4k" data-i18n="4K">4K</option>
           </select>
         </div>
       </div>

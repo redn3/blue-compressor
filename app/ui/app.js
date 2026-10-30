@@ -69,7 +69,7 @@ const RESOLUTION_NOTES = {
   get "6k"() { return tr("6048 × 3402 active. Clips already 6K or smaller keep their size."); },
   get "4k"() { return tr("3840 × 2160 active (UHD). The raw image is scaled down per colour, then compressed again."); },
 };
-const RES_LABEL = { get original() { return tr("Original"); }, "6k": "6K", get "4k"() { return tr("4K UHD"); } };
+const RES_LABEL = { get original() { return tr("Original"); }, "6k": "6K", get "4k"() { return tr("4K"); } };
 const BETA_ACK = "beta-ack-1";
 
 // Short name of a setting, as the output folders are named: "1.2bpp", "Lossless 4K".
@@ -430,7 +430,7 @@ function fitNum(el) {
   const cs = getComputedStyle(el);
   fitCanvas.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
   const w = fitCanvas.measureText(el.value || "0.0").width;
-  el.style.width = `${Math.ceil(w) + 2}px`;
+  el.style.width = `max(3ch, ${Math.ceil(w) + 4}px)`;
 }
 function renderTicks(el, top) {
   let html = "";
@@ -510,22 +510,6 @@ function bindBppSlider() {
     e.preventDefault();
     step(e.deltaY < 0 ? 0.1 : -0.1);
   }, { passive: false });
-  // WebKit webviews (macOS) deliver trackpad pinches as gesture events rather than
-  // ctrl+wheel. Zoom around the pinch point relative to the scale when the pinch began.
-  let gestureStart = null;
-  st.addEventListener("gesturestart", (e) => {
-    e.preventDefault();
-    gestureStart = viewer.scale;
-  });
-  st.addEventListener("gesturechange", (e) => {
-    e.preventDefault();
-    if (gestureStart == null || (!viewer.base && !viewer.region)) return;
-    zoomTo(gestureStart * e.scale, local(e));
-  });
-  st.addEventListener("gestureend", (e) => {
-    e.preventDefault();
-    gestureStart = null;
-  });
 }
 
 // Queue ------------------------------------------------------------------------
@@ -1719,6 +1703,22 @@ function bindStage() {
   const st = $("stage");
   let drag = null;
   const local = (e) => { const r = st.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+  // WebKit webviews (macOS) deliver trackpad pinches as gesture events rather than
+  // ctrl+wheel. Zoom around the pinch point relative to the scale when the pinch began.
+  let gestureStart = null;
+  st.addEventListener("gesturestart", (e) => {
+    e.preventDefault();
+    gestureStart = viewer.scale;
+  });
+  st.addEventListener("gesturechange", (e) => {
+    e.preventDefault();
+    if (gestureStart == null || (!viewer.base && !viewer.region)) return;
+    zoomTo(gestureStart * e.scale, local(e));
+  });
+  st.addEventListener("gestureend", (e) => {
+    e.preventDefault();
+    gestureStart = null;
+  });
   const nearSplit = (p) => Math.abs(p.x - splitCanvasX() / dpr()) < 14;
   st.addEventListener("pointermove", (e) => {
     if (e.target.closest(".v-mini")) return;

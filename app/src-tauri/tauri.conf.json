@@ -35,7 +35,7 @@
     "active": true,
     "targets": "all",
     "category": "Video",
-    "shortDescription": "Recompress Nikon N-RAW and R3D NE TICO RAW clips",
+    "shortDescription": "Recompress Nikon N-RAW, R3D NE and ProRes RAW clips",
     "longDescription": "Blue Compressor repacks, requantizes or resizes Nikon N-RAW (.NEV) and R3D NE (.R3D) clips while keeping the raw data, metadata, audio and container.",
     "icon": [
       "icons/32x32.png",

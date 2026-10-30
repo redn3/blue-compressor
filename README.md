@@ -17,7 +17,8 @@ Not sure which Mac you have? Open the Apple menu and choose About This Mac. If i
 Other formats (Windows `.msi`, Linux `.deb` and `.rpm`) and the command line tool are on the [release page](https://github.com/redn3/blue-compressor/releases/tag/v0.2.3).
 
 Blue Compressor makes Nikon **N-RAW** (`.NEV`, e.g. Z8, Z9, Z6III) and **R3D NE**
-(`.R3D`, e.g. Nikon ZR) clips smaller. It re-encodes the TICO RAW (JPEG XS) data inside
+(`.R3D`, e.g. Nikon ZR) clips smaller. It also converts Nikon **ProRes RAW** (`.MOV`)
+clips into N-RAW and R3D NE (a decode and re-encode, so not lossless). It re-encodes the TICO RAW (JPEG XS) data inside
 them and keeps everything else as it was: the raw Bayer data stays raw, and the
 container, metadata, timecode and audio are untouched. The output is an ordinary clip
 meant to open in the same software as the camera originals.

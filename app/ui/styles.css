@@ -1354,3 +1354,33 @@ html:lang(zh-Hant) body { font-family: -apple-system, "PingFang TC", "Microsoft 
 .dev-select { width: 100%; }
 .dev-check { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-2); }
 body.tab-develop .viewer { display: none; }
+
+/* Narrow and short windows: nothing overlaps, fields keep their content. */
+.queue-head { flex-wrap: wrap; row-gap: 8px; }
+.queue-actions { flex-wrap: wrap; justify-content: flex-end; }
+.empty { overflow: auto; flex-direction: column; }
+.drop-zone { justify-content: safe center; flex-shrink: 0; min-height: 100%; height: auto; padding: 16px; text-align: center; box-sizing: border-box; }
+.seg button { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 900px) { .seg-picks button { padding-left: 4px; padding-right: 4px; font-size: 12px; } }
+.drop-sub { max-width: 100%; }
+.bpp-head { flex-wrap: wrap; }
+.bpp-value { flex: none; }
+.bpp-value input { min-width: 3ch; }
+.brand { min-width: 0; }
+.brand-text { min-width: 0; }
+.brand-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-height: 760px), (max-width: 1100px) {
+  .drop-art { width: 64px; height: 64px; margin-bottom: 6px; }
+  .quad { width: 48px; height: 48px; margin: 8px; gap: 4px; }
+  .q { border-radius: 5px; }
+  .drop-arrow { width: 26px; height: 26px; right: -10px; bottom: -8px; }
+}
+@media (max-width: 1100px) {
+  .brand-sub { display: none; }
+}
+@media (max-width: 900px) {
+  .body { grid-template-columns: 260px minmax(0, 1fr); }
+  .queue-head { padding: 14px 16px 10px; }
+  .empty { padding: 6px 16px 16px; }
+  .queue-actions .btn { padding: 0 9px; }
+}
