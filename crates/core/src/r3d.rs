@@ -20,9 +20,9 @@
 //! lack some of them; those are rebuilt with the tags inserted, still without decoding
 //! (experimental: no real clips of those cameras were available to test).
 //!
-//! R3D NE records about one stop brighter than N-RAW at the same ISO (measured on matched
-//! ZR clips: raw values about 2x). The R3D keeps the real ISO; an optional `.RMD` sidecar
-//! next to it carries an exposure offset ([`zr_exposure_ev`]) so RED decoders match.
+//! At the same ISO, RED's decoder renders an R3D NE rewrap about half a stop darker than its
+//! N-RAW original (compared side by side in REDCINE-X PRO). The R3D keeps the real ISO; an
+//! `.RMD` sidecar (RSX layout) next to it carries the offset ([`zr_exposure_ev`]) so they match.
 
 use std::fs::File;
 use std::io::{BufWriter, Read, Write};
@@ -37,15 +37,19 @@ use crate::{Error, Options, Result};
 pub const R3D_FOLDER: &str = "R3D NE";
 pub const NEV_FOLDER: &str = "N-RAW";
 
-/// RMD exposure offset for ZR clips: +1 stop, the measured R3D NE vs N-RAW difference.
-pub const ZR_EXPOSURE_EV: f64 = 1.0;
-/// RMD exposure offset for other cameras (no measurements yet; about half a stop is the
+/// RMD exposure offset for ZR clips: +0.5 EV. In RED's own decoder (sidecar ignored, same
+/// ISO 800) the N-RAW original renders about half a stop brighter than the R3D NE rewrap.
+pub const ZR_EXPOSURE_EV: f64 = 0.5;
+/// RMD exposure offset for other cameras (no measurements yet; the ZR value is the
 /// starting point). TODO: check against real Z8, Z9 and Z6III clips.
 pub const OTHER_EXPOSURE_EV: f64 = 0.5;
 
-/// Exposure offset for a camera model.
+/// Exposure offset for a camera model. The model string may carry any case, padding or
+/// trailing NULs ("NIKON ZR", "Nikon ZR\0\0").
 pub fn zr_exposure_ev(model: &str) -> f64 {
-    if model == "NIKON ZR" {
+    let m: String =
+        model.trim_matches(|c: char| c == '\0' || c.is_whitespace()).split_whitespace().collect::<Vec<_>>().join(" ");
+    if m.eq_ignore_ascii_case("NIKON ZR") {
         ZR_EXPOSURE_EV
     } else {
         OTHER_EXPOSURE_EV
@@ -248,15 +252,86 @@ pub fn rmd_path(r3d: &Path) -> PathBuf {
     r3d.with_extension("RMD")
 }
 
-/// The exposure sidecar text. RMD is RED's XML metadata sidecar (`<!DOCTYPE REDXIF>`); only
-/// ISO and the exposure offset are written, everything else stays as recorded. The element
-/// names follow the publicly described controls; they are not checked against RED's
-/// schema yet, so decoders that do not recognise them simply ignore the file.
-pub fn rmd_text(iso: u32, exposure_ev: f64) -> String {
+/// A GUID in RED's sidecar style (8-4-4-4-12 upper case hex), from a seed mixed with the
+/// clock so every sidecar gets its own.
+fn guid(seed: u64, n: u64) -> String {
+    use std::hash::{BuildHasher, Hasher};
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos() as u64);
+    let h = |k: u64| {
+        let mut x = std::collections::hash_map::RandomState::new().build_hasher();
+        x.write_u64(seed ^ now ^ k.wrapping_mul(0x9e37_79b9_7f4a_7c15));
+        x.finish()
+    };
+    let (a, b) = (h(2 * n), h(2 * n + 1));
     format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<!DOCTYPE REDXIF>\n<rmd>\n    \
-         <version major=\"1\" minor=\"0\"/>\n    <color>\n        <iso>{iso}</iso>\n        \
-         <exposure_adjust>{exposure_ev:.3}</exposure_adjust>\n    </color>\n</rmd>\n"
+        "{:08X}-{:04X}-{:04X}-{:04X}-{:012X}",
+        a >> 32,
+        (a >> 16) & 0xffff,
+        (a & 0x0fff) | 0x4000,
+        ((b >> 48) & 0x3fff) | 0x8000,
+        b & 0xffff_ffff_ffff
+    )
+}
+
+/// The settings written to the `.RMD` sidecar of a rewrapped clip.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RmdLook {
+    pub iso: u32,
+    pub kelvin: f64,
+    pub tint: f64,
+    /// Exposure Adjust in stops.
+    pub exposure_ev: f64,
+}
+
+/// The `.RMD` sidecar text in RED's RSX layout (the one RED's own software writes): a legacy
+/// `<looks>` block and a `<looks2 colorversion="3">` block for the IPP2 pipeline R3D NE uses,
+/// each with one look whose `R3DIPS` module carries ISO, white balance and the exposure
+/// offset. Everything else is at RED's defaults (Medium roll off and tone map, REDWideGamutRGB
+/// and Log3G10).
+pub fn rmd_text(l: RmdLook) -> String {
+    let seed = (l.iso as u64) << 32 ^ l.kelvin.to_bits() ^ l.exposure_ev.to_bits();
+    let (g1, g2) = (guid(seed, 0), guid(seed, 1));
+    let (iso, k, t, ev) = (l.iso, l.kelvin, l.tint, l.exposure_ev);
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<sidecar version="2.0" type="RSX">
+    <looks>
+        <primary guid="{g1}"/>
+        <looklist>
+            <look id="{g1}">
+                <module name="R3DIPS">
+                    <iso type="int" value="{iso}"/>
+                    <kelvin type="float" value="{k:.5}"/>
+                    <tint type="float" value="{t:.5}"/>
+                    <exposurecompensation type="float" value="{ev:.5}"/>
+                </module>
+            </look>
+        </looklist>
+    </looks>
+    <looks2 colorversion="3">
+        <primary guid="{g2}"/>
+        <looklist>
+            <look id="{g2}">
+                <module name="R3DIPS">
+                    <iso type="int" value="{iso}"/>
+                    <kelvin type="float" value="{k:.5}"/>
+                    <tint type="float" value="{t:.5}"/>
+                    <exposureadjust type="float" value="{ev:.5}"/>
+                    <exposurecompensation type="float" value="0.00000"/>
+                    <highlightrolloff type="int" value="3"/>
+                    <outputtonemap type="int" value="1"/>
+                    <colorspace type="int" value="1"/>
+                    <gammaspace type="string" value="12BT"/>
+                    <colorversion type="int" value="3"/>
+                    <lenscorrection>
+                        <distortion type="int" value="0"/>
+                    </lenscorrection>
+                </module>
+            </look>
+        </looklist>
+    </looks2>
+</sidecar>
+"#
     )
 }
 
@@ -622,8 +697,9 @@ fn finish_outcome(
     let rmd = if p.direction == Direction::ToR3d && o.rmd {
         let path = rmd_path(&o.output);
         let ev = o.exposure_ev.unwrap_or_else(|| zr_exposure_ev(&p.model));
-        std::fs::write(&path, rmd_text(p.iso, ev))
-            .map_err(|e| Error(format!("cannot write {}: {e}", path.display())))?;
+        let kelvin = crate::develop::clip_info(&o.output).ok().map(|c| c.kelvin).filter(|&k| k > 0).unwrap_or(5600);
+        let look = RmdLook { iso: p.iso, kelvin: kelvin as f64, tint: 0.0, exposure_ev: ev };
+        std::fs::write(&path, rmd_text(look)).map_err(|e| Error(format!("cannot write {}: {e}", path.display())))?;
         Some(path)
     } else {
         None
@@ -902,9 +978,25 @@ mod tests {
     }
 
     #[test]
-    fn rmd_is_redxif() {
-        let t = rmd_text(800, 1.0);
-        assert!(t.starts_with("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<!DOCTYPE REDXIF>"));
-        assert!(t.contains("<iso>800</iso>") && t.contains("<exposure_adjust>1.000</exposure_adjust>"));
+    fn rmd_is_rsx() {
+        let t = rmd_text(RmdLook { iso: 800, kelvin: 4749.0, tint: 0.0, exposure_ev: 0.5 });
+        assert!(t.contains("<sidecar version=\"2.0\" type=\"RSX\">") && t.contains("<looks2 colorversion=\"3\">"));
+        assert!(
+            t.contains("<iso type=\"int\" value=\"800\"/>")
+                && t.contains("<kelvin type=\"float\" value=\"4749.00000\"/>")
+        );
+        assert!(t.contains("<exposureadjust type=\"float\" value=\"0.50000\"/>"));
+        assert_eq!(t.matches("<look id=").count(), 2);
+        assert!(!t.contains('\u{2014}'));
+        let g: Vec<&str> = t.match_indices("guid=\"").map(|(i, _)| &t[i + 6..i + 42]).collect();
+        assert!(g.len() == 2 && g[0] != g[1] && g.iter().all(|x| x.len() == 36 && x.matches('-').count() == 4));
+    }
+
+    #[test]
+    fn model_match_is_tolerant() {
+        for m in ["NIKON ZR", "Nikon ZR", " nikon  zr \0\0", "NIKON ZR\0"] {
+            assert_eq!(zr_exposure_ev(m), ZR_EXPOSURE_EV, "{m:?}");
+        }
+        assert_eq!(zr_exposure_ev("NIKON Z 8"), OTHER_EXPOSURE_EV);
     }
 }

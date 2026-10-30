@@ -237,9 +237,10 @@ fn rewraps_zr_to_r3d_ne_in_place() {
     assert_r3d_tags(&out, "A007_C002_10299S");
     assert_eq!(codestreams(&out), cs);
     assert_eq!(t_white(&src), t_white(&out), "white balance tag is kept");
-    // +1 stop in the sidecar for the ZR.
+    // +0.5 EV in the RSX sidecar for the ZR.
     let rmd = std::fs::read_to_string(r.rmd.unwrap()).unwrap();
-    assert!(rmd.contains("<exposure_adjust>1.000</exposure_adjust>") && rmd.contains("<iso>800</iso>"));
+    assert!(rmd.contains("type=\"RSX\"") && rmd.contains("<exposureadjust type=\"float\" value=\"0.50000\"/>"));
+    assert!(rmd.contains("<iso type=\"int\" value=\"800\"/>"));
     // Same size, only tags changed.
     let (a, b) = (std::fs::read(&src).unwrap(), std::fs::read(&out).unwrap());
     assert_eq!(a.len(), b.len());
@@ -299,7 +300,7 @@ fn other_cameras_are_rebuilt_experimental() {
     assert_eq!(codestreams(&out), cs, "image data copied as is");
     assert!(r.frame_bytes > 0, "all frames the same size");
     let rmd = std::fs::read_to_string(r.rmd.unwrap()).unwrap();
-    assert!(rmd.contains("<exposure_adjust>0.500</exposure_adjust>"));
+    assert!(rmd.contains("<exposureadjust type=\"float\" value=\"0.50000\"/>"));
     // And back to N-RAW.
     let back = d.join("back.NEV");
     run(&out, &back, false);
@@ -338,7 +339,7 @@ fn compress_path_writes_constant_r3d_ne() {
     assert_r3d_tags(&out, "A001_C004_0101AB");
     assert_eq!(codestreams(&out), cs);
     let rmd = std::fs::read_to_string(r.rmd.expect("sidecar")).unwrap();
-    assert!(rmd.contains("<exposure_adjust>1.500</exposure_adjust>"), "adjustable exposure");
+    assert!(rmd.contains("<exposureadjust type=\"float\" value=\"1.50000\"/>"), "adjustable exposure");
     let _ = std::fs::remove_dir_all(d);
 }
 

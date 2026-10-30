@@ -194,12 +194,13 @@ metadata, the camera matrix and a few constants. The image data is copied as it 
   recompressing, so the image data stays exactly as recorded: each job only does the
   conversions above, as a streaming copy with no decoding, at about disk speed
   (under a second for a 650 MB clip on an SSD). Not available for the watch folder.
-- **Exposure sidecar:** R3D NE records about one stop brighter than N-RAW at the same ISO.
-  The ISO tag is left as it is; instead every R3D NE output gets an `.RMD` sidecar next to
-  the `.R3D` that asks RED decoders for +1 stop of exposure on ZR clips (+0.5 for the Z8,
-  Z9 and Z6III, a first guess). The sidecar layout follows the public outline of the format
-  (an XML `REDXIF` document); its element names are not verified against real RED software
-  yet, so check that your decoder picks it up.
+- **Exposure sidecar:** in RED's own software, at the same ISO, the N-RAW original renders
+  about half a stop brighter than its R3D NE rewrap. The ISO tag is left as it is; instead
+  every R3D NE output gets an `.RMD` sidecar next to the `.R3D` with +0.5 EV of Exposure
+  Adjust. The ZR value comes from a side by side comparison in REDCINE-X PRO; for the Z8,
+  Z9 and Z6III it is the same first guess. The sidecar uses the RSX layout RED's own
+  software writes (ISO, white balance and Exposure Adjust in a `looks2` R3DIPS module,
+  everything else at RED's defaults).
 
 **Experimental: Z8, Z9 and Z6III.** These cameras never record R3D NE, so their clips
 also get the RED metadata the ZR writes (clip block, exposure block, gamma and gamut) and
