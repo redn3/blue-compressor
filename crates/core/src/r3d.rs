@@ -285,8 +285,9 @@ pub struct RmdLook {
 
 /// The `.RMD` sidecar text in RED's RSX layout (the one RED's own software writes): a legacy
 /// `<looks>` block and a `<looks2 colorversion="3">` block for the IPP2 pipeline R3D NE uses,
-/// each with one look whose `R3DIPS` module carries ISO, white balance and the exposure
-/// offset. Everything else is at RED's defaults (Medium roll off and tone map, REDWideGamutRGB
+/// each with one look whose `R3DIPS` module carries ISO and white balance. The exposure
+/// offset is written only to the `<looks2>` Exposure Adjust; the legacy block keeps exposure
+/// compensation at 0 so it is never applied twice. Everything else is at RED's defaults (Medium roll off and tone map, REDWideGamutRGB
 /// and Log3G10).
 pub fn rmd_text(l: RmdLook) -> String {
     let seed = (l.iso as u64) << 32 ^ l.kelvin.to_bits() ^ l.exposure_ev.to_bits();
@@ -296,37 +297,38 @@ pub fn rmd_text(l: RmdLook) -> String {
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <sidecar version="2.0" type="RSX">
     <looks>
-        <primary guid="{g1}"/>
+        <primary type="guid" value="{g1}"/>
         <looklist>
-            <look id="{g1}">
-                <module name="R3DIPS">
-                    <iso type="int" value="{iso}"/>
-                    <kelvin type="float" value="{k:.5}"/>
-                    <tint type="float" value="{t:.5}"/>
-                    <exposurecompensation type="float" value="{ev:.5}"/>
-                </module>
+            <look id="{g1}" name="">
+                <lookmodules>
+                    <module name="R3DIPS" order="0">
+                        <iso type="int" value="{iso}"/>
+                        <kelvin type="float" value="{k:.5}"/>
+                        <tint type="float" value="{t:.5}"/>
+                        <exposurecompensation type="float" value="0.00000"/>
+                    </module>
+                </lookmodules>
             </look>
         </looklist>
     </looks>
     <looks2 colorversion="3">
-        <primary guid="{g2}"/>
+        <primary type="guid" value="{g2}"/>
         <looklist>
-            <look id="{g2}">
-                <module name="R3DIPS">
-                    <iso type="int" value="{iso}"/>
-                    <kelvin type="float" value="{k:.5}"/>
-                    <tint type="float" value="{t:.5}"/>
-                    <exposureadjust type="float" value="{ev:.5}"/>
-                    <exposurecompensation type="float" value="0.00000"/>
-                    <highlightrolloff type="int" value="3"/>
-                    <outputtonemap type="int" value="1"/>
-                    <colorspace type="int" value="1"/>
-                    <gammaspace type="string" value="12BT"/>
-                    <colorversion type="int" value="3"/>
-                    <lenscorrection>
-                        <distortion type="int" value="0"/>
-                    </lenscorrection>
-                </module>
+            <look id="{g2}" name="">
+                <lookmodules>
+                    <module name="R3DIPS" order="0">
+                        <colorversion type="int" value="3"/>
+                        <iso type="int" value="{iso}"/>
+                        <kelvin type="float" value="{k:.5}"/>
+                        <tint type="float" value="{t:.5}"/>
+                        <exposureadjust type="float" value="{ev:.5}"/>
+                        <exposurecompensation type="float" value="0.00000"/>
+                        <highlightrolloff type="int" value="3"/>
+                        <outputtonemap type="int" value="1"/>
+                        <colorspace type="int" value="1"/>
+                        <gammaspace type="string" value="12BT"/>
+                    </module>
+                </lookmodules>
             </look>
         </looklist>
     </looks2>
@@ -988,7 +990,17 @@ mod tests {
         assert!(t.contains("<exposureadjust type=\"float\" value=\"0.50000\"/>"));
         assert_eq!(t.matches("<look id=").count(), 2);
         assert!(!t.contains('\u{2014}'));
-        let g: Vec<&str> = t.match_indices("guid=\"").map(|(i, _)| &t[i + 6..i + 42]).collect();
+        // The exposure offset lives only in <looks2>; the legacy block stays at 0 so no
+        // decoder applies it twice.
+        let legacy = &t[t.find("<looks>").unwrap()..t.find("</looks>").unwrap()];
+        assert!(
+            legacy.contains("<exposurecompensation type=\"float\" value=\"0.00000\"/>") && !legacy.contains("0.50000")
+        );
+        assert!(
+            t.matches("<lookmodules>").count() == 2 && t.matches("<module name=\"R3DIPS\" order=\"0\">").count() == 2
+        );
+        assert_eq!(t.matches("name=\"\">").count(), 2);
+        let g: Vec<&str> = t.match_indices("type=\"guid\" value=\"").map(|(i, _)| &t[i + 19..i + 55]).collect();
         assert!(g.len() == 2 && g[0] != g[1] && g.iter().all(|x| x.len() == 36 && x.matches('-').count() == 4));
     }
 
