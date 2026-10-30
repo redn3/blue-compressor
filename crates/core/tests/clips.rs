@@ -60,6 +60,7 @@ fn transcode(input: &Path, quality: u8, resolution: Resolution) -> (tempdir::Dir
         threads: 0,
         bpp: None,
         cbr: false,
+        template: None,
     };
     let r = bluecompress::transcode(&opt, &AtomicBool::new(false), &mut |_, _| {}).unwrap();
     eprintln!(

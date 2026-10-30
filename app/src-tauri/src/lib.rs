@@ -177,7 +177,7 @@ fn backend_of(s: &str) -> Backend {
 }
 
 fn is_clip(p: &Path) -> bool {
-    matches!(p.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref(), Some("nev" | "r3d"))
+    bluecompress::is_clip_path(p)
 }
 
 fn collect(path: &Path, out: &mut Vec<PathBuf>) {
@@ -221,6 +221,7 @@ fn describe(path: &Path) -> Clip {
             codec: Some(match i.codec {
                 Codec::NRaw => "N-RAW".into(),
                 Codec::R3dNe => "R3D NE".into(),
+                Codec::ProResRaw => "ProRes RAW".into(),
             }),
             width: i.width,
             height: i.height,
@@ -258,15 +259,15 @@ fn target_of(input: &Path, quality: Option<u8>, bpp: Option<f64>, lossless: bool
 /// "1.2bpp"). Never an existing file, and never the input itself.
 fn output_for(input: &Path, folder: Option<&str>, target: Target, resolution: &str) -> PathBuf {
     let tag = bluecompress::variant_name_for(target, resolution);
-    let name = input.file_name().unwrap_or_default();
+    let name = bluecompress::output_file_name(input);
     let same = |a: &Path, b: &Path| match (a.canonicalize(), b.canonicalize()) {
         (Ok(x), Ok(y)) => x == y,
         _ => false,
     };
     let free = |p: &Path| !p.exists() && !same(p, input);
     let candidates: Vec<PathBuf> = match folder {
-        Some(f) if !f.is_empty() => vec![Path::new(f).join(name), Path::new(f).join(&tag).join(name)],
-        _ => vec![input.parent().unwrap_or(Path::new(".")).join(format!("Compressed {tag}")).join(name)],
+        Some(f) if !f.is_empty() => vec![Path::new(f).join(&name), Path::new(f).join(&tag).join(&name)],
+        _ => vec![input.parent().unwrap_or(Path::new(".")).join(format!("Compressed {tag}")).join(&name)],
     };
     if let Some(p) = candidates.iter().find(|p| free(p)) {
         return p.clone();
@@ -276,7 +277,7 @@ fn output_for(input: &Path, folder: Option<&str>, target: Target, resolution: &s
     let dir = last.parent().unwrap_or(Path::new("."));
     let base = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let parent = dir.parent().unwrap_or(Path::new("."));
-    (2..).map(|n| parent.join(format!("{base} ({n})")).join(name)).find(|p| free(p)).unwrap()
+    (2..).map(|n| parent.join(format!("{base} ({n})")).join(&name)).find(|p| free(p)).unwrap()
 }
 
 #[tauri::command]
@@ -514,6 +515,7 @@ fn start(app: AppHandle, state: State<'_, Runner>, jobs: Vec<JobRequest>, settin
                 backend,
                 threads: 0,
                 cbr: job.cbr,
+                template: None,
             };
             let mut last = Instant::now() - std::time::Duration::from_secs(1);
             let app2 = app.clone();
@@ -590,7 +592,7 @@ fn start(app: AppHandle, state: State<'_, Runner>, jobs: Vec<JobRequest>, settin
             // R3D NE from the original .nev (not the compressed copy), next to the output.
             let (r3d, r3d_skipped, r3d_error) = match &result {
                 Ok(_)
-                    if ((job.r3d && bluecompress::r3d::is_nev(&options.input))
+                    if ((job.r3d && bluecompress::r3d::becomes_nev(&options.input))
                         || (job.to_nev && bluecompress::r3d::is_r3d(&options.input)))
                         && !cancel.load(Ordering::SeqCst) =>
                 {
@@ -688,7 +690,7 @@ fn pick_clips(app: AppHandle) -> Vec<String> {
     app.dialog()
         .file()
         .set_title("Add Clips")
-        .add_filter("N-RAW and R3D NE clips", &["nev", "NEV", "r3d", "R3D"])
+        .add_filter("N-RAW, R3D NE and ProRes RAW clips", &["nev", "NEV", "r3d", "R3D", "mov", "MOV"])
         .blocking_pick_files()
         .unwrap_or_default()
         .into_iter()

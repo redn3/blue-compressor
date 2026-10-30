@@ -339,9 +339,9 @@ pub fn rmd_text(l: RmdLook) -> String {
 
 // Per direction values. Frame values are the NRMT bytes after group and tag.
 const R3D_CODES: [u16; 3] = [65, 4, 3];
-const NEV_CODES: [u16; 3] = [49, 2, 1];
+pub(crate) const NEV_CODES: [u16; 3] = [49, 2, 1];
 const R3D_C0: [u8; 8] = [0x48, 0x01, 0x0c, 0x00, 0x78, 0x01, 0x0c, 0x00];
-const NEV_C0: [u8; 8] = [0x60, 0x01, 0x0c, 0x00, 0xa8, 0x01, 0x0c, 0x00];
+pub(crate) const NEV_C0: [u8; 8] = [0x60, 0x01, 0x0c, 0x00, 0xa8, 0x01, 0x0c, 0x00];
 const R3D_0011: [u8; 7] = [0x00, 0x0f, 0xc1, 0x14, 0x2d, 0xf0, 0xce];
 const NEV_0011: [u8; 7] = [0x00, 0x0f, 0xc1, 0x12, 0xe1, 0xf0, 0xce];
 /// Camera to XYZ (D65) matrices, 9 big endian f32 after a zero byte (rows sum to the D65
@@ -449,7 +449,7 @@ pub fn plan(m: &Movie, name: &str) -> Result<R3dPlan> {
 }
 
 /// moov/udta with NCDT/NCTG replaced by `tags` (everything else as it was).
-fn build_udta(m: &Movie, tags: &[(u32, u16, Vec<u8>)]) -> Result<Vec<u8>> {
+pub(crate) fn build_udta(m: &Movie, tags: &[(u32, u16, Vec<u8>)]) -> Result<Vec<u8>> {
     let mm = &m.moov;
     let boxes = |start: usize, end: usize| -> Vec<(usize, usize, u32)> {
         let mut v = Vec::new();
@@ -749,6 +749,7 @@ pub fn convert(o: &R3dOptions, cancel: &AtomicBool, progress: &mut dyn FnMut(f64
                 backend: crate::Backend::Cpu,
                 threads: 0,
                 cbr: false,
+                template: None,
             };
             let r = crate::transcode::transcode_with(&job, Some(&p), cancel, progress)?;
             finish_outcome(o, &p, start, r.input_bytes, r.output_bytes)
@@ -884,6 +885,12 @@ pub fn is_nev(path: &Path) -> bool {
     path.extension().is_some_and(|e| e.eq_ignore_ascii_case("nev"))
 }
 
+/// True for a clip whose compressed copy is N-RAW, so it can also become R3D NE: a `.nev`,
+/// or a ProRes RAW `.mov`.
+pub fn becomes_nev(path: &Path) -> bool {
+    is_nev(path) || crate::prores_raw::is_prores_raw(path)
+}
+
 /// True for a `.r3d` file (any case).
 pub fn is_r3d(path: &Path) -> bool {
     path.extension().is_some_and(|e| e.eq_ignore_ascii_case("r3d"))
@@ -924,6 +931,22 @@ pub fn convert_job(
     progress: &mut dyn FnMut(f64, f64),
 ) -> Result<R3dJob> {
     let src = &job.input;
+    if crate::prores_raw::is_prores_raw(src) {
+        // The job's N-RAW output is already coded at the job's setting: rewrap it.
+        if !c.to_r3d {
+            return Ok(R3dJob::Skipped("no conversion for this clip".into()));
+        }
+        if c.rewrap {
+            return Ok(R3dJob::Skipped("ProRes RAW is re-encoded, there is nothing to rewrap".into()));
+        }
+        let nev = &job.output;
+        if let Err(e) = check(nev) {
+            return Ok(R3dJob::Skipped(e.0));
+        }
+        let o =
+            R3dOptions { rmd: c.rmd, exposure_ev: c.exposure_ev, ..R3dOptions::new(nev, &r3d_path(&job.output, src)) };
+        return convert(&o, cancel, progress).map(R3dJob::Done);
+    }
     let (wanted, out) = if is_nev(src) {
         (c.to_r3d, r3d_path(&job.output, src))
     } else if is_r3d(src) {

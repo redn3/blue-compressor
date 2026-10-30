@@ -659,3 +659,338 @@ fn serialize(b: &BoxNode, src: &[u8], repl: &HashMap<u64, Vec<u8>>, out: &mut Ve
     let n = (out.len() - start) as u32;
     wr32(out, start, n);
 }
+
+/// The `trak` boxes of a moov tree that [`Movie::parse`] lists as tracks, in the same
+/// order (so index `i` here is `movie.tracks[i]`).
+fn track_boxes(mv: &BoxNode) -> Vec<&BoxNode> {
+    mv.children
+        .iter()
+        .filter(|b| b.kind == fourcc(b"trak"))
+        .filter(|t| {
+            find(&t.children, b"tkhd").is_some()
+                && find_path(t, &[b"mdia", b"hdlr"]).is_some()
+                && find_path(t, &[b"mdia", b"minf", b"stbl"]).is_some()
+        })
+        .collect()
+}
+
+/// Pairs each track of `template` with the first unused track of `source` that has the
+/// same handler (vide, soun, tmcd): (template track, source track).
+pub fn track_pairs(template: &Movie, source: &Movie) -> Vec<(usize, usize)> {
+    let mut used = vec![false; source.tracks.len()];
+    let mut out = Vec::new();
+    for (ti, t) in template.tracks.iter().enumerate() {
+        if let Some(si) = (0..source.tracks.len()).find(|&i| !used[i] && source.tracks[i].handler == t.handler) {
+            used[si] = true;
+            out.push((ti, si));
+        }
+    }
+    out
+}
+
+/// Duration field of an mvhd / tkhd / mdhd box: (offset, is 64-bit). `at` is the box offset.
+fn duration_field(buf: &[u8], b: &BoxNode) -> (usize, bool) {
+    let p = b.payload() as usize;
+    let v1 = buf[p] == 1;
+    let k = b.kind;
+    let off = if k == fourcc(b"tkhd") {
+        if v1 {
+            p + 28
+        } else {
+            p + 20
+        }
+    } else if v1 {
+        p + 24
+    } else {
+        p + 16
+    };
+    (off, v1)
+}
+
+fn read_duration(buf: &[u8], b: &BoxNode) -> u64 {
+    let (o, w) = duration_field(buf, b);
+    if w {
+        rd64(buf, o)
+    } else {
+        rd32(buf, o) as u64
+    }
+}
+
+fn write_duration(buf: &mut [u8], b: &BoxNode, v: u64) {
+    let (o, w) = duration_field(buf, b);
+    if w {
+        buf[o..o + 8].copy_from_slice(&v.to_be_bytes());
+    } else {
+        wr32(buf, o, v.min(u32::MAX as u64) as u32);
+    }
+}
+
+/// Timescale of an mvhd / mdhd box.
+fn timescale_field(buf: &[u8], b: &BoxNode) -> usize {
+    let p = b.payload() as usize;
+    if buf[p] == 1 {
+        p + 20
+    } else {
+        p + 12
+    }
+}
+
+/// A new moov built from `template`'s (sample descriptions, track headers, everything the
+/// decoders know a camera file by) with the timing and sample tables of `source`: every
+/// paired track takes the source track's stts and stsc (and, but for video, its stsz),
+/// durations, timescales and edit list; video takes `video_sizes`; chunk offsets are
+/// `chunk_offsets[source track]`. Template tracks without a source track are dropped.
+/// `udta` replaces moov/udta; `codec` is the video sample entry's fourcc.
+pub fn moov_from_template(
+    template: &Movie,
+    source: &Movie,
+    video_sizes: &[u32],
+    chunk_offsets: &[Vec<u64>],
+    udta: &[u8],
+    codec: u32,
+) -> Result<Vec<u8>> {
+    let mut moov = template.moov.clone();
+    let tt = parse_boxes(&moov, 0, moov.len() as u64)?;
+    let st = parse_boxes(&source.moov, 0, source.moov.len() as u64)?;
+    let (tmv, smv) = (&tt[0], &st[0]);
+    let src = &source.moov;
+    let mut repl: HashMap<u64, Vec<u8>> = HashMap::new();
+    let whole = |b: &BoxNode| src[b.offset as usize..(b.offset + b.size) as usize].to_vec();
+
+    if let (Some(a), Some(b)) = (find(&tmv.children, b"mvhd"), find(&smv.children, b"mvhd")) {
+        let (ta, tb) = (timescale_field(&moov, a), timescale_field(src, b));
+        let ts = rd32(src, tb);
+        wr32(&mut moov, ta, ts);
+        let d = read_duration(src, b);
+        write_duration(&mut moov, a, d);
+    }
+    let (tb, sb) = (track_boxes(tmv), track_boxes(smv));
+    let pairs = track_pairs(template, source);
+    for (ti, trak) in tb.iter().enumerate() {
+        let Some(&(_, si)) = pairs.iter().find(|p| p.0 == ti) else {
+            repl.insert(trak.offset, Vec::new());
+            continue;
+        };
+        let strak = sb[si];
+        let is_video = ti == template.video_track;
+        if let (Some(a), Some(b)) = (find(&trak.children, b"tkhd"), find(&strak.children, b"tkhd")) {
+            let d = read_duration(src, b);
+            write_duration(&mut moov, a, d);
+        }
+        if let (Some(a), Some(b)) = (find_path(trak, &[b"mdia", b"mdhd"]), find_path(strak, &[b"mdia", b"mdhd"])) {
+            let ts = rd32(src, timescale_field(src, b));
+            let o = timescale_field(&moov, a);
+            wr32(&mut moov, o, ts);
+            let d = read_duration(src, b);
+            write_duration(&mut moov, a, d);
+        }
+        match (find(&trak.children, b"edts"), find(&strak.children, b"edts")) {
+            (Some(a), Some(b)) => {
+                repl.insert(a.offset, whole(b));
+            }
+            (Some(a), None) => {
+                repl.insert(a.offset, Vec::new());
+            }
+            _ => {}
+        }
+        let (tstbl, sstbl) = (
+            find_path(trak, &[b"mdia", b"minf", b"stbl"]).unwrap(),
+            find_path(strak, &[b"mdia", b"minf", b"stbl"]).unwrap(),
+        );
+        let mut placed_co = false;
+        for c in &tstbl.children {
+            let k = &c.kind.to_be_bytes();
+            match k {
+                b"stts" | b"stsc" => match find(&sstbl.children, &[k[0], k[1], k[2], k[3]]) {
+                    Some(s) => {
+                        repl.insert(c.offset, whole(s));
+                    }
+                    None => return fail(format!("source track without {}", fourcc_str(c.kind))),
+                },
+                b"stsz" => {
+                    let b = if is_video {
+                        let mut stsz = Vec::new();
+                        let constant = !video_sizes.is_empty() && video_sizes.iter().all(|&s| s == video_sizes[0]);
+                        let first = if constant { video_sizes[0] } else { 0 };
+                        for v in [0, fourcc(b"stsz"), 0, first, video_sizes.len() as u32] {
+                            stsz.extend_from_slice(&v.to_be_bytes());
+                        }
+                        if !constant {
+                            for &s in video_sizes {
+                                stsz.extend_from_slice(&s.to_be_bytes());
+                            }
+                        }
+                        let n = stsz.len() as u32;
+                        wr32(&mut stsz, 0, n);
+                        stsz
+                    } else {
+                        match find(&sstbl.children, b"stsz") {
+                            Some(s) => whole(s),
+                            None => return fail("source track without stsz"),
+                        }
+                    };
+                    repl.insert(c.offset, b);
+                }
+                b"stco" | b"co64" => {
+                    if placed_co {
+                        repl.insert(c.offset, Vec::new());
+                        continue;
+                    }
+                    placed_co = true;
+                    let offs = &chunk_offsets[si];
+                    let mut co = Vec::with_capacity(16 + 8 * offs.len());
+                    for v in [0, fourcc(b"co64"), 0, offs.len() as u32] {
+                        co.extend_from_slice(&v.to_be_bytes());
+                    }
+                    for &o in offs {
+                        co.extend_from_slice(&o.to_be_bytes());
+                    }
+                    let n = co.len() as u32;
+                    wr32(&mut co, 0, n);
+                    repl.insert(c.offset, co);
+                }
+                // Tables that would describe the template's own samples.
+                b"stss" | b"ctts" | b"sdtp" | b"stps" | b"cslg" => {
+                    repl.insert(c.offset, Vec::new());
+                }
+                _ => {}
+            }
+        }
+    }
+    let se = template.video().stsd_entry_offset;
+    wr32(&mut moov, se + 4, codec);
+    match find(&tmv.children, b"udta") {
+        Some(b) => {
+            repl.insert(b.offset, udta.to_vec());
+        }
+        None => return fail("template has no udta"),
+    }
+    let mut out = Vec::with_capacity(moov.len() + 64 * 1024);
+    serialize(tmv, &moov, &repl, &mut out);
+    Ok(out)
+}
+
+/// A new file from scratch: the template's ftyp, room for the moov, then the media data in
+/// the order it is written; [`RawWriter::finish`] places the moov (in front when it fits)
+/// and the mdat header. Dropping an unfinished writer removes the file.
+pub struct RawWriter {
+    tmp_path: PathBuf,
+    file: Option<std::io::BufWriter<File>>,
+    pos: u64,
+    ftyp_end: u64,
+    mdat_offset: u64,
+    finished: bool,
+    buf: Vec<u8>,
+}
+
+impl RawWriter {
+    pub fn create(tmp_path: &Path, template_input: &InputFile, template: &Movie, source: &Movie) -> Result<RawWriter> {
+        let file = File::create(tmp_path).map_err(|e| Error(format!("cannot create {}: {e}", tmp_path.display())))?;
+        let mut w = RawWriter {
+            tmp_path: tmp_path.to_path_buf(),
+            file: Some(std::io::BufWriter::with_capacity(8 << 20, file)),
+            pos: 0,
+            ftyp_end: 0,
+            mdat_offset: 0,
+            finished: false,
+            buf: Vec::new(),
+        };
+        let ftyp = find(&template.top, b"ftyp").ok_or_else(|| Error("template has no ftyp".into()))?;
+        let fb = template_input.read(ftyp.offset, ftyp.size as usize)?;
+        w.write(&fb)?;
+        w.ftyp_end = w.pos;
+        let samples: usize = source.tracks.iter().map(|t| t.samples.len() + t.chunks.len()).sum();
+        let est = (template.moov.len() + source.moov.len() + 12 * samples + 64 * 1024) as u64;
+        let start = (w.pos + est + 4095) & !4095;
+        let zeros = vec![0u8; (start - w.pos) as usize];
+        w.write(&zeros)?;
+        w.mdat_offset = start;
+        Ok(w)
+    }
+
+    pub fn pos(&self) -> u64 {
+        self.pos
+    }
+
+    pub fn write(&mut self, p: &[u8]) -> Result<()> {
+        let f = self.file.as_mut().unwrap();
+        f.write_all(p).map_err(|e| Error(format!("write error {}: {e}", self.tmp_path.display())))?;
+        self.pos += p.len() as u64;
+        Ok(())
+    }
+
+    /// Copies `size` bytes at `offset` of `input`.
+    pub fn copy_from(&mut self, input: &InputFile, offset: u64, size: u64) -> Result<()> {
+        let mut buf = std::mem::take(&mut self.buf);
+        buf.resize(size.min(8 << 20) as usize, 0);
+        let mut done = 0u64;
+        while done < size {
+            let n = (buf.len() as u64).min(size - done) as usize;
+            input.read_into(offset + done, &mut buf[..n])?;
+            self.write(&buf[..n])?;
+            done += n as u64;
+        }
+        self.buf = buf;
+        Ok(())
+    }
+
+    /// Writes `moov` and the mdat header, then renames the file to `path`. Returns the size.
+    pub fn finish(mut self, moov: &[u8], path: &Path) -> Result<u64> {
+        let mdat_end = self.pos;
+        let payload = mdat_end - self.mdat_offset;
+        let large = payload + 8 > 0xffff_ffff;
+        let hdr_at = self.mdat_offset - if large { 16 } else { 8 };
+        let front = self.ftyp_end + moov.len() as u64 + 8 <= hdr_at;
+        let mut file = self
+            .file
+            .take()
+            .unwrap()
+            .into_inner()
+            .map_err(|e| Error(format!("write error {}: {}", self.tmp_path.display(), e.error())))?;
+        let tmp = self.tmp_path.clone();
+        let io = |e: std::io::Error| Error(format!("write error {}: {e}", tmp.display()));
+        let mut at = |o: u64, p: &[u8]| -> Result<()> {
+            file.seek(SeekFrom::Start(o)).map_err(io)?;
+            file.write_all(p).map_err(io)
+        };
+        let mut h = Vec::new();
+        if large {
+            h.extend_from_slice(&1u32.to_be_bytes());
+            h.extend_from_slice(b"mdat");
+            h.extend_from_slice(&(payload + 16).to_be_bytes());
+        } else {
+            h.extend_from_slice(&((payload + 8) as u32).to_be_bytes());
+            h.extend_from_slice(b"mdat");
+        }
+        at(hdr_at, &h)?;
+        let (gap_at, gap_len) = if front {
+            at(self.ftyp_end, moov)?;
+            (self.ftyp_end + moov.len() as u64, hdr_at - (self.ftyp_end + moov.len() as u64))
+        } else {
+            at(mdat_end, moov)?;
+            (self.ftyp_end, hdr_at - self.ftyp_end)
+        };
+        if gap_len > 0 {
+            if gap_len < 8 {
+                return fail("internal: free gap too small");
+            }
+            let mut b = (gap_len as u32).to_be_bytes().to_vec();
+            b.extend_from_slice(b"free");
+            at(gap_at, &b)?;
+        }
+        file.sync_all().map_err(io)?;
+        drop(file);
+        std::fs::rename(&self.tmp_path, path).map_err(|e| Error(format!("rename failed {}: {e}", path.display())))?;
+        self.finished = true;
+        Ok(if front { mdat_end } else { mdat_end + moov.len() as u64 })
+    }
+}
+
+impl Drop for RawWriter {
+    fn drop(&mut self) {
+        self.file.take();
+        if !self.finished {
+            let _ = std::fs::remove_file(&self.tmp_path);
+        }
+    }
+}

@@ -252,7 +252,7 @@ pub fn run_watch(
                     None => continue,
                 },
             };
-            let target_out = cfg.output_dir.join(&rel);
+            let target_out = cfg.output_dir.join(&rel).with_file_name(bluecompress::output_file_name(&clip));
             if std::fs::metadata(&target_out).map(|m| m.len() > 0).unwrap_or(false) {
                 observed.remove(&clip);
                 continue;
@@ -394,6 +394,7 @@ pub fn run_watch(
                     backend: cfg.backend,
                     threads: cfg.threads,
                     cbr: cfg.cbr,
+                    template: None,
                 };
 
                 let mut last_emit = Instant::now() - Duration::from_secs(1);

@@ -435,6 +435,7 @@ fn describe_clip(path: &Path) -> Clip {
             codec: Some(match i.codec {
                 Codec::NRaw => "N-RAW".into(),
                 Codec::R3dNe => "R3D NE".into(),
+                Codec::ProResRaw => "ProRes RAW".into(),
             }),
             width: i.width,
             height: i.height,
@@ -465,15 +466,15 @@ fn job_target(job: &QueueJob) -> Target {
 
 fn output_for(input: &Path, folder: Option<&str>, target: Target, resolution: &str) -> PathBuf {
     let tag = bluecompress::variant_name_for(target, resolution);
-    let name = input.file_name().unwrap_or_default();
+    let name = bluecompress::output_file_name(input);
     let same = |a: &Path, b: &Path| match (a.canonicalize(), b.canonicalize()) {
         (Ok(x), Ok(y)) => x == y,
         _ => false,
     };
     let free = |p: &Path| !p.exists() && !same(p, input);
     let candidates: Vec<PathBuf> = match folder {
-        Some(f) if !f.is_empty() => vec![Path::new(f).join(name), Path::new(f).join(&tag).join(name)],
-        _ => vec![input.parent().unwrap_or(Path::new(".")).join(format!("Compressed {tag}")).join(name)],
+        Some(f) if !f.is_empty() => vec![Path::new(f).join(&name), Path::new(f).join(&tag).join(&name)],
+        _ => vec![input.parent().unwrap_or(Path::new(".")).join(format!("Compressed {tag}")).join(&name)],
     };
     if let Some(p) = candidates.iter().find(|p| free(p)) {
         return p.clone();
@@ -482,7 +483,7 @@ fn output_for(input: &Path, folder: Option<&str>, target: Target, resolution: &s
     let dir = last.parent().unwrap_or(Path::new("."));
     let base = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let parent = dir.parent().unwrap_or(Path::new("."));
-    (2..).map(|n| parent.join(format!("{base} ({n})")).join(name)).find(|p| free(p)).unwrap()
+    (2..).map(|n| parent.join(format!("{base} ({n})")).join(&name)).find(|p| free(p)).unwrap()
 }
 
 /// A finished compressed copy of `input` that an earlier run already wrote for this
@@ -637,7 +638,13 @@ fn handle_fs_list(state: &ServerState, requested: Option<&str>) -> Result<FsList
         } else if p.is_file() && is_clip(&p) {
             let size = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
             let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("");
-            let codec = if ext.eq_ignore_ascii_case("r3d") { Some("R3D NE") } else { Some("N-RAW") };
+            let codec = if ext.eq_ignore_ascii_case("r3d") {
+                Some("R3D NE")
+            } else if ext.eq_ignore_ascii_case("mov") {
+                Some("ProRes RAW")
+            } else {
+                Some("N-RAW")
+            };
             clips.push(FsEntry { name, path: ps(&p), kind: "clip", codec, size });
         }
     }
@@ -918,6 +925,7 @@ fn run_job(st: &Arc<ServerState>, job: &QueueJob, settings: &Settings) {
         backend,
         threads: st.threads,
         cbr: job.cbr,
+        template: None,
     };
     let mut last = Instant::now() - Duration::from_secs(1);
     let clients = st.sse_clients.clone();
@@ -1011,7 +1019,7 @@ fn run_job(st: &Arc<ServerState>, job: &QueueJob, settings: &Settings) {
     // R3D NE from the original .nev, next to the output, under the same lock.
     let r3d = match &result {
         Ok(_)
-            if ((job.r3d && bluecompress::r3d::is_nev(&options.input))
+            if ((job.r3d && bluecompress::r3d::becomes_nev(&options.input))
                 || (job.to_nev && bluecompress::r3d::is_r3d(&options.input)))
                 && !st.cancel.load(Ordering::SeqCst) =>
         {

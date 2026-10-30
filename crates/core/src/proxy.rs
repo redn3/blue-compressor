@@ -99,7 +99,7 @@ pub fn find_ffmpeg() -> Option<PathBuf> {
     std::env::split_paths(&path).chain(extra).map(|d| d.join(exe_name)).find(|p| p.is_file())
 }
 
-pub(crate) fn quiet(cmd: &mut Command) -> &mut Command {
+pub fn quiet(cmd: &mut Command) -> &mut Command {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;

@@ -194,11 +194,14 @@ struct Cli {
     rmd: Option<bool>,
     /// --rmd-ev; None reads RMD_EV (watch: WATCH_RMD_EV first).
     rmd_ev: Option<f64>,
+    /// --template: the same-camera N-RAW or R3D NE clip for ProRes RAW inputs.
+    template: Option<String>,
 }
 
 fn usage() -> String {
     format!(
-        "bluecompress {}: re-encode Nikon N-RAW (.NEV) and R3D NE (.R3D) TICO RAW clips
+        "bluecompress {}: re-encode Nikon N-RAW (.NEV) and R3D NE (.R3D) TICO RAW clips,
+and Nikon ProRes RAW (.MOV) to N-RAW and R3D NE
 
 usage:
   bluecompress compress [options] <clip|folder>... -o <output folder>
@@ -226,6 +229,10 @@ options:
   -o, --output-dir DIR    write outputs here with the source file names
       --output FILE       single input: exact output path
       --suffix S          append S to output file names (before the extension)
+      --template CLIP     ProRes RAW inputs (.MOV): the same-camera .NEV or .R3D to write
+                          into (default: one found next to the clip). ProRes RAW is decoded
+                          and re-encoded to N-RAW (--r3d adds R3D NE): not lossless; a
+                          lossless setting codes at the clip's own bits per pixel
       --overwrite         replace existing outputs (default: fail)
       --skip-existing     skip clips whose output already exists
       --cbr               constant bitrate: compressed clips get every frame padded to
@@ -268,10 +275,7 @@ exit codes: 0 success, 1 a clip failed, 2 usage error, 3 cancelled
 }
 
 pub(crate) fn is_clip(p: &Path) -> bool {
-    p.extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e.eq_ignore_ascii_case("nev") || e.eq_ignore_ascii_case("r3d"))
-        .unwrap_or(false)
+    bluecompress::is_clip_path(p)
 }
 
 fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -307,18 +311,18 @@ fn expand(inputs: &[String], missing: &mut Vec<String>) -> Vec<PathBuf> {
 }
 
 pub(crate) fn codec_name(i: &ClipInfo) -> &'static str {
-    if i.codec == Codec::R3dNe {
-        "R3D NE"
-    } else {
-        "N-RAW"
+    match i.codec {
+        Codec::R3dNe => "R3D NE",
+        Codec::NRaw => "N-RAW",
+        Codec::ProResRaw => "ProRes RAW",
     }
 }
 
 pub(crate) fn fourcc(i: &ClipInfo) -> &'static str {
-    if i.codec == Codec::R3dNe {
-        "NR3D"
-    } else {
-        "NRAW"
+    match i.codec {
+        Codec::R3dNe => "NR3D",
+        Codec::NRaw => "NRAW",
+        Codec::ProResRaw => "APRH",
     }
 }
 
@@ -446,7 +450,8 @@ fn compress_cmd(o: &Cli) -> u8 {
             (Some(f), _) => PathBuf::from(f),
             (None, Some(d)) => {
                 let stem = input.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-                let ext = input.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+                let name = PathBuf::from(bluecompress::output_file_name(input));
+                let ext = name.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
                 Path::new(d).join(format!("{stem}{}{ext}", o.suffix))
             }
             (None, None) => unreachable!(),
@@ -535,6 +540,7 @@ fn compress_cmd(o: &Cli) -> u8 {
             backend,
             threads: o.threads,
             cbr: env_cbr(o.cbr, false),
+            template: o.template.as_ref().map(std::path::PathBuf::from),
         };
         let conv = env_convert(o, false);
         if conv.rewrap {
@@ -686,7 +692,7 @@ fn parse_ev(v: &str) -> Option<f64> {
 /// failure).
 pub(crate) fn write_r3d(job: &Options, conv: &bluecompress::Convert, json: bool, quiet: bool) -> bool {
     let source = &job.input;
-    if !(bluecompress::r3d::is_nev(source) && conv.to_r3d) && !(bluecompress::r3d::is_r3d(source) && conv.to_nev) {
+    if !(bluecompress::r3d::becomes_nev(source) && conv.to_r3d) && !(bluecompress::r3d::is_r3d(source) && conv.to_nev) {
         if conv.rewrap && !quiet {
             eprintln!("{}: nothing to rewrap (turn on --r3d or --to-nev)", ps(source));
         }
@@ -704,7 +710,7 @@ pub(crate) fn write_r3d(job: &Options, conv: &bluecompress::Convert, json: bool,
             println!("{{\"event\":\"r3d_progress\",\"input\":{},\"fraction\":{fraction:.3}}}", q(&ins));
             let _ = std::io::stdout().flush();
         } else if !quiet {
-            let kind = if bluecompress::r3d::is_nev(source) { "R3D NE" } else { "N-RAW" };
+            let kind = if bluecompress::r3d::becomes_nev(source) { "R3D NE" } else { "N-RAW" };
             eprint!("\r  {kind} {:5.1}%  {mbs:6.0} MB/s", fraction * 100.0);
         }
     });
@@ -1277,6 +1283,7 @@ fn main() -> ExitCode {
         poll_seconds: None,
         clear_watch: None,
         suffix: String::new(),
+        template: None,
         json: false,
         quiet: false,
         overwrite: false,
@@ -1406,6 +1413,10 @@ fn main() -> ExitCode {
             "--suffix" => match it.next() {
                 Some(v) => o.suffix = v,
                 None => return bad("--suffix needs a value"),
+            },
+            "--template" => match it.next() {
+                Some(v) => o.template = Some(v),
+                None => return bad("--template needs a clip"),
             },
             "--overwrite" => o.overwrite = true,
             "--skip-existing" => o.skip_existing = true,
@@ -1691,6 +1702,8 @@ mod tests {
                 poll_seconds: None,
                 clear_watch: None,
                 suffix: String::new(),
+                template: None,
+                template: None,
                 json: false,
                 quiet: true,
                 overwrite: false,
@@ -1750,6 +1763,7 @@ mod tests {
             poll_seconds: None,
             clear_watch: None,
             suffix: String::new(),
+            template: None,
             json: false,
             quiet: true,
             overwrite: false,

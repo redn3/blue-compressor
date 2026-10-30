@@ -327,6 +327,7 @@ fn compress_path_writes_constant_r3d_ne() {
         backend: bluecompress::Backend::Cpu,
         threads: 2,
         cbr: false,
+        template: None,
     };
     let r = r3d::convert_compressed(
         &job,

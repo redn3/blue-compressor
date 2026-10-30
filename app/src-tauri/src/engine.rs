@@ -237,7 +237,7 @@ mod mock {
         progress: &mut dyn FnMut(f64, f64),
     ) -> bluecompress::Result<bluecompress::R3dJob> {
         let source = &job.input;
-        let to_r3d = bluecompress::r3d::is_nev(source);
+        let to_r3d = bluecompress::r3d::becomes_nev(source);
         if !(to_r3d && conv.to_r3d) && !(bluecompress::r3d::is_r3d(source) && conv.to_nev) {
             return Ok(bluecompress::R3dJob::Skipped("nothing to convert".into()));
         }

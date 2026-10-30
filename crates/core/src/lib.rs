@@ -21,6 +21,7 @@ pub mod frame;
 mod gpu;
 pub mod nraw;
 mod preview;
+pub mod prores_raw;
 pub mod proxy;
 pub mod quality;
 pub mod r3d;
@@ -58,6 +59,9 @@ pub enum Codec {
     NRaw,
     /// R3D NE (.R3D), e.g. Nikon ZR.
     R3dNe,
+    /// Apple ProRes RAW (.MOV) from a Nikon camera: input only, re-encoded to N-RAW (not
+    /// lossless, see [`prores_raw`]).
+    ProResRaw,
 }
 
 #[derive(Debug, Clone)]
@@ -118,6 +122,9 @@ pub struct Options {
     /// take what they need up to the budget (simple frames come in smaller). Lossless
     /// repacks are always variable (padding them would give back the saving).
     pub cbr: bool,
+    /// ProRes RAW input only: the same-camera N-RAW or R3D NE clip to use as the template
+    /// (None picks one near the clip, see [`prores_raw::find_template`]).
+    pub template: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -138,7 +145,10 @@ pub fn probe(path: &std::path::Path) -> Result<ClipInfo> {
     let codec = match v.codec {
         c if c == bmff::fourcc(b"NRAW") => Codec::NRaw,
         c if c == bmff::fourcc(b"NR3D") => Codec::R3dNe,
-        c => return Err(Error(format!("not a Nikon N-RAW or R3D NE clip (codec {})", bmff::fourcc_str(c)))),
+        c if c == bmff::fourcc(b"aprh") || c == bmff::fourcc(b"aprn") => Codec::ProResRaw,
+        c => {
+            return Err(Error(format!("not a Nikon N-RAW, R3D NE or ProRes RAW clip (codec {})", bmff::fourcc_str(c))))
+        }
     };
     let video_bytes: u64 = v.samples.iter().map(|s| s.size as u64).sum();
     let (codestream_bytes, _) = quality::source_codestream_bytes(&input, &m);
@@ -188,8 +198,45 @@ pub fn backend_description(backend: Backend) -> String {
 /// Transcodes one clip. `progress(fraction, fps)` is called from the calling thread about
 /// ten times a second; setting `cancel` stops the job and removes the partial output.
 /// The output is written to `<output>.partial` and renamed when complete.
+///
+/// A ProRes RAW input is re-encoded to N-RAW into a same-camera template (see
+/// [`prores_raw`]); it keeps its size, and a lossless target codes at the clip's own density.
 pub fn transcode(options: &Options, cancel: &AtomicBool, progress: &mut dyn FnMut(f64, f64)) -> Result<Outcome> {
+    if prores_raw::is_prores_raw(&options.input) {
+        if options.resolution != Resolution::Original {
+            return Err(Error("ProRes RAW clips keep their size: choose the original resolution".into()));
+        }
+        let o = prores_raw::PrrOptions {
+            input: options.input.clone(),
+            output: options.output.clone(),
+            template: options.template.clone(),
+            target: Target::new(options.quality, options.bpp),
+            cbr: options.cbr,
+            threads: options.threads,
+        };
+        return prores_raw::convert(&o, cancel, progress);
+    }
     transcode::transcode(options, cancel, progress)
+}
+
+/// True for a clip the queues take: `.nev`, `.r3d`, or a ProRes RAW `.mov`.
+pub fn is_clip_path(p: &std::path::Path) -> bool {
+    match p.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref() {
+        Some("nev" | "r3d") => true,
+        Some("mov") => prores_raw::is_prores_raw(p),
+        _ => false,
+    }
+}
+
+/// File name of the compressed copy of `input`: the same name, but `.NEV` for ProRes RAW
+/// clips (they become N-RAW).
+pub fn output_file_name(input: &std::path::Path) -> std::ffi::OsString {
+    let name = input.file_name().unwrap_or_default().to_os_string();
+    if input.extension().is_some_and(|e| e.eq_ignore_ascii_case("mov")) {
+        let stem = input.file_stem().unwrap_or_default().to_string_lossy();
+        return format!("{stem}.NEV").into();
+    }
+    name
 }
 
 /// Path of the staging file a queue writes a job to before renaming it to `target`:
@@ -308,10 +355,11 @@ pub fn existing_compressed_for(
 ) -> Option<(PathBuf, u64)> {
     use std::path::Path;
     let tag = variant_name_for(target, resolution);
-    let name = input.file_name()?;
+    input.file_name()?;
+    let name = output_file_name(input);
     let candidates: Vec<PathBuf> = match folder {
-        Some(f) if !f.is_empty() => vec![Path::new(f).join(name), Path::new(f).join(&tag).join(name)],
-        _ => vec![input.parent().unwrap_or(Path::new(".")).join(format!("Compressed {tag}")).join(name)],
+        Some(f) if !f.is_empty() => vec![Path::new(f).join(&name), Path::new(f).join(&tag).join(name)],
+        _ => vec![input.parent().unwrap_or(Path::new(".")).join(format!("Compressed {tag}")).join(&name)],
     };
     let same = |a: &Path, b: &Path| match (a.canonicalize(), b.canonicalize()) {
         (Ok(x), Ok(y)) => x == y,

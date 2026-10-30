@@ -122,7 +122,14 @@ pub unsafe extern "C" fn bc_probe(
                 out.file_bytes = ci.file_bytes;
                 out.video_bytes = ci.video_bytes;
                 out.codec = [0; 8];
-                copy_str(&mut out.codec, if ci.codec == Codec::NRaw { "NRAW" } else { "NR3D" });
+                copy_str(
+                    &mut out.codec,
+                    match ci.codec {
+                        Codec::NRaw => "NRAW",
+                        Codec::R3dNe => "NR3D",
+                        Codec::ProResRaw => "APRH",
+                    },
+                );
                 out.audio_tracks = ci.audio_tracks as c_int;
                 out.codestream_bytes = ci.codestream_bytes;
             }
@@ -229,6 +236,7 @@ unsafe fn transcode_with(
         threads: o.threads.max(0) as usize,
         // The C API keeps the variable frame sizes it always had.
         cbr: false,
+        template: None,
     };
     let cancel = AtomicBool::new(false);
     let user = user as usize;
