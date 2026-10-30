@@ -53,6 +53,12 @@ struct Decoded {
 
 static CACHE: Mutex<Option<Arc<Decoded>>> = Mutex::new(None);
 
+/// The four quad planes (G1, R, G2, B) of a TICO RAW codestream, in raw values.
+pub(crate) fn decode_planes(cs: &[u8]) -> Result<Vec<Vec<u16>>> {
+    let r = decode_raw(cs)?;
+    Ok(r.planes)
+}
+
 fn decode_raw(cs: &[u8]) -> Result<Raw> {
     let (h, _) = TicoHeader::parse(cs)?;
     let l = Layout::make(&h, h.width as usize, h.height as usize)?;
@@ -149,6 +155,20 @@ fn decode_pair(
     if let Some(d) = CACHE.lock().unwrap().as_ref().filter(|d| d.key == key) {
         return Ok(d.clone());
     }
+    if crate::prores_raw::is_prores_raw(path) {
+        // Decoded by ffmpeg and coded again, as a conversion does (no resize for ProRes RAW).
+        let f = crate::prores_raw::preview_frame(path, frame, Some(target))?;
+        let d = Arc::new(Decoded {
+            key,
+            before: Raw { w: f.w, h: f.h, planes: f.before, black: f.black },
+            after: Raw { w: f.w, h: f.h, planes: f.after, black: f.black },
+            source_frame_bytes: f.source_frame_bytes,
+            output_frame_bytes: f.output_frame_bytes,
+            frames: f.frames,
+        });
+        *CACHE.lock().unwrap() = Some(d.clone());
+        return Ok(d);
+    }
     let input = InputFile::open(path)?;
     let movie = Movie::parse(&input)?;
     let video = movie.video();
@@ -192,6 +212,9 @@ fn decode_pair(
 }
 
 fn frame_count(path: &Path) -> Result<u32> {
+    if crate::prores_raw::is_prores_raw(path) {
+        return crate::prores_raw::frame_count(path);
+    }
     let input = InputFile::open(path)?;
     Ok(Movie::parse(&input)?.video().samples.len() as u32)
 }
@@ -248,6 +271,15 @@ pub struct Thumbnail {
 /// Renders frame `frame` (clamped) of the original clip `width` pixels wide, with the same
 /// look as the previewer. It decodes only, so it is cheap and leaves the preview cache alone.
 pub fn thumbnail(path: &Path, frame: u32, width: u32) -> Result<Thumbnail> {
+    if crate::prores_raw::is_prores_raw(path) {
+        let f = crate::prores_raw::preview_frame(path, frame, None)?;
+        let raw = Raw { w: f.w, h: f.h, planes: f.before, black: f.black };
+        let ow = (width.clamp(16, 2048) as usize).min(raw.w);
+        let oh = (raw.h * ow / raw.w).max(1);
+        let rgb = to_rgb(&raw, [0.0, 0.0, 1.0, 1.0], ow, oh);
+        let (gains, exposure) = grade(&rgb);
+        return Ok(Thumbnail { width: ow as u32, height: oh as u32, rgba: render(&rgb, gains, exposure) });
+    }
     let input = InputFile::open(path)?;
     let movie = Movie::parse(&input)?;
     let video = movie.video();

@@ -171,6 +171,11 @@ pub fn clip_info(path: &Path) -> Result<ClipInfo> {
     let movie = Movie::parse(&input)?;
     let video = movie.video();
     if !is_supported_codec(video.codec) {
+        if crate::prores_raw::is_prores_raw(path) {
+            return Err(Error(
+                "ProRes RAW clips cannot be developed yet: convert the clip to N-RAW in the Compress tab, then develop that".into(),
+            ));
+        }
         return Err(Error("not a Nikon N-RAW or R3D NE clip".into()));
     }
     let tags = r3d::nctg_tags(&movie);

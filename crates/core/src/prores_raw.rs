@@ -537,6 +537,128 @@ pub fn convert(o: &PrrOptions, cancel: &AtomicBool, progress: &mut dyn FnMut(f64
     })
 }
 
+/// One frame of a ProRes RAW clip for the previewer, in N-RAW raw values: the four quad
+/// planes (G1, R, G2, B, each `w` x `h`) as decoded, and as they come out of the re-encode
+/// at `target` (the same as the decoded frame when no template is found near the clip).
+pub struct PreviewFrame {
+    pub w: usize,
+    pub h: usize,
+    pub black: f32,
+    pub before: Vec<Vec<u16>>,
+    pub after: Vec<Vec<u16>>,
+    pub source_frame_bytes: u64,
+    pub output_frame_bytes: u64,
+    pub frames: u32,
+}
+
+/// Number of frames of a ProRes RAW clip.
+pub fn frame_count(path: &Path) -> Result<u32> {
+    let input = InputFile::open(path)?;
+    Ok(Movie::parse(&input)?.video().samples.len() as u32)
+}
+
+/// Decodes frame `frame` (clamped) of a ProRes RAW clip to its full RGGB mosaic with ffmpeg.
+fn decode_mosaic(path: &Path, movie: &Movie, frame: usize, w: usize, h: usize) -> Result<Vec<u16>> {
+    let v = movie.video();
+    let ts = f64::from(v.timescale.max(1));
+    let delta = f64::from(v.sample_delta.max(1));
+    // A quarter frame before the frame's start time: accurate seeking keeps that frame.
+    let t = ((frame as f64 - 0.25) * delta / ts).max(0.0);
+    let ff = find_decoder()?;
+    let mut cmd = Command::new(&ff);
+    crate::proxy::quiet(&mut cmd);
+    cmd.args(["-v", "error", "-nostdin", "-apply_cropping", "0", "-ss", &format!("{t:.6}"), "-i"])
+        .arg(path)
+        .args(["-map", "0:v:0", "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "bayer_rggb16le", "-"])
+        .stdin(Stdio::null());
+    let out = cmd.output().map_err(|e| Error(format!("cannot start {}: {e}", ff.display())))?;
+    if out.stdout.len() < w * h * 2 {
+        let e = String::from_utf8_lossy(&out.stderr);
+        return err(format!("ProRes RAW frame {frame}: decoder gave no picture ({})", e.trim()));
+    }
+    Ok(out.stdout[..w * h * 2].as_chunks::<2>().0.iter().map(|b| u16::from_le_bytes(*b)).collect())
+}
+
+/// Black of N-RAW clips, used when no template is near the clip.
+const NRAW_BLACK: f32 = 1008.0;
+
+/// The previewer's frame of a ProRes RAW clip (see [`PreviewFrame`]).
+/// With `target` None only decodes (`after` is then the decoded frame too).
+pub fn preview_frame(path: &Path, frame: u32, target: Option<Target>) -> Result<PreviewFrame> {
+    let input = InputFile::open(path)?;
+    let movie = Movie::parse(&input)?;
+    let video = movie.video();
+    if !CODECS.iter().any(|c| video.codec == fourcc(c)) {
+        return err("not a ProRes RAW clip");
+    }
+    let nframes = video.samples.len();
+    if nframes == 0 {
+        return err("clip has no frames");
+    }
+    let i = (frame as usize).min(nframes - 1);
+    let head = input.read(video.samples[i].offset, (video.samples[i].size as usize).min(256))?;
+    let fh = frame_header(&head)?;
+    if fh.bayer != 0 {
+        return err("only RGGB ProRes RAW is supported");
+    }
+    let (w, h) = (fh.width as usize, fh.height as usize);
+    let mosaic = decode_mosaic(path, &movie, i, w, h)?;
+    let (cw, ch) = (w / 2, h / 2);
+    let source_frame_bytes = video.samples[i].size as u64;
+    let tpl = target
+        .and_then(|_| find_template(path))
+        .and_then(|t| load_template(&t).ok())
+        .filter(|t| (t.tico.width as usize, t.tico.height as usize) == (w, h));
+    let black = tpl.as_ref().map_or(NRAW_BLACK, |t| Transfer::new(&t.tico).black as f32);
+    let map = LevelMap::new(&fh, black);
+    let before: Vec<Vec<u16>> = (0..4)
+        .map(|c| {
+            let mut pl = vec![0u16; cw * ch];
+            pl.par_chunks_mut(cw).enumerate().for_each(|(y, out)| {
+                let line = &mosaic[(2 * y + PHASE_Y[c]) * w..];
+                for (x, o) in out.iter_mut().enumerate() {
+                    *o = map.apply(line[2 * x + PHASE_X[c]]).round() as u16;
+                }
+            });
+            pl
+        })
+        .collect();
+    let Some(tpl) = tpl else {
+        return Ok(PreviewFrame {
+            w: cw,
+            h: ch,
+            black,
+            after: before.clone(),
+            before,
+            source_frame_bytes,
+            output_frame_bytes: source_frame_bytes,
+            frames: nframes as u32,
+        });
+    };
+    let layout = Layout::make(&tpl.tico, w, h)?;
+    let tr = Transfer::new(&tpl.tico);
+    let src_bytes: u64 = video.samples.iter().map(|s| s.size as u64).sum();
+    let target = resolve_target(target.unwrap_or(Target::quality(1)), bpp_of(src_bytes as f64 / nframes as f64, w as u32, h as u32));
+    let mut pl = mosaic_to_planes(&mosaic, w, h, &map, &tr);
+    drop(mosaic);
+    forward_star_tetrix(&mut pl);
+    let mut coeffs = vec![0i32; Coeffs::len(&layout)];
+    forward_wavelet(&layout, &pl, &mut coeffs);
+    drop(pl);
+    let cs = encode_target(&tpl.tico, &layout, &coeffs, target, &mut Vec::new())?;
+    let after = crate::preview::decode_planes(&cs)?;
+    Ok(PreviewFrame {
+        w: cw,
+        h: ch,
+        black,
+        before,
+        after,
+        source_frame_bytes,
+        output_frame_bytes: cs.len() as u64,
+        frames: nframes as u32,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

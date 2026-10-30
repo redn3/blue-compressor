@@ -1361,7 +1361,10 @@ body.tab-develop .viewer { display: none; }
 .empty { overflow: auto; flex-direction: column; }
 .drop-zone { justify-content: safe center; flex-shrink: 0; min-height: 100%; height: auto; padding: 16px; text-align: center; box-sizing: border-box; }
 .seg button { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-@media (max-width: 900px) { .seg-picks button { padding-left: 4px; padding-right: 4px; font-size: 12px; } }
+@media (max-width: 900px) {
+  .seg-picks { display: grid; grid-template-columns: 1fr 1fr; }
+  .seg-picks button { overflow: visible; }
+}
 .drop-sub { max-width: 100%; }
 .bpp-head { flex-wrap: wrap; }
 .bpp-value { flex: none; }
