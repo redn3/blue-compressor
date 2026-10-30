@@ -100,6 +100,9 @@ struct JobRequest {
     /// Rewrap only: no compressed copy, just the conversions above (image data copied).
     #[serde(default)]
     rewrap: bool,
+    /// With `r3d`: the R3D NE (and .RMD) is the only output of N-RAW and ProRes RAW clips.
+    #[serde(default)]
+    r3d_only: bool,
     /// Write the exposure .RMD next to an R3D NE output (on unless turned off).
     #[serde(default = "yes")]
     rmd: bool,
@@ -466,7 +469,7 @@ fn start(app: AppHandle, state: State<'_, Runner>, jobs: Vec<JobRequest>, settin
             let target = target_of(&input, job.quality, job.bpp, job.lossless);
             let (quality, bpp) = target.option_fields();
             // Already compressed by an earlier, interrupted run: keep it.
-            if !job.force && !job.rewrap {
+            if !job.force && !job.rewrap && !job.r3d_only {
                 if let Some((out, out_bytes)) =
                     existing_for(&input, settings.output_folder.as_deref(), target, res_name)
                 {
@@ -545,9 +548,11 @@ fn start(app: AppHandle, state: State<'_, Runner>, jobs: Vec<JobRequest>, settin
                 rewrap: job.rewrap,
                 rmd: job.rmd,
                 exposure_ev: job.rmd_ev,
+                r3d_only: job.r3d_only,
             };
-            if job.rewrap {
-                // Rewrap only: the conversion is the job's output.
+            let only = conv.only_output(&options.input);
+            if only {
+                // Rewrap or R3D only: the conversion is the job's output.
                 let r = engine::r3d_job(&options, &conv, &cancel, &mut |fraction, _| {
                     if fraction >= 1.0 || last.elapsed().as_millis() >= 100 {
                         last = Instant::now();
@@ -571,7 +576,7 @@ fn start(app: AppHandle, state: State<'_, Runner>, jobs: Vec<JobRequest>, settin
                                 frames: d.frames,
                                 seconds: d.seconds,
                                 fps: if d.seconds > 0.0 { f64::from(d.frames) / d.seconds } else { 0.0 },
-                                backend: "rewrap".into(),
+                                backend: if job.rewrap { "rewrap".into() } else { "R3D NE".into() },
                                 r3d: Some(out),
                                 r3d_skipped: None,
                                 r3d_error: None,

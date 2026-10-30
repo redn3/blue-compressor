@@ -158,7 +158,7 @@ const convOf = (j) => (settings.sameForAll || !j || !CONVERTS.includes(j.convert
 const rewraps = (j, c = convOf(j)) => (c === "r3d" && isNev(j)) || (c === "nraw" && isR3d(j));
 const settingOf = (j) => {
   const c = convOf(j);
-  return { compression: compOf(j), resolution: resolutionOf(j), r3d: c === "r3d" && becomesNev(j), cbr: !!settings.cbr, toNev: c === "nraw" && isR3d(j), rewrap: !!settings.rewrap && rewraps(j, c), rmd: true, rmdEv: null };
+  return { compression: compOf(j), resolution: resolutionOf(j), r3d: c === "r3d" && becomesNev(j), r3dOnly: c === "r3d" && becomesNev(j), cbr: !!settings.cbr, toNev: c === "nraw" && isR3d(j), rewrap: !!settings.rewrap && rewraps(j, c), rmd: true, rmdEv: null };
 };
 // The R3D NE toggle only acts on .nev clips, the N-RAW one on .R3D clips.
 function isR3d(j) { return /\.r3d$/i.test((j && j.path) || ""); }
@@ -385,15 +385,17 @@ function renderCompression() {
   range.classList.toggle("lossless", isLossless(c));
   // The value box: a number with its unit, or the pick's name when it differs per clip.
   const shown = typeof c === "number" ? c : span && span[0] === span[1] ? span[0] : null;
-  if (!num.matches(":focus")) num.value = shown != null ? bppText(shown) : isLossless(c) ? tr("Lossless") : pick ? pick.label : "";
-  $("bpp-unit").hidden = shown == null && !num.matches(":focus");
+  // A pick that goes by each clip's rate reads as its share of it ("55%"), not one bpp.
+  const rel = pick && pick.f && !isLossless(c);
+  if (!num.matches(":focus")) num.value = rel ? `${Math.round(pick.f * 100)}%` : shown != null ? bppText(shown) : isLossless(c) ? tr("Lossless") : pick ? pick.label : "";
+  $("bpp-unit").hidden = (rel || shown == null) && !num.matches(":focus");
   fitNum(num);
   num.title = span ? tr("{0}: {1}, by each clip's own rate", pick.label, spanText(span)) : tr("Bits per pixel");
   range.disabled = num.disabled = running;
   renderTicks($("bpp-ticks"), top);
   $("bpp-sources").innerHTML = sourceMarks().map((m) =>
     `<span class="bpp-source" style="left:${sliderPos(m.bpp, top)}" title="${esc(`Your clip${m.names.length > 1 ? "s" : ""} at ${bppText(m.bpp)} bpp: ${m.names.slice(0, 4).join(", ")}${m.names.length > 4 ? ` and ${m.names.length - 4} more` : ""}`)}"></span>`).join("") +
-    (span ? targetMarks(c).map((t) => `<span class="bpp-target" style="left:${sliderPos(t, top)}" title="${esc(tr("{0} on a {1} bpp clip: {2} bpp", pick.label, bppText(t / pick.f), bppText(t)))}"></span>`).join("") : "") +
+    (span ? targetSpan(c, pick, top) : "") +
     Object.entries(BPP_MARKS).filter(([r]) => Number(r) <= top).map(([r, name]) =>
       `<span class="bpp-he" style="left:${sliderPos(Number(r), top)}" title="${esc(`${name}: Nikon's own ${r} bpp stills`)}">${name}</span>`).join("");
 
@@ -430,9 +432,18 @@ function renderCompression() {
   note.classList.toggle("warn", over.length > 0);
 }
 // Distinct values a relative pick takes over the clips (16 at most).
-function targetMarks(c) {
+// A pick goes by each clip's own rate: one thin bar under the track from the lowest to the
+// highest clip target (never on the knob), its tooltip listing every clip.
+function targetSpan(c, pick, top) {
   const list = viewer.open && viewer.job ? [viewer.job] : jobs.filter((j) => j.ok && j.bpp > 0);
-  return [...new Set(list.map((j) => pickValue(c, j.bpp)).filter((x) => typeof x === "number"))].slice(0, 16);
+  const t = list.map((j) => ({ j, v: pickValue(c, j.bpp) })).filter((x) => typeof x.v === "number");
+  if (!t.length) return "";
+  const lo = Math.min(...t.map((x) => x.v)), hi = Math.max(...t.map((x) => x.v));
+  const lines = t.slice(0, 12).map((x) => tr("{0}: {1} → {2} bpp", x.j.name, bppText(x.j.bpp), bppText(x.v)));
+  if (t.length > 12) lines.push(tr("and {0} more", t.length - 12));
+  const tip = `${tr("{0}: {1}% of each clip's rate", pick.label, Math.round(pick.f * 100))}\n${lines.join("\n")}`;
+  const l = sliderPos(lo, top), rr = sliderPos(hi, top);
+  return `<span class="bpp-span${lo === hi ? " one" : ""}" style="left:${l};width:calc(${rr} - ${l})" title="${esc(tip)}"></span>`;
 }
 // Sizes the value box's input to its text, so names and numbers both sit snug.
 let fitCanvas = null;
@@ -742,6 +753,8 @@ function updateCard(j) {
 
   const cSel = el.querySelector(".job-c"), rSel = el.querySelector(".job-r"), bIn = el.querySelector(".job-b");
   const jc = compOf(j), jp = pickOf(rawCompOf(j));
+  // Picks read with their share of the clip's own rate: "Medium 55%".
+  for (const o of cSel.options) { const pk = PICK[o.value]; if (pk) o.textContent = pk.f ? `${pk.label} ${Math.round(pk.f * 100)}%` : pk.label; }
   cSel.value = jp ? jp.id : "custom";
   if (!bIn.matches(":focus")) bIn.value = typeof jc === "number" ? bppText(jc) : "";
   bIn.placeholder = isLossless(jc) ? tr("Lossless") : "";
@@ -1022,6 +1035,8 @@ const jobRequest = (j) => ({
   cbr: !!(j.ran && j.ran.cbr),
   to_nev: !!(j.ran && j.ran.toNev),
   rewrap: !!(j.ran && j.ran.rewrap),
+  // Convert to R3D NE: the R3D NE is the clip's only output.
+  r3d_only: !!(j.ran && j.ran.r3dOnly),
   rmd: true,
   rmd_ev: null,
   clip: { name: j.name, codec: j.codec, width: j.width, height: j.height, frames: j.frames, fps: j.fps, bytes: j.bytes, bpp: j.bpp },
@@ -1109,7 +1124,7 @@ function fromServer(s) {
     path: s.path, name: c.name || s.name, ok: true, codec: c.codec || "", width: c.width || 0, height: c.height || 0,
     frames: c.frames || 0, fps: c.fps || 0, bytes: c.bytes || s.bytes, bpp: c.bpp || 0, error: s.error,
     id: s.id, state: s.state, fraction: s.fraction, rate: s.fps, target: null, force: s.force,
-    resolution: s.resolution, compression: comp, ran: { compression: comp, resolution: s.resolution, r3d: !!s.r3d, cbr: !!s.cbr, toNev: !!s.toNev, rewrap: !!s.rewrap, rmd: s.rmd !== false, rmdEv: s.rmdEv ?? null },
+    resolution: s.resolution, compression: comp, ran: { compression: comp, resolution: s.resolution, r3d: !!s.r3d, r3dOnly: !!s.r3dOnly, cbr: !!s.cbr, toNev: !!s.toNev, rewrap: !!s.rewrap, rmd: s.rmd !== false, rmdEv: s.rmdEv ?? null },
     output: s.output, result: s.result, onServer: true,
   };
 }

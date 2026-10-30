@@ -910,6 +910,17 @@ pub struct Convert {
     pub exposure_ev: Option<f64>,
     /// Write the exposure .RMD next to R3D NE outputs.
     pub rmd: bool,
+    /// With `to_r3d`: the R3D NE (and its .RMD) is the only output of N-RAW and ProRes RAW
+    /// clips, no N-RAW copy is kept. N-RAW clips are coded straight into R3D NE; ProRes
+    /// RAW is coded to a temporary N-RAW that is removed once rewrapped.
+    pub r3d_only: bool,
+}
+
+impl Convert {
+    /// True when the conversion is the job's only output for `src` (rewrap, or R3D only).
+    pub fn only_output(&self, src: &Path) -> bool {
+        self.rewrap || (self.r3d_only && self.to_r3d && becomes_nev(src))
+    }
 }
 
 /// What the conversion step of a job did.
@@ -935,6 +946,23 @@ pub fn convert_job(
         // The job's N-RAW output is already coded at the job's setting: rewrap it.
         if !c.to_r3d {
             return Ok(R3dJob::Skipped("no conversion for this clip".into()));
+        }
+        if c.r3d_only {
+            // Code to a temporary N-RAW at the job's setting, rewrap it, then remove it.
+            let t0 = Instant::now();
+            let staged = Options { output: job.output.clone(), ..job.clone() };
+            crate::transcode_staged(&staged, cancel, &mut |f, fps| progress(f * 0.9, fps))?;
+            let o = R3dOptions {
+                rmd: c.rmd,
+                exposure_ev: c.exposure_ev,
+                ..R3dOptions::new(&job.output, &r3d_path(&job.output, src))
+            };
+            let r = convert(&o, cancel, &mut |f, fps| progress(0.9 + f * 0.1, fps));
+            let _ = std::fs::remove_file(&job.output);
+            let mut d = r?;
+            d.input_bytes = std::fs::metadata(src).map(|m| m.len()).unwrap_or(d.input_bytes);
+            d.seconds = t0.elapsed().as_secs_f64();
+            return Ok(R3dJob::Done(d));
         }
         if c.rewrap {
             return Ok(R3dJob::Skipped("ProRes RAW is re-encoded, there is nothing to rewrap".into()));

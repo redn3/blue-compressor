@@ -191,6 +191,8 @@ struct Cli {
     /// --to-nev, --rewrap, --no-rmd (hidden); None reads NEV, REWRAP, RMD (watch: WATCH_ first).
     to_nev: Option<bool>,
     rewrap: Option<bool>,
+    /// --r3d-only (implies --r3d); None reads R3D_ONLY (watch: WATCH_R3D_ONLY first).
+    r3d_only: Option<bool>,
     rmd: Option<bool>,
     /// --rmd-ev; None reads RMD_EV (watch: WATCH_RMD_EV first).
     rmd_ev: Option<f64>,
@@ -244,6 +246,9 @@ options:
                           lossless job copies the image data as it is). Log3G10 and
                           REDWideGamutRGB tags; N-RAW High and Normal; Z8, Z9 and Z6III
                           clips are experimental. Default: R3D, else off
+      --r3d-only          with --r3d: the R3D NE (and its .RMD) in R3D NE/<name>.R3D is the
+                          only output of N-RAW and ProRes RAW clips, no N-RAW copy is kept.
+                          Default: R3D_ONLY, else off
       --to-nev            also rewrap each .R3D (R3D NE) back to N-RAW in N-RAW/<name>.NEV
                           next to its output. Default: NEV, else off
       --rewrap            skip compression (lossless): no compressed copy, just the R3D NE /
@@ -543,7 +548,7 @@ fn compress_cmd(o: &Cli) -> u8 {
             template: o.template.as_ref().map(std::path::PathBuf::from),
         };
         let conv = env_convert(o, false);
-        if conv.rewrap {
+        if conv.only_output(input) {
             if write_r3d(&opt, &conv, o.json, o.quiet) {
                 done += 1;
             } else {
@@ -669,10 +674,12 @@ fn env_flag(cli: Option<bool>, watch: bool, watch_key: &str, key: &str, default:
 
 /// The R3D NE / N-RAW conversion settings.
 pub(crate) fn env_convert(o: &Cli, watch: bool) -> bluecompress::Convert {
+    let r3d_only = env_flag(o.r3d_only, watch, "WATCH_R3D_ONLY", "R3D_ONLY", false);
     bluecompress::Convert {
-        to_r3d: env_r3d(o.r3d, watch),
+        to_r3d: env_r3d(o.r3d, watch) || r3d_only,
         to_nev: env_flag(o.to_nev, watch, "WATCH_NEV", "NEV", false),
         rewrap: env_flag(o.rewrap, watch, "WATCH_REWRAP", "REWRAP", false),
+        r3d_only: env_flag(o.r3d_only, watch, "WATCH_R3D_ONLY", "R3D_ONLY", false),
         rmd: env_flag(o.rmd, watch, "WATCH_RMD", "RMD", true),
         exposure_ev: o.rmd_ev.or_else(|| {
             (if watch { env_nonempty("WATCH_RMD_EV") } else { None })
@@ -832,6 +839,7 @@ fn watch_cmd(o: &Cli) -> u8 {
         r3d: env_r3d(o.r3d, true),
         cbr: env_cbr(o.cbr, true),
         to_nev: env_convert(o, true).to_nev,
+        r3d_only: env_convert(o, true).r3d_only,
         rmd: env_convert(o, true).rmd,
         rmd_ev: env_convert(o, true).exposure_ev,
         json: o.json,
@@ -900,6 +908,7 @@ fn serve_cmd(o: &Cli) -> u8 {
             r3d: env_r3d(o.r3d, true),
             cbr: env_cbr(o.cbr, true),
             to_nev: env_convert(o, true).to_nev,
+            r3d_only: env_convert(o, true).r3d_only,
             rmd: env_convert(o, true).rmd,
             rmd_ev: env_convert(o, true).exposure_ev,
             json: o.json,
@@ -920,6 +929,7 @@ fn serve_cmd(o: &Cli) -> u8 {
             r3d: env_r3d(o.r3d, true),
             cbr: env_cbr(o.cbr, true),
             to_nev: env_convert(o, true).to_nev,
+            r3d_only: env_convert(o, true).r3d_only,
             rmd: env_convert(o, true).rmd,
             rmd_ev: env_convert(o, true).exposure_ev,
             json: o.json,
@@ -949,6 +959,7 @@ fn serve_cmd(o: &Cli) -> u8 {
         default_r3d: env_r3d(o.r3d, false),
         default_to_nev: env_convert(o, false).to_nev,
         default_rewrap: env_convert(o, false).rewrap,
+        default_r3d_only: env_convert(o, false).r3d_only,
         default_rmd: env_convert(o, false).rmd,
         default_cbr: env_cbr(o.cbr, false),
         template: o.template.clone().or_else(|| env_nonempty("TEMPLATE")).map(PathBuf::from),
@@ -1294,6 +1305,7 @@ fn main() -> ExitCode {
         cbr: None,
         to_nev: None,
         rewrap: None,
+        r3d_only: None,
         rmd: None,
         rmd_ev: None,
     };
@@ -1398,6 +1410,10 @@ fn main() -> ExitCode {
             "--no-clear-watch" | "--keep-source" => o.clear_watch = Some(false),
             "--once" => o.once = true,
             "--r3d" => o.r3d = Some(true),
+            "--r3d-only" => {
+                o.r3d = Some(true);
+                o.r3d_only = Some(true);
+            }
             "--no-r3d" => o.r3d = Some(false),
             "--to-nev" => o.to_nev = Some(true),
             "--no-to-nev" => o.to_nev = Some(false),
@@ -1713,6 +1729,7 @@ mod tests {
                 cbr: Some(cbr),
                 to_nev: None,
                 rewrap: None,
+                r3d_only: None,
                 rmd: None,
                 rmd_ev: None,
             };
@@ -1773,6 +1790,7 @@ mod tests {
             cbr: None,
             to_nev: None,
             rewrap: None,
+            r3d_only: None,
             rmd: None,
             rmd_ev: None,
         };
@@ -1816,6 +1834,7 @@ mod tests {
                 r3d: false,
                 cbr: false,
                 to_nev: false,
+                r3d_only: false,
                 rmd: true,
                 rmd_ev: None,
                 json: false,
@@ -1863,6 +1882,7 @@ mod tests {
             default_r3d: false,
             default_to_nev: false,
             default_rewrap: false,
+            default_r3d_only: false,
             default_rmd: true,
             default_cbr: false,
             template: None,
@@ -1880,6 +1900,7 @@ mod tests {
                 r3d: false,
                 cbr: false,
                 to_nev: false,
+                r3d_only: false,
                 rmd: true,
                 rmd_ev: None,
                 json: false,

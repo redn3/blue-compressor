@@ -30,6 +30,8 @@ pub struct WatchConfig {
     pub r3d: bool,
     /// Also rewrap .R3D clips to N-RAW, and write the exposure .RMD (see `--to-nev`, `--rmd`).
     pub to_nev: bool,
+    /// With `r3d`: keep only the R3D NE (and .RMD) of N-RAW and ProRes RAW clips.
+    pub r3d_only: bool,
     pub rmd: bool,
     pub rmd_ev: Option<f64>,
     /// Constant bitrate for the compressed clip.
@@ -442,10 +444,16 @@ pub fn run_watch(
                             rewrap: false,
                             rmd: cfg.rmd,
                             exposure_ev: cfg.rmd_ev,
+                            // The N-RAW output is written first and removed below.
+                            r3d_only: false,
                         };
                         let job = Options { output: target_out.clone(), ..opt.clone() };
                         let r3d_ok =
                             !(out_ok && (cfg.r3d || cfg.to_nev)) || crate::write_r3d(&job, &conv, cfg.json, cfg.quiet);
+                        // R3D only: the R3D NE replaces the N-RAW output once it is written.
+                        if cfg.r3d_only && cfg.r3d && r3d_ok && out_ok && bluecompress::r3d::becomes_nev(&clip) {
+                            let _ = std::fs::remove_file(&target_out);
+                        }
                         let clear_now = state.lock().unwrap().clear_after_process;
                         let mut cleared = false;
                         if out_ok && clear_now && r3d_ok {

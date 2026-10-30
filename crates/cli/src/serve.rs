@@ -42,6 +42,7 @@ pub struct ServeConfig {
     /// R3D NE to N-RAW, rewrap-only and exposure sidecar toggles (NEV, REWRAP, RMD).
     pub default_to_nev: bool,
     pub default_rewrap: bool,
+    pub default_r3d_only: bool,
     pub default_rmd: bool,
     /// Constant bitrate toggle for new clips (CBR or --cbr).
     pub default_cbr: bool,
@@ -60,6 +61,7 @@ struct ServerState {
     default_r3d: bool,
     default_to_nev: bool,
     default_rewrap: bool,
+    default_r3d_only: bool,
     default_rmd: bool,
     default_cbr: bool,
     template: Option<PathBuf>,
@@ -108,6 +110,7 @@ struct AppInfo {
     default_r3d: bool,
     default_to_nev: bool,
     default_rewrap: bool,
+    default_r3d_only: bool,
     default_rmd: bool,
     default_cbr: bool,
     watch: WatchSnapshot,
@@ -162,6 +165,9 @@ struct JobRequest {
     /// Rewrap only: no compressed copy, just the conversions above (image data copied).
     #[serde(default)]
     rewrap: bool,
+    /// With `r3d`: the R3D NE (and .RMD) is the only output of N-RAW and ProRes RAW clips.
+    #[serde(default)]
+    r3d_only: bool,
     /// Write the exposure .RMD next to an R3D NE output (on unless turned off).
     #[serde(default = "yes")]
     rmd: bool,
@@ -206,6 +212,7 @@ struct QueueJob {
     cbr: bool,
     to_nev: bool,
     rewrap: bool,
+    r3d_only: bool,
     rmd: bool,
     rmd_ev: Option<f64>,
     clip: Option<serde_json::Value>,
@@ -794,6 +801,7 @@ fn start_queue(state: &Arc<ServerState>, args: StartArgs) -> Result<(), String> 
                 cbr: job.cbr,
                 to_nev: job.to_nev,
                 rewrap: job.rewrap,
+                r3d_only: job.r3d_only,
                 rmd: job.rmd,
                 rmd_ev: job.rmd_ev,
                 clip: job.clip,
@@ -867,7 +875,7 @@ fn run_job(st: &Arc<ServerState>, job: &QueueJob, settings: &Settings) {
     let res_name = if resized { job.resolution.as_str() } else { "original" };
 
     // Already compressed by an earlier (for example interrupted) run: keep it.
-    if !job.force && !job.rewrap {
+    if !job.force && !job.rewrap && !job.r3d_only {
         if let Some((out, out_bytes)) = existing_for(&input, folder, target, res_name) {
             let done = JobDone {
                 id: job.id,
@@ -967,9 +975,11 @@ fn run_job(st: &Arc<ServerState>, job: &QueueJob, settings: &Settings) {
         rewrap: job.rewrap,
         rmd: job.rmd,
         exposure_ev: job.rmd_ev,
+        r3d_only: job.r3d_only,
     };
-    if job.rewrap {
-        // Rewrap only: the conversion is the job's output, with its progress as the job's.
+    let only = conv.only_output(&options.input);
+    if only {
+        // Rewrap or R3D only: the conversion is the job's output, with its progress as the job's.
         let mut last = Instant::now() - Duration::from_secs(1);
         let clients = st.sse_clients.clone();
         let r = bluecompress::r3d_job(&options, &conv, &st.cancel, &mut |fraction, _| {
@@ -991,7 +1001,7 @@ fn run_job(st: &Arc<ServerState>, job: &QueueJob, settings: &Settings) {
                     frames: d.frames,
                     seconds: d.seconds,
                     fps: if d.seconds > 0.0 { d.frames as f64 / d.seconds } else { 0.0 },
-                    backend: "rewrap".into(),
+                    backend: if job.rewrap { "rewrap".into() } else { "R3D NE".into() },
                     r3d: Some(ps(&d.output)),
                     r3d_skipped: None,
                     r3d_error: None,
@@ -1097,6 +1107,7 @@ fn invoke_command(state: &Arc<ServerState>, cmd: &str, body: &[u8]) -> HttpRespo
                 default_r3d: state.default_r3d,
                 default_to_nev: state.default_to_nev,
                 default_rewrap: state.default_rewrap,
+                default_r3d_only: state.default_r3d_only,
                 default_rmd: state.default_rmd,
                 default_cbr: state.default_cbr,
                 watch: state.watch_state.lock().unwrap().clone(),
@@ -1540,6 +1551,7 @@ pub fn run_serve(cfg: ServeConfig, cancel: &'static AtomicBool) -> u8 {
         default_r3d: cfg.default_r3d,
         default_to_nev: cfg.default_to_nev,
         default_rewrap: cfg.default_rewrap,
+        default_r3d_only: cfg.default_r3d_only,
         default_rmd: cfg.default_rmd,
         default_cbr: cfg.default_cbr,
         template: cfg.template.clone(),

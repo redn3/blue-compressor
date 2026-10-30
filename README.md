@@ -181,16 +181,22 @@ video codec (`NRAW` and `NR3D`), the format codes, the gamma and gamut (N-LOG an
 or Log3G10 and REDWideGamutRGB, which decoders apply when debayering), the RED clip
 metadata, the camera matrix and a few constants. The image data is copied as it is.
 
-- **Convert .nev to R3D NE** (or `--r3d`, `R3D` / `WATCH_R3D` in Docker) acts on `.nev`
-  clips and writes `R3D NE/<clip name>.R3D` next to each output (ZR names such as
-  `A007_C002_10299S` are already RED style; other names get one). It follows the
-  compression and resolution settings: a lossless job copies the image data as it is, a
-  compressed or resized one is recompressed from the original and padded to constant
-  frames. N-RAW High and Normal both work.
-- **Convert .R3D to N-RAW** (or `--to-nev`, `NEV` / `WATCH_NEV`) acts on `.R3D` clips and
-  rewraps them back to N-RAW (`N-RAW/<clip name>.NEV`): NRAW codec, N-LOG, the N-RAW
-  constants and matrix, and the RED blocks cleared. A round trip, N-RAW to R3D NE and
-  back, gives identical image data.
+- **Convert** in the app and Web UI picks the output format: **Off** keeps each clip in
+  its own format, **N-RAW** makes every output a `.NEV`, **R3D NE** every output a `.R3D`.
+  With "Same settings for all clips" off, each clip has its own Convert choice.
+- **R3D NE** (or `--r3d-only`, `R3D_ONLY` / `WATCH_R3D_ONLY` in Docker) acts on `.nev`
+  and ProRes RAW clips: the only output is `Compressed <setting>/R3D NE/<clip name>.R3D`
+  with its `.RMD`, no N-RAW copy is kept. ZR names such as `A007_C002_10299S` are already
+  RED style, other names get one. It follows the compression and resolution settings: a
+  lossless job copies the image data as it is, a compressed or resized one is coded from
+  the original straight into R3D NE and padded to constant frames. ProRes RAW is coded
+  to a temporary N-RAW that is removed after the rewrap. N-RAW High and Normal both work.
+  `--r3d` alone (`R3D` / `WATCH_R3D`) still keeps the N-RAW output and adds the R3D NE
+  next to it, as before.
+- **N-RAW** (or `--to-nev`, `NEV` / `WATCH_NEV`) acts on `.R3D` clips and rewraps them
+  back to N-RAW (`N-RAW/<clip name>.NEV`): NRAW codec, N-LOG, the N-RAW constants and
+  matrix, and the RED blocks cleared. A round trip, N-RAW to R3D NE and back, gives
+  identical image data.
 - **Skip compression (lossless)** (or `--rewrap`, `REWRAP`) converts the format without
   recompressing, so the image data stays exactly as recorded: each job only does the
   conversions above, as a streaming copy with no decoding, at about disk speed
@@ -215,7 +221,7 @@ Nikon ProRes RAW clips (`.MOV`) can be added like any other clip. They are decod
 raw Bayer mosaic (ffmpeg 8 or later, which the macOS app bundles), mapped to N-RAW sensor
 values and coded again with the TICO RAW encoder, so this is **not lossless**: the setting
 picks the size (Lossless codes at the clip's own bits per pixel). The output is an N-RAW
-`.NEV` with the same name, and **Convert .nev to R3D NE** also gives the R3D NE.
+`.NEV` with the same name, or with **Convert: R3D NE** only the R3D NE.
 
 The output is written into a template: a `.NEV` or `.R3D` recorded by the same camera at
 the same frame size. By default one is picked from the clip's folder, the folder above and
@@ -442,9 +448,10 @@ services:
 | `WATCH_CLEAR` | `false` | Set to `true` (or toggle **Clear watch folder after process** in the Web UI) to delete source clips from `WATCH_INPUT` once compression succeeds. |
 | `CBR` | `false` | Set to `true` to turn on **Constant bitrate** for new Web UI jobs (see Constant bitrate above). |
 | `WATCH_CBR` | `false` | Set to `true` for constant bitrate watch-folder outputs. |
-| `R3D` | `false` | Set to `true` to turn on **Convert .nev to R3D NE** for new Web UI jobs (see R3D NE and N-RAW above). |
+| `R3D` | `false` | Set to `true` to turn on **Convert: R3D NE** for new Web UI jobs (see R3D NE and N-RAW above). |
+| `R3D_ONLY` / `WATCH_R3D_ONLY` | `false` | Set to `true` so the R3D NE (and its `.RMD`) is the only output of N-RAW and ProRes RAW clips (implies `R3D`). |
 | `WATCH_R3D` | `false` | Set to `true` to also convert every watch-folder `.nev` to R3D NE. A failed conversion keeps the source even with `WATCH_CLEAR`. |
-| `NEV` / `WATCH_NEV` | `false` | Set to `true` to turn on **Convert .R3D to N-RAW** for Web UI jobs / the watch folder (see R3D NE and N-RAW above). |
+| `NEV` / `WATCH_NEV` | `false` | Set to `true` to turn on **Convert: N-RAW** for Web UI jobs / the watch folder (see R3D NE and N-RAW above). |
 | `TEMPLATE` | none | Same-camera `.NEV` or `.R3D` to write ProRes RAW clips into (see ProRes RAW input above); by default one is found next to each clip. Needs an ffmpeg with the ProRes RAW decoder (8 or later). |
 | `REWRAP` | `false` | Set to `true` to turn on **Skip compression (lossless)** for new Web UI jobs. |
 | `UPDATE_CHECK` | `true` | Set to `false` to stop the update check (an anonymous request to the GitHub releases API at start and every 12 hours; the Web UI then shows no update banner). |

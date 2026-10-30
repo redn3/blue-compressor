@@ -368,7 +368,7 @@ svg .fill { fill: currentColor; stroke: none; }
 .job {
   position: relative;
   display: grid;
-  grid-template-columns: auto 1fr auto auto;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 14px;
   padding: 13px 14px 14px;
@@ -600,7 +600,8 @@ svg .fill { fill: currentColor; stroke: none; }
 
 /* Per-clip settings in a card */
 .job { cursor: pointer; }
-.job-settings { display: none; gap: 6px; margin-top: 8px; }
+.job-settings { display: none; flex-wrap: wrap; gap: 6px; margin-top: 8px; min-width: 0; }
+.job-main { min-width: 0; }
 body.per-clip .job-settings { display: flex; }
 .mini-select {
   appearance: none;
@@ -1393,3 +1394,17 @@ body.tab-develop .viewer { display: none; }
 .seg-convert { margin-bottom: 8px; }
 @media (max-width: 900px) { .seg-picks.seg-convert { display: flex; } }
 .switch-row[hidden] { display: none; }
+
+/* Range of the clip targets of a pick: under the track, never on the knob. */
+.bpp-span {
+  position: absolute;
+  top: 37px;
+  height: 3px;
+  min-width: 3px;
+  border-radius: 999px;
+  background: var(--accent-2);
+  opacity: 0.55;
+  pointer-events: auto;
+  cursor: help;
+}
+.bpp-span.one { margin-left: -1.5px; }
