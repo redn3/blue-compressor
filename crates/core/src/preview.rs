@@ -49,6 +49,8 @@ struct Decoded {
     source_frame_bytes: u64,
     output_frame_bytes: u64,
     frames: u32,
+    /// As shot look of the clip, as the Develop tab shows it at its defaults.
+    look: Option<crate::develop::ClipInfo>,
 }
 
 static CACHE: Mutex<Option<Arc<Decoded>>> = Mutex::new(None);
@@ -124,6 +126,25 @@ fn grade(rgb: &[[f32; 3]]) -> ([f32; 3], f32) {
     (gains.map(|v| v.clamp(0.25, 4.0)), exposure.clamp(0.1, 64.0))
 }
 
+/// The Develop tab's as shot settings for a clip (white balance, matrix, exposure with the
+/// RMD offset, Rec.709 viewing transform), for camera RGB that is black subtracted over
+/// (16383 - black), as [`to_rgb`] gives it.
+fn as_shot_shade(info: &crate::develop::ClipInfo, black: f32) -> crate::develop::Shade {
+    crate::develop::shade(info, &crate::develop::Params::as_shot(info), black, 16383.0, true)
+}
+
+fn render_look(rgb: &[[f32; 3]], s: &crate::develop::Shade) -> Vec<u8> {
+    let mut out = Vec::with_capacity(rgb.len() * 4);
+    for p in rgb {
+        let px = crate::develop::shade_pixel(s, *p);
+        for v in px {
+            out.push((v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8);
+        }
+        out.push(255);
+    }
+    out
+}
+
 fn render(rgb: &[[f32; 3]], gains: [f32; 3], exposure: f32) -> Vec<u8> {
     let srgb = |v: f32| {
         let v = v.clamp(0.0, 1.0);
@@ -165,6 +186,7 @@ fn decode_pair(
             source_frame_bytes: f.source_frame_bytes,
             output_frame_bytes: f.output_frame_bytes,
             frames: f.frames,
+            look: crate::develop::clip_info(path).ok(),
         });
         *CACHE.lock().unwrap() = Some(d.clone());
         return Ok(d);
@@ -206,6 +228,7 @@ fn decode_pair(
         source_frame_bytes: nf.codestream_size as u64,
         output_frame_bytes: (nf.build(&out_cs, None)?.len() - nf.codestream_offset) as u64,
         frames: video.samples.len() as u32,
+        look: crate::develop::clip_info(path).ok(),
     });
     *CACHE.lock().unwrap() = Some(d.clone());
     Ok(d)
@@ -245,15 +268,24 @@ pub fn preview_frame(
     let (bw, bh) = (d.before.w as f64 * crop[2], d.before.h as f64 * crop[3]);
     let ow = width.clamp(16, 8192) as usize;
     let oh = ((ow as f64 * bh / bw).round() as usize).max(1);
-    // Grade from the whole original frame, so panning does not shift the colors.
-    let (gains, exposure) = grade(&to_rgb(&d.before, [0.0, 0.0, 1.0, 1.0], 480, 270));
     let b = to_rgb(&d.before, crop, ow, oh);
     let a = to_rgb(&d.after, crop, ow, oh);
+    let (before_rgba, after_rgba) = match &d.look {
+        Some(info) => {
+            let s = as_shot_shade(info, d.before.black);
+            (render_look(&b, &s), render_look(&a, &s))
+        }
+        None => {
+            // Grade from the whole original frame, so panning does not shift the colors.
+            let (gains, exposure) = grade(&to_rgb(&d.before, [0.0, 0.0, 1.0, 1.0], 480, 270));
+            (render(&b, gains, exposure), render(&a, gains, exposure))
+        }
+    };
     Ok(Preview {
         width: ow as u32,
         height: oh as u32,
-        before_rgba: render(&b, gains, exposure),
-        after_rgba: render(&a, gains, exposure),
+        before_rgba,
+        after_rgba,
         source_frame_bytes: d.source_frame_bytes,
         output_frame_bytes: d.output_frame_bytes,
         frames: d.frames,
@@ -277,8 +309,7 @@ pub fn thumbnail(path: &Path, frame: u32, width: u32) -> Result<Thumbnail> {
         let ow = (width.clamp(16, 2048) as usize).min(raw.w);
         let oh = (raw.h * ow / raw.w).max(1);
         let rgb = to_rgb(&raw, [0.0, 0.0, 1.0, 1.0], ow, oh);
-        let (gains, exposure) = grade(&rgb);
-        return Ok(Thumbnail { width: ow as u32, height: oh as u32, rgba: render(&rgb, gains, exposure) });
+        return Ok(Thumbnail { width: ow as u32, height: oh as u32, rgba: thumb_rgba(path, &rgb, raw.black) });
     }
     let input = InputFile::open(path)?;
     let movie = Movie::parse(&input)?;
@@ -293,6 +324,16 @@ pub fn thumbnail(path: &Path, frame: u32, width: u32) -> Result<Thumbnail> {
     let ow = (width.clamp(16, 2048) as usize).min(raw.w);
     let oh = (raw.h * ow / raw.w).max(1);
     let rgb = to_rgb(&raw, [0.0, 0.0, 1.0, 1.0], ow, oh);
-    let (gains, exposure) = grade(&rgb);
-    Ok(Thumbnail { width: ow as u32, height: oh as u32, rgba: render(&rgb, gains, exposure) })
+    Ok(Thumbnail { width: ow as u32, height: oh as u32, rgba: thumb_rgba(path, &rgb, raw.black) })
+}
+
+/// A thumbnail in the as shot look (the previewer's own grade when the metadata is unreadable).
+fn thumb_rgba(path: &Path, rgb: &[[f32; 3]], black: f32) -> Vec<u8> {
+    match crate::develop::clip_info(path) {
+        Ok(info) => render_look(rgb, &as_shot_shade(&info, black)),
+        Err(_) => {
+            let (gains, exposure) = grade(rgb);
+            render(rgb, gains, exposure)
+        }
+    }
 }

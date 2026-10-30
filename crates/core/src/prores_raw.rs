@@ -638,7 +638,10 @@ pub fn preview_frame(path: &Path, frame: u32, target: Option<Target>) -> Result<
     let layout = Layout::make(&tpl.tico, w, h)?;
     let tr = Transfer::new(&tpl.tico);
     let src_bytes: u64 = video.samples.iter().map(|s| s.size as u64).sum();
-    let target = resolve_target(target.unwrap_or(Target::quality(1)), bpp_of(src_bytes as f64 / nframes as f64, w as u32, h as u32));
+    let target = resolve_target(
+        target.unwrap_or(Target::quality(1)),
+        bpp_of(src_bytes as f64 / nframes as f64, w as u32, h as u32),
+    );
     let mut pl = mosaic_to_planes(&mosaic, w, h, &map, &tr);
     drop(mosaic);
     forward_star_tetrix(&mut pl);
@@ -657,6 +660,101 @@ pub fn preview_frame(path: &Path, frame: u32, target: Option<Target>) -> Result<
         output_frame_bytes: cs.len() as u64,
         frames: nframes as u32,
     })
+}
+
+/// True when `codec` is a ProRes RAW sample entry type.
+pub fn is_prr_codec(codec: u32) -> bool {
+    CODECS.iter().any(|c| codec == fourcc(c))
+}
+
+/// Frame header and N-RAW level map of a ProRes RAW clip (black as N-RAW clips have it).
+pub fn level_map_of(input: &InputFile, movie: &Movie) -> Result<(FrameHeader, LevelMap)> {
+    let v = movie.video();
+    let s = *v.samples.first().ok_or_else(|| Error("clip has no frames".into()))?;
+    let head = input.read(s.offset, (s.size as usize).min(256))?;
+    let fh = frame_header(&head)?;
+    if fh.bayer != 0 {
+        return err("only RGGB ProRes RAW is supported");
+    }
+    Ok((fh, LevelMap::new(&fh, NRAW_BLACK)))
+}
+
+/// An RGGB mosaic to the developer's four quad planes (G1, R, G2, B) in N-RAW raw values.
+pub fn mosaic_to_raw_planes(mosaic: &[u16], w: usize, h: usize, map: &LevelMap) -> [Vec<f32>; 4] {
+    let (cw, ch) = (w / 2, h / 2);
+    [0, 1, 2, 3].map(|c| {
+        let mut pl = vec![0f32; cw * ch];
+        pl.par_chunks_mut(cw).enumerate().for_each(|(y, out)| {
+            let line = &mosaic[(2 * y + PHASE_Y[c]) * w..];
+            for (x, o) in out.iter_mut().enumerate() {
+                *o = map.apply(line[2 * x + PHASE_X[c]]);
+            }
+        });
+        pl
+    })
+}
+
+/// Frame `index` of a ProRes RAW clip as raw quad planes, N-RAW black and white.
+pub fn decode_frame_planes(
+    input: &InputFile,
+    movie: &Movie,
+    index: usize,
+) -> Result<(usize, usize, [Vec<f32>; 4], f32)> {
+    let (fh, map) = level_map_of(input, movie)?;
+    let (w, h) = (fh.width as usize, fh.height as usize);
+    let m = decode_mosaic(input.path(), movie, index, w, h)?;
+    Ok((w / 2, h / 2, mosaic_to_raw_planes(&m, w, h, &map), NRAW_BLACK))
+}
+
+/// Every frame of a ProRes RAW clip in order, from one ffmpeg process.
+pub struct MosaicStream {
+    child: std::process::Child,
+    stdout: std::process::ChildStdout,
+    pub w: usize,
+    pub h: usize,
+    pub map: LevelMap,
+}
+
+impl MosaicStream {
+    pub fn open(input: &InputFile, movie: &Movie) -> Result<MosaicStream> {
+        let (fh, map) = level_map_of(input, movie)?;
+        let ff = find_decoder()?;
+        let mut cmd = Command::new(&ff);
+        crate::proxy::quiet(&mut cmd);
+        cmd.args(["-v", "error", "-nostdin", "-apply_cropping", "0", "-i"])
+            .arg(input.path())
+            .args(["-map", "0:v:0", "-f", "rawvideo", "-pix_fmt", "bayer_rggb16le", "-"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        let mut child = cmd.spawn().map_err(|e| Error(format!("cannot start {}: {e}", ff.display())))?;
+        let stdout = child.stdout.take().unwrap();
+        Ok(MosaicStream { child, stdout, w: fh.width as usize, h: fh.height as usize, map })
+    }
+
+    /// The next frame as raw quad planes.
+    pub fn next_planes(&mut self) -> Result<[Vec<f32>; 4]> {
+        let mut buf = vec![0u8; self.w * self.h * 2];
+        self.stdout.read_exact(&mut buf).map_err(|e| Error(format!("ProRes RAW decoder stopped ({e})")))?;
+        let px: Vec<u16> = buf.as_chunks::<2>().0.iter().map(|b| u16::from_le_bytes(*b)).collect();
+        Ok(mosaic_to_raw_planes(&px, self.w, self.h, &self.map))
+    }
+}
+
+impl Drop for MosaicStream {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+/// First frame of the template near a ProRes RAW clip, for its white balance and matrix.
+pub fn template_first_frame(clip: &Path) -> Option<Vec<u8>> {
+    let t = find_template(clip)?;
+    let input = InputFile::open(&t).ok()?;
+    let movie = Movie::parse(&input).ok()?;
+    let s = *movie.video().samples.first()?;
+    input.read(s.offset, (s.size as usize).min(64 << 10)).ok()
 }
 
 #[cfg(test)]

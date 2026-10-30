@@ -170,12 +170,8 @@ pub fn clip_info(path: &Path) -> Result<ClipInfo> {
     let input = InputFile::open(path)?;
     let movie = Movie::parse(&input)?;
     let video = movie.video();
-    if !is_supported_codec(video.codec) {
-        if crate::prores_raw::is_prores_raw(path) {
-            return Err(Error(
-                "ProRes RAW clips cannot be developed yet: convert the clip to N-RAW in the Compress tab, then develop that".into(),
-            ));
-        }
+    let prr = crate::prores_raw::is_prr_codec(video.codec);
+    if !is_supported_codec(video.codec) && !prr {
         return Err(Error("not a Nikon N-RAW or R3D NE clip".into()));
     }
     let tags = r3d::nctg_tags(&movie);
@@ -188,8 +184,15 @@ pub fn clip_info(path: &Path) -> Result<ClipInfo> {
         .filter(|k| (1000..=50_000).contains(k))
         .unwrap_or(0);
     let (mut wb, mut matrix) = ([1.7, 1.5], r3d::default_camera_matrix());
-    if let Some(s) = video.samples.first() {
-        let head = input.read(s.offset, (s.size as usize).min(64 << 10))?;
+    // ProRes RAW frames carry no Nikon frame tags: the same-camera template's are used.
+    let head = if prr {
+        crate::prores_raw::template_first_frame(path)
+    } else if let Some(s) = video.samples.first() {
+        Some(input.read(s.offset, (s.size as usize).min(64 << 10))?)
+    } else {
+        None
+    };
+    if let Some(head) = head {
         for (tag, v) in r3d::frame_tags(&head) {
             match tag {
                 0x0190_0009 => {
@@ -554,6 +557,10 @@ pub struct RawPlanes {
 /// Decodes frame `index` of a clip to its raw planes.
 pub fn decode_planes(input: &InputFile, movie: &Movie, index: usize) -> Result<RawPlanes> {
     let video = movie.video();
+    if crate::prores_raw::is_prr_codec(video.codec) {
+        let (w, h, data, black) = crate::prores_raw::decode_frame_planes(input, movie, index)?;
+        return Ok(RawPlanes { w, h, data, black, white: 16383.0 });
+    }
     let s = *video.samples.get(index).ok_or_else(|| Error("no such frame".into()))?;
     let sample = input.read(s.offset, s.size as usize)?;
     let nf = NrawFrame::parse(&sample)?;
@@ -812,16 +819,32 @@ pub fn export(e: &Export, cancel: &AtomicBool, progress: &mut dyn FnMut(f64, f64
     // Decode the next frames in parallel while the current batch renders and encodes.
     let batch = rayon::current_num_threads().clamp(2, 8);
     let mut bytes = Vec::with_capacity(ow * oh * 6);
+    // ProRes RAW: one decoder process for the whole clip, frames in order.
+    let mut prr = if crate::prores_raw::is_prr_codec(movie.video().codec) {
+        Some(crate::prores_raw::MosaicStream::open(&input, &movie)?)
+    } else {
+        None
+    };
     'outer: for b0 in (0..n).step_by(batch) {
         if cancel.load(Ordering::Relaxed) {
             result = Err(Error("cancelled".into()));
             break;
         }
-        let planes = match (b0..(b0 + batch).min(n))
-            .into_par_iter()
-            .map(|i| decode_planes(&input, &movie, i))
-            .collect::<Result<Vec<_>>>()
-        {
+        let decoded = match prr.as_mut() {
+            Some(st) => (b0..(b0 + batch).min(n))
+                .map(|_| {
+                    st.next_planes().map(|data| RawPlanes {
+                        w: st.w / 2,
+                        h: st.h / 2,
+                        data,
+                        black: st.map.black,
+                        white: 16383.0,
+                    })
+                })
+                .collect::<Result<Vec<_>>>(),
+            None => (b0..(b0 + batch).min(n)).into_par_iter().map(|i| decode_planes(&input, &movie, i)).collect(),
+        };
+        let planes = match decoded {
             Ok(p) => p,
             Err(err) => {
                 result = Err(err);
