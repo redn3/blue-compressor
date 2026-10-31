@@ -1,3 +1,8 @@
+**What's new in 0.2.6**
+- Clips converted to **R3D NE** now open with IPP2 in RED-compatible software, like clips recorded natively in R3D NE.
+- The **.RMD sidecar** no longer sets color space and gamma, so converted clips open as REDWideGamutRGB / Log3G10 from the clip itself. The exposure adjustment stays at +0.5 EV for ZR clips.
+- Clips converted with an earlier version need to be converted again to get these fixes.
+
 **What's new in 0.2.5**
 - **ProRes RAW input** (Nikon): .MOV ProRes RAW clips can be converted to N-RAW or R3D NE, previewed, and developed in the Develop tab. The conversion is not lossless and hits the bpp you pick. Decoding runs on all CPU cores. Docker and the Web UI need ffmpeg 8 or newer for ProRes RAW; the current image ships an older ffmpeg, so ProRes RAW clips work in the desktop app and the command line tool with a recent ffmpeg.
 - **Convert** choice: Off, N-RAW or R3D NE, for all clips or per clip. With R3D NE chosen, only the .R3D and its .RMD are written (`--r3d-only`, `R3D_ONLY`, `WATCH_R3D_ONLY`). Skip compression is only shown when a lossless rewrap is possible.
