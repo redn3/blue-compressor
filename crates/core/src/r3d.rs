@@ -227,12 +227,19 @@ pub fn red_clip_block(name: &str) -> Vec<u8> {
     put(0x1051, b"C");
     put(0x1052, suffix.as_bytes());
     put(0x1056, file.as_bytes());
+    // The camera's monitoring look. Native R3D NE clips always carry it, and decoders take
+    // its presence as the sign of an IPP2 clip: without it the clip opens in the legacy
+    // color science.
+    put(0x10c1, CAMERA_LUT);
     let pad = 256 - b.len();
     b.extend_from_slice(&(pad as u16).to_be_bytes());
     b.extend_from_slice(&0x0090u16.to_be_bytes());
     b.resize(256, 0);
     b
 }
+
+/// Camera look name in 0x523d entry 0x10c1, as a ZR records it.
+pub const CAMERA_LUT: &[u8] = b"SC-R3DNE TO REC709 NATURAL_CLIP.CUBE";
 
 /// RED exposure block of NCTG 0x1020 for an ISO.
 pub fn red_exposure_block(iso: u32) -> [u8; 12] {
@@ -291,12 +298,15 @@ pub struct RmdLook {
 /// and Log3G10).
 pub fn rmd_text(l: RmdLook) -> String {
     let seed = (l.iso as u64) << 32 ^ l.kelvin.to_bits() ^ l.exposure_ev.to_bits();
-    let (g1, g2) = (guid(seed, 0), guid(seed, 1));
+    // One look shared by both blocks, as RED's own software writes it.
+    let g1 = guid(seed, 0);
+    let g2 = &g1;
     let (iso, k, t, ev) = (l.iso, l.kelvin, l.tint, l.exposure_ev);
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <sidecar version="2.0" type="RSX">
     <looks>
+        <IPP2_RMD_REQUIRES_REDCINE-X_50_OR_ABOVE/>
         <primary type="guid" value="{g1}"/>
         <looklist>
             <look id="{g1}" name="">
@@ -317,6 +327,7 @@ pub fn rmd_text(l: RmdLook) -> String {
             <look id="{g2}" name="">
                 <lookmodules>
                     <module name="R3DIPS" order="0">
+                        <bypassipp2outputtransform type="bool" value="false"/>
                         <colorversion type="int" value="3"/>
                         <iso type="int" value="{iso}"/>
                         <kelvin type="float" value="{k:.5}"/>
@@ -1018,6 +1029,11 @@ mod tests {
         let file = b"A003_C013_0315E2.R3D";
         let at = b.windows(file.len()).position(|w| w == file).unwrap();
         assert_eq!(&b[at - 4..at], &[0x00, 0x18, 0x10, 0x56]);
+        // Then the camera look (IPP2 marker) and the padding entry, as in camera files.
+        let lut = at + file.len();
+        assert_eq!(&b[lut..lut + 4], &[0x00, 0x28, 0x10, 0xc1]);
+        assert_eq!(&b[lut + 4..lut + 40], CAMERA_LUT);
+        assert_eq!(&b[lut + 40..lut + 44], &[0x00, 0xa2, 0x00, 0x90]);
         assert_eq!(red_exposure_block(1600), [0, 1, 0, 0, 0, 2, 0, 0, 0, 0, 0x06, 0x40]);
     }
 
@@ -1053,7 +1069,8 @@ mod tests {
         );
         assert_eq!(t.matches("name=\"\">").count(), 2);
         let g: Vec<&str> = t.match_indices("type=\"guid\" value=\"").map(|(i, _)| &t[i + 19..i + 55]).collect();
-        assert!(g.len() == 2 && g[0] != g[1] && g.iter().all(|x| x.len() == 36 && x.matches('-').count() == 4));
+        assert!(t.contains("<IPP2_RMD_REQUIRES_REDCINE-X_50_OR_ABOVE/>"));
+        assert!(g.len() == 2 && g[0] == g[1] && g.iter().all(|x| x.len() == 36 && x.matches('-').count() == 4));
     }
 
     #[test]
