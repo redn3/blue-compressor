@@ -294,8 +294,9 @@ pub struct RmdLook {
 /// `<looks>` block and a `<looks2 colorversion="3">` block for the IPP2 pipeline R3D NE uses,
 /// each with one look whose `R3DIPS` module carries ISO and white balance. The exposure
 /// offset is written only to the `<looks2>` Exposure Adjust; the legacy block keeps exposure
-/// compensation at 0 so it is never applied twice. Everything else is at RED's defaults (Medium roll off and tone map, REDWideGamutRGB
-/// and Log3G10).
+/// compensation at 0 so it is never applied twice. Roll off and tone map are at RED's defaults (Medium). Color space and gamma
+/// are left out so the decoder uses the clip's own (REDWideGamutRGB / Log3G10); REDCINE-X's
+/// 1 / 12BT would make Resolve show Rec.709 / BT.1886.
 pub fn rmd_text(l: RmdLook) -> String {
     let seed = (l.iso as u64) << 32 ^ l.kelvin.to_bits() ^ l.exposure_ev.to_bits();
     // One look shared by both blocks, as RED's own software writes it.
@@ -336,8 +337,6 @@ pub fn rmd_text(l: RmdLook) -> String {
                         <exposurecompensation type="float" value="0.00000"/>
                         <highlightrolloff type="int" value="3"/>
                         <outputtonemap type="int" value="1"/>
-                        <colorspace type="int" value="1"/>
-                        <gammaspace type="string" value="12BT"/>
                     </module>
                 </lookmodules>
             </look>
@@ -1056,6 +1055,7 @@ mod tests {
                 && t.contains("<kelvin type=\"float\" value=\"4749.00000\"/>")
         );
         assert!(t.contains("<exposureadjust type=\"float\" value=\"0.50000\"/>"));
+        assert!(!t.contains("<colorspace") && !t.contains("<gammaspace"));
         assert_eq!(t.matches("<look id=").count(), 2);
         assert!(!t.contains('\u{2014}'));
         // The exposure offset lives only in <looks2>; the legacy block stays at 0 so no
