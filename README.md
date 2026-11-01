@@ -1,5 +1,9 @@
 # Blue Compressor
 
+## How this is built
+
+Blue Compressor was built, and is maintained, by AI agents. It is 100% vibecoded: the code, tests and docs are written by agents, and every change is reviewed by a veteran software engineer before it ships. We think that is worth saying plainly.
+
 ## Download
 
 **[Latest release (v0.2.6 beta)](https://github.com/redn3/blue-compressor/releases/tag/v0.2.6)**. Pick the file for your computer:
