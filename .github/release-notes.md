@@ -1,3 +1,9 @@
+**What's new in 0.2.7**
+- **Noise reduction** in Develop: adjustable Luma and Chroma sliders, saved per clip. Applies to the preview, playback and export.
+- **Playback** in Develop: play and pause with the space bar or the play button, step frames with the arrow keys (Shift jumps 10 frames), and scrub the timeline.
+- **Full resolution export** with Standard or High quality 10-bit HEVC. For now, full resolution is upscaled from Develop's half-resolution image, so it is not sharper than 4K.
+- The README now says openly that this project is built and maintained by AI agents and reviewed by a veteran software engineer.
+
 **What's new in 0.2.6**
 - Clips converted to **R3D NE** now open with IPP2 in RED-compatible software, like clips recorded natively in R3D NE.
 - The **.RMD sidecar** no longer sets color space and gamma, so converted clips open as REDWideGamutRGB / Log3G10 from the clip itself. The exposure adjustment stays at +0.5 EV for ZR clips.
