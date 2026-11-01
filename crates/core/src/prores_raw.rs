@@ -743,13 +743,23 @@ pub struct MosaicStream {
 
 impl MosaicStream {
     pub fn open(input: &InputFile, movie: &Movie) -> Result<MosaicStream> {
+        Self::open_from(input, movie, 0)
+    }
+
+    /// Every frame from frame `start` on (ProRes RAW frames are all key frames).
+    pub fn open_from(input: &InputFile, movie: &Movie, start: usize) -> Result<MosaicStream> {
         let (fh, map) = level_map_of(input, movie)?;
         let ff = find_decoder()?;
         let mut cmd = Command::new(&ff);
         crate::proxy::quiet(&mut cmd);
-        cmd.args(["-v", "error", "-nostdin"])
-            .args(decoder_threads())
-            .args(["-apply_cropping", "0", "-i"])
+        cmd.args(["-v", "error", "-nostdin"]).args(decoder_threads());
+        let v = movie.video();
+        if start > 0 && v.timescale > 0 {
+            // Half a frame early so rounding lands on the frame itself.
+            let t = (start as f64 - 0.5).max(0.0) * v.sample_delta as f64 / v.timescale as f64;
+            cmd.args(["-ss", &format!("{t:.6}")]);
+        }
+        cmd.args(["-apply_cropping", "0", "-i"])
             .arg(input.path())
             .args(["-map", "0:v:0", "-f", "rawvideo", "-pix_fmt", "bayer_rggb16le", "-"])
             .stdin(Stdio::null())

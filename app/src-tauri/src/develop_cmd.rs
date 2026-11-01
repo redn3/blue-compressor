@@ -59,6 +59,10 @@ pub struct Settings {
     saturation: f32,
     color_boost: f32,
     sharpness: f32,
+    #[serde(default)]
+    nr_luma: f32,
+    #[serde(default)]
+    nr_chroma: f32,
 }
 
 fn output_name(o: Output) -> &'static str {
@@ -98,6 +102,8 @@ impl From<&Params> for Settings {
             saturation: p.saturation,
             color_boost: p.color_boost,
             sharpness: p.sharpness,
+            nr_luma: p.nr_luma,
+            nr_chroma: p.nr_chroma,
         }
     }
 }
@@ -133,6 +139,8 @@ impl Settings {
             saturation: self.saturation,
             color_boost: self.color_boost,
             sharpness: self.sharpness,
+            nr_luma: self.nr_luma,
+            nr_chroma: self.nr_chroma,
         }
     }
 }
@@ -221,6 +229,8 @@ pub struct ExportRequest {
     width: u32,
     kbps: Option<u32>,
     cbr: bool,
+    #[serde(default)]
+    high: bool,
 }
 
 #[derive(Serialize, Clone)]
@@ -245,8 +255,8 @@ struct Finished {
 }
 
 #[tauri::command]
-pub fn develop_default_kbps(width: u32, height: u32, fps: f64) -> u32 {
-    develop::default_kbps(width, height, fps)
+pub fn develop_default_kbps(width: u32, height: u32, fps: f64, high: Option<bool>) -> u32 {
+    develop::quality_kbps(width, height, fps, high.unwrap_or(false))
 }
 
 /// Exports clips one after another; emits develop-progress and develop-done per clip and
@@ -270,7 +280,7 @@ pub fn develop_export(app: AppHandle, state: State<'_, Exporting>, jobs: Vec<Exp
                 develop::clip_info(&input)
                     .map(|c| {
                         let (w, h) = develop::output_size(&c, j.width);
-                        develop::default_kbps(w, h, c.fps)
+                        develop::quality_kbps(w, h, c.fps, j.high)
                     })
                     .unwrap_or(develop::UHD_KBPS)
             });
@@ -316,4 +326,90 @@ pub fn develop_export(app: AppHandle, state: State<'_, Exporting>, jobs: Vec<Exp
 #[tauri::command]
 pub fn develop_cancel(state: State<'_, Exporting>) {
     state.cancel.store(true, Ordering::SeqCst);
+}
+
+/// Playback in the Develop tab (one clip at a time).
+#[derive(Default)]
+pub struct Playing(std::sync::Mutex<Option<develop::Player>>);
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn develop_play_start(
+    state: State<'_, Playing>,
+    path: String,
+    frame: u32,
+    settings: Settings,
+    width: u32,
+    height: u32,
+    view709: bool,
+) -> Result<(), String> {
+    let (w, h) = (width.clamp(16, 4096) as usize, height.clamp(16, 4096) as usize);
+    // Stop what plays before starting anew.
+    let old = state.0.lock().map_err(|e| e.to_string())?.take();
+    let p = settings.params();
+    let player = tauri::async_runtime::spawn_blocking(move || {
+        drop(old);
+        develop::Player::start(Path::new(&path), frame as usize, &p, w, h, view709)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
+    *state.0.lock().map_err(|e| e.to_string())? = Some(player);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn develop_play_settings(app: AppHandle, settings: Settings, view709: bool) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        use tauri::Manager;
+        if let Ok(g) = app.state::<Playing>().0.lock() {
+            if let Some(p) = g.as_ref() {
+                p.set(&settings.params(), view709);
+            }
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// The next playback frame: 12-byte header (width, height, frame as u32 LE) then RGBA.
+/// Only the header when no frame came in time; frame u32::MAX at the end of the clip.
+#[tauri::command]
+pub async fn develop_play_frame(app: AppHandle) -> Result<tauri::ipc::Response, String> {
+    let r =
+        tauri::async_runtime::spawn_blocking(move || {
+            use tauri::Manager;
+            let state = app.state::<Playing>();
+            let g = state.0.lock().map_err(|e| e.to_string())?;
+            match g.as_ref() {
+                None => Ok::<_, String>(develop::Played::End),
+                Some(p) => Ok(p.next(std::time::Duration::from_millis(60)).unwrap_or(develop::Played::Frame(
+                    develop::PlayFrame { index: u32::MAX as usize - 1, w: 0, h: 0, rgba: Vec::new() },
+                ))),
+            }
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    match r? {
+        develop::Played::Frame(f) => {
+            out.reserve(12 + f.rgba.len());
+            out.extend_from_slice(&(f.w as u32).to_le_bytes());
+            out.extend_from_slice(&(f.h as u32).to_le_bytes());
+            out.extend_from_slice(&(f.index as u32).to_le_bytes());
+            out.extend_from_slice(&f.rgba);
+        }
+        develop::Played::End => {
+            out.extend_from_slice(&[0; 8]);
+            out.extend_from_slice(&u32::MAX.to_le_bytes());
+        }
+        develop::Played::Failed(e) => return Err(e),
+    }
+    Ok(tauri::ipc::Response::new(out))
+}
+
+#[tauri::command]
+pub async fn develop_play_stop(state: State<'_, Playing>) -> Result<(), String> {
+    let old = state.0.lock().map_err(|e| e.to_string())?.take();
+    tauri::async_runtime::spawn_blocking(move || drop(old)).await.map_err(|e| e.to_string())
 }

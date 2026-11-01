@@ -232,6 +232,18 @@ pub fn encoder_works(ffmpeg: &Path, encoder: &str) -> bool {
     quiet(&mut cmd).status().map(|s| s.success()).unwrap_or(false)
 }
 
+/// Whether `encoder` takes 10-bit frames of `w` x `h` (hardware encoders have size limits).
+pub fn encoder_works_size(ffmpeg: &Path, encoder: &str, w: u32, h: u32) -> bool {
+    let mut cmd = Command::new(ffmpeg);
+    cmd.args(["-hide_banner", "-v", "error", "-f", "lavfi", "-i", &format!("color=c=gray:s={w}x{h}:r=25:d=0.12")])
+        .args(encoder_args(encoder, None))
+        .args(["-frames:v", "2", "-f", "null", "-"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    quiet(&mut cmd).status().map(|s| s.success()).unwrap_or(false)
+}
+
 /// The encoders that work with `ffmpeg` on this machine, in [`ENCODERS`] order.
 pub fn available_encoders(ffmpeg: &Path) -> Vec<String> {
     ENCODERS.iter().filter(|e| encoder_works(ffmpeg, e)).map(|e| e.to_string()).collect()

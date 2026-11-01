@@ -11,7 +11,13 @@ const DEV_WB = [
 ];
 const DEV_ROLL = [["none", N_("None")], ["hard", N_("Hard")], ["medium", N_("Medium")], ["soft", N_("Soft")], ["verySoft", N_("Very Soft")]];
 const DEV_TONE = [["none", N_("None")], ["low", N_("Low")], ["medium", N_("Medium")], ["high", N_("High")]];
-const DEV_SIZES = [[3840, "4K"], [1920, "1080p"]];
+const DEV_SIZES = [[0, ""], [3840, "4K"], [1920, "1080p"]];
+const DEV_QUALITY = [["standard", N_("Standard")], ["high", N_("High")]];
+// Noise reduction sliders (all formats), 0 is off.
+const NR_SLIDERS = [
+  ["nrLuma", N_("Luma"), 0, 100, 1, false, "", 0],
+  ["nrChroma", N_("Chroma"), 0, 100, 1, false, "", 0],
+];
 
 // The ISO values the R3D SDK accepts (ImageProcessingLimits::ISOList, including the six added
 // in SDK 9.0). The ISO slider and box only land on these.
@@ -47,6 +53,8 @@ const SLIDER_TIPS = {
   saturation: N_("Strength of all colors."),
   colorBoost: N_("Strengthens muted colors more than strong ones."),
   sharpness: N_("20 leaves the image as it is."),
+  nrLuma: N_("Smooths grain in the brightness. 0 is off."),
+  nrChroma: N_("Smooths color noise. 0 is off."),
 };
 
 const dev = {
@@ -58,7 +66,9 @@ const dev = {
   timer: 0,
   exporting: false,
   status: "",
-  export: { width: 3840, mbps: null, cbr: false, output: "native" },
+  export: { width: 3840, mbps: null, cbr: false, output: "native", high: false },
+  playing: false,
+  playRun: 0,
 };
 
 const devDemo = !window.__TAURI__;
@@ -86,7 +96,7 @@ async function devStandIn(cmd, a) {
         iso: 800, kelvin: k, hasAudio: true, renderer: "Metal (Apple GPU)",
         sidecar: r3d ? { name: a.path.split("/").pop().replace(/\.[^.]+$/, ".RMD"), exposure: 1, iso: 800, kelvin: null, tint: null } : null,
         outputPath: a.path.replace(/[^/]+$/, "Developed/") + a.path.split("/").pop().replace(/\.[^.]+$/, r3d ? "_Log3G10.mov" : "_NLog.mov"),
-        asShot: { output: r3d ? "log3g10" : "nlog", kelvin: k, tint: 0, exposure: r3d ? 1 : 0, iso: 800, rollOff: "medium", toneMap: "medium", contrast: 0, highlights: 0, shadows: 0, saturation: 0, colorBoost: 0, sharpness: 20 },
+        asShot: { output: r3d ? "log3g10" : "nlog", kelvin: k, tint: 0, exposure: r3d ? 1 : 0, iso: 800, rollOff: "medium", toneMap: "medium", contrast: 0, highlights: 0, shadows: 0, saturation: 0, colorBoost: 0, sharpness: 20, nrLuma: 0, nrChroma: 0 },
       };
     }
     case "develop_preview": {
@@ -123,6 +133,20 @@ async function devStandIn(cmd, a) {
       return buf;
     }
     case "develop_auto_exposure": return 0.6;
+    case "develop_play_start": dev.demoPlay = { ...a, at: performance.now() }; return null;
+    case "develop_play_settings": if (dev.demoPlay) Object.assign(dev.demoPlay, a); return null;
+    case "develop_play_stop": dev.demoPlay = null; return null;
+    case "develop_play_frame": {
+      const p = dev.demoPlay;
+      if (!p) return new ArrayBuffer(12);
+      const i = p.frame + Math.floor(((performance.now() - p.at) / 1000) * 25);
+      const n = dev.clips.get(p.path)?.info.frames || 300;
+      if (i >= n) { const b = new ArrayBuffer(12); new DataView(b).setUint32(8, 0xffffffff, true); return b; }
+      const img = new Uint8Array(await devStandIn("develop_preview", { ...p, frame: i }));
+      const out = new Uint8Array(12 + img.length - 8);
+      out.set(img.subarray(0, 8), 0); new DataView(out.buffer).setUint32(8, i, true); out.set(img.subarray(8), 12);
+      return out.buffer;
+    }
     case "develop_default_kbps": return Math.round((100000 * a.width * a.height) / (3840 * 2160) * Math.max(1, a.fps / 25));
     case "develop_export": {
       dev.demoCancel = false;
@@ -160,6 +184,7 @@ async function devEnsure(path) {
 
 function devShowTab(name) {
   const develop = name === "develop";
+  if (!develop) devStop();
   document.body.classList.toggle("tab-develop", develop);
   devEl("develop").hidden = !develop;
   for (const b of devEl("tabs").querySelectorAll("button")) b.setAttribute("aria-checked", String(b.dataset.value === name));
@@ -181,7 +206,7 @@ function devRender() {
     const c = dev.clips.get(j.path);
     const edited = c && JSON.stringify(c.s) !== JSON.stringify(c.info.asShot);
     b.innerHTML = `<span class="dev-clip-name">${esc(j.name)}</span><span class="dev-clip-sub">${esc(isR3d(j) ? "R3D NE" : isPrr(j) ? "ProRes RAW" : "N-RAW")}${edited ? " · " + esc(tr("Edited")) : ""}</span>`;
-    b.addEventListener("click", () => { dev.path = j.path; dev.frame = 0; devRender(); });
+    b.addEventListener("click", () => { if (j.path !== dev.path) devStop(); dev.path = j.path; dev.frame = 0; devRender(); });
     ul.append(b);
   }
   if (!dev.path) return;
@@ -303,6 +328,8 @@ function devRenderControls() {
     sec(N_("Color"));
     for (const k of NRAW_SLIDERS.slice(5)) box.append(devSlider(c, k));
   }
+  sec(N_("Noise Reduction"));
+  for (const k of NR_SLIDERS) box.append(devSlider(c, k));
   devRenderExport();
 }
 
@@ -316,15 +343,19 @@ function devRenderExport() {
     c.s.output = v === "rec709" ? "rec709" : c.info.r3d ? "log3g10" : "nlog";
     devChanged();
   }, N_("Log keeps the most for grading later. Rec.709 is ready to watch.")));
-  box.append(devSelect(N_("Size"), DEV_SIZES.map(([w, l]) => [String(w), l]), String(dev.export.width), (v) => { dev.export.width = +v; dev.export.mbps = null; devRenderExport(); }));
+  const fullH = Math.round(c.info.height / 2) * 2, fullW = Math.floor(c.info.width / 2) * 2;
+  const sizes = DEV_SIZES.filter(([w]) => w < fullW).map(([w, l]) => [String(w), w ? l : tr("Full ({0})", `${fullW} x ${fullH}`)]);
+  box.append(devSelect(N_("Size"), sizes, String(dev.export.width), (v) => { dev.export.width = +v; dev.export.mbps = null; devRenderExport(); }));
+  box.append(devSelect(N_("Quality"), DEV_QUALITY, dev.export.high ? "high" : "standard", (v) => { dev.export.high = v === "high"; dev.export.mbps = null; devRenderExport(); }, N_("10-bit either way. High doubles the bitrate for the cleanest picture.")));
   const row = document.createElement("div");
   row.className = "dev-row";
   row.innerHTML = `<div class="dev-row-head"><span class="dev-label">${esc(tr("Bitrate"))}</span><span class="info" tabindex="0" role="img" aria-label="${esc(tr("10-bit HEVC. 100 Mb/s at 4K by default."))}">i</span><input class="mini-input dev-num" id="dev-mbps" type="text" inputmode="decimal" aria-label="${esc(tr("Bitrate"))}"><span class="dev-unit">Mb/s</span></div>
     <label class="dev-check"><input type="checkbox" id="dev-cbr" class="switch"><span>${esc(tr("Constant bitrate"))}</span></label>`;
   box.append(row);
   const mb = row.querySelector("#dev-mbps");
-  const h = Math.round((dev.export.width * c.info.height) / c.info.width / 2) * 2;
-  devInvoke("develop_default_kbps", { width: dev.export.width, height: h, fps: c.info.fps }).then((k) => {
+  const ew = dev.export.width || Math.floor(c.info.width / 2) * 2;
+  const h = Math.round((ew * c.info.height) / c.info.width / 2) * 2;
+  devInvoke("develop_default_kbps", { width: ew, height: h, fps: c.info.fps, high: dev.export.high }).then((k) => {
     if (dev.export.mbps == null) mb.value = num(k / 1000, 0, 0);
   });
   if (dev.export.mbps != null) mb.value = num(dev.export.mbps, 0, 1);
@@ -349,10 +380,14 @@ function devRenderExport() {
 function devFrameFill() {
   const f = devEl("dev-frame");
   f.style.setProperty("--p", `${(100 * f.value) / Math.max(1, f.max)}%`);
+  const c = devClip();
+  if (c) devEl("dev-tc").textContent = `${+f.value + 1} / ${c.info.frames}` + (dev.playFps ? ` · ${fpsText(dev.playFps)} fps` : "");
 }
 
 function devChanged() {
-  devSchedule(60);
+  const pc = devClip();
+  if (dev.playing && pc) devInvoke("develop_play_settings", { settings: pc.s, view709: dev.view709 || pc.s.output === "rec709" }).catch(() => {});
+  else devSchedule(60);
   const on = devEl("dev-list").querySelector(".dev-clip.on .dev-clip-sub");
   const c = devClip();
   if (on && c) on.textContent = (c.info.r3d ? "R3D NE" : "N-RAW") + (JSON.stringify(c.s) !== JSON.stringify(c.info.asShot) ? " · " + tr("Edited") : "");
@@ -363,28 +398,105 @@ function devSchedule(ms) {
   dev.timer = setTimeout(devPreview, ms);
 }
 
-async function devPreview() {
-  const c = devClip();
+// Display size of the picture in the stage and its pixel size, at most `max` wide.
+function devFit(c, max) {
   const stage = devEl("dev-stage");
-  if (!c || !stage.clientWidth) return;
-  const seq = ++dev.seq;
   const r = window.devicePixelRatio || 1;
   const aspect = c.info.height / c.info.width;
   let w = stage.clientWidth, h = w * aspect;
   if (h > stage.clientHeight) { h = stage.clientHeight; w = h / aspect; }
-  const pw = Math.max(16, Math.min(1920, Math.round(w * r))), ph = Math.max(16, Math.round(pw * aspect));
+  const pw = Math.max(16, Math.min(max, Math.round(w * r))), ph = Math.max(16, Math.round(pw * aspect));
+  return { w, h, pw, ph };
+}
+
+function devDraw(bytes, at, w, h) {
+  const dv = new DataView(bytes.buffer, bytes.byteOffset);
+  const bw = dv.getUint32(0, true), bh = dv.getUint32(4, true);
+  const cv = devEl("dev-canvas");
+  if (cv.width !== bw || cv.height !== bh) { cv.width = bw; cv.height = bh; }
+  cv.style.width = `${w}px`; cv.style.height = `${h}px`;
+  cv.getContext("2d").putImageData(new ImageData(new Uint8ClampedArray(bytes.buffer, bytes.byteOffset + at, bw * bh * 4), bw, bh), 0, 0);
+}
+
+const devBytes = (buf) => new Uint8Array(buf instanceof ArrayBuffer ? buf : buf.buffer || new Uint8Array(buf).buffer);
+
+function devPlayIcon() {
+  devEl("dev-play-ico").setAttribute("d", dev.playing ? "M4 2.5h3v11H4ZM9 2.5h3v11H9Z" : "M4 2.5v11L13.5 8Z");
+  const l = tr(dev.playing ? "Pause" : "Play");
+  devEl("dev-play").setAttribute("aria-label", l);
+}
+
+// Playback: frames come developed with the current settings, paced to the clip's frame rate
+// (late frames are skipped). Pausing shows the frame again at full preview quality.
+async function devPlay() {
+  if (dev.playing) return devStop();
+  const c = devClip();
+  if (!c || dev.exporting) return;
+  if (dev.frame >= c.info.frames - 1) dev.frame = 0;
+  const run = ++dev.playRun;
+  dev.playing = true;
+  dev.playFps = 0;
+  devPlayIcon();
+  const { w, h, pw, ph } = devFit(c, 1280);
+  try {
+    await devInvoke("develop_play_start", { path: dev.path, frame: dev.frame, settings: c.s, width: pw, height: ph, view709: dev.view709 || c.s.output === "rec709" });
+    let shown = 0, t0 = performance.now();
+    while (dev.playing && run === dev.playRun) {
+      const bytes = devBytes(await devInvoke("develop_play_frame"));
+      if (!dev.playing || run !== dev.playRun) break;
+      const dv = new DataView(bytes.buffer, bytes.byteOffset);
+      const idx = dv.getUint32(8, true);
+      if (idx === 0xffffffff) break;
+      if (dv.getUint32(0, true) === 0) continue;
+      devDraw(bytes, 12, w, h);
+      devError("");
+      dev.frame = idx;
+      devEl("dev-frame").value = idx;
+      shown++;
+      const el = (performance.now() - t0) / 1000;
+      if (el > 0.5) { dev.playFps = shown / el; shown = 0; t0 = performance.now(); }
+      devFrameFill();
+    }
+  } catch (e) {
+    devError(String(e));
+  }
+  if (run === dev.playRun) devStop();
+}
+
+function devStop() {
+  if (!dev.playing) return;
+  dev.playing = false;
+  dev.playRun++;
+  dev.playFps = 0;
+  devPlayIcon();
+  devFrameFill();
+  devInvoke("develop_play_stop").catch(() => {});
+  devSchedule(0);
+}
+
+function devStep(d) {
+  const c = devClip();
+  if (!c) return;
+  devStop();
+  dev.frame = Math.max(0, Math.min(c.info.frames - 1, dev.frame + d));
+  devEl("dev-frame").value = dev.frame;
+  devFrameFill();
+  devSchedule(0);
+}
+
+async function devPreview() {
+  const c = devClip();
+  const stage = devEl("dev-stage");
+  if (!c || !stage.clientWidth) return;
+  if (dev.playing) return;
+  const seq = ++dev.seq;
+  const { w, h, pw, ph } = devFit(c, 1920);
   devEl("dev-loading").hidden = false;
   try {
     const view709 = dev.view709 || c.s.output === "rec709";
     const buf = await devInvoke("develop_preview", { path: dev.path, frame: dev.frame, settings: c.s, crop: null, width: pw, height: ph, view709 });
-    if (seq !== dev.seq) return;
-    const bytes = new Uint8Array(buf instanceof ArrayBuffer ? buf : buf.buffer || new Uint8Array(buf).buffer);
-    const dv = new DataView(bytes.buffer, bytes.byteOffset);
-    const bw = dv.getUint32(0, true), bh = dv.getUint32(4, true);
-    const cv = devEl("dev-canvas");
-    cv.width = bw; cv.height = bh;
-    cv.style.width = `${w}px`; cv.style.height = `${h}px`;
-    cv.getContext("2d").putImageData(new ImageData(new Uint8ClampedArray(bytes.buffer, bytes.byteOffset + 8, bw * bh * 4), bw, bh), 0, 0);
+    if (seq !== dev.seq || dev.playing) return;
+    devDraw(devBytes(buf), 8, w, h);
     devError("");
   } catch (e) {
     if (seq === dev.seq) devError(String(e));
@@ -395,11 +507,12 @@ async function devPreview() {
 
 function devRequest(path) {
   const c = dev.clips.get(path);
-  return { path, settings: c.s, width: dev.export.width, kbps: dev.export.mbps != null ? Math.round(dev.export.mbps * 1000) : null, cbr: dev.export.cbr };
+  return { path, settings: c.s, width: dev.export.width, kbps: dev.export.mbps != null ? Math.round(dev.export.mbps * 1000) : null, cbr: dev.export.cbr, high: dev.export.high };
 }
 
 async function devExport(all) {
   if (dev.exporting) return;
+  devStop();
   const paths = all ? devClipsInQueue().map((j) => j.path) : [dev.path];
   for (const p of paths) await devEnsure(p);
   const out = devClip()?.s.output;
@@ -425,8 +538,20 @@ async function devExport(all) {
 function devInit() {
   if (WEB) { devEl("tabs").hidden = true; return; }
   for (const b of devEl("tabs").querySelectorAll("button")) b.addEventListener("click", () => devShowTab(b.dataset.value));
-  devEl("dev-frame").addEventListener("input", () => { dev.frame = +devEl("dev-frame").value; devFrameFill(); devSchedule(40); });
-  devEl("dev-view").addEventListener("change", () => { dev.view709 = devEl("dev-view").checked; devSchedule(0); });
+  devEl("dev-play").addEventListener("click", () => devPlay());
+  devEl("dev-prev").addEventListener("click", () => devStep(-1));
+  devEl("dev-next").addEventListener("click", () => devStep(1));
+  document.addEventListener("keydown", (e) => {
+    if (devEl("develop").hidden || e.metaKey || e.ctrlKey || e.altKey) return;
+    const t = e.target, tag = t.tagName;
+    if (tag === "SELECT" || tag === "TEXTAREA" || (tag === "INPUT" && !(t.type === "range" && t.id === "dev-frame")) || (tag === "BUTTON" && e.key === " " && t.id !== "dev-play")) return;
+    if (e.key === " ") { e.preventDefault(); if (t.id !== "dev-play") devPlay(); }
+    else if (e.key === "ArrowLeft") { e.preventDefault(); devStep(e.shiftKey ? -10 : -1); }
+    else if (e.key === "ArrowRight") { e.preventDefault(); devStep(e.shiftKey ? 10 : 1); }
+  });
+  devEl("dev-frame").addEventListener("pointerdown", () => devStop());
+  devEl("dev-frame").addEventListener("input", () => { devStop(); dev.frame = +devEl("dev-frame").value; devFrameFill(); devSchedule(40); });
+  devEl("dev-view").addEventListener("change", () => { dev.view709 = devEl("dev-view").checked; devChanged(); });
   devEl("dev-view").checked = dev.view709;
   devEl("dev-reset").addEventListener("click", () => {
     const c = devClip();

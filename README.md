@@ -240,9 +240,11 @@ The Develop tab is a quick turnaround with basic tools for developing your digit
 - R3D NE: ISO, Exposure Adjust, Color Temp, Tint, Contrast, Highlight Roll Off and Output Tone Map.
 - N-RAW: White Balance presets (Temperature and Tint unlock on Custom), Exposure, Highlights, Shadows, Saturation, Color Boost and Sharpness (20 leaves the image as it is).
 - **Auto exposure** sets exposure so the frame averages middle gray.
+- Noise Reduction (all formats): Luma and Chroma, 0 (off) to 100, saved per clip. A fast edge preserving filter on the RAW planes, scaled to the noise measured in each frame, so the preview, playback and export look the same.
+- Playback: play and pause with the space bar, step frames with the arrow keys or the buttons, scrub on the timeline. Frames are developed with the current settings in real time; frames that cannot be ready in time are skipped so playback keeps time. Pausing shows the frame at full preview quality.
 - Output: the clip's own log (Log3G10 / REDWideGamutRGB or N-Log / Rec.2020) or Rec.709. The preview can show log through a Rec.709 view.
-- Export: 10-bit HEVC MOV (VideoToolbox on a Mac, else the first ffmpeg HEVC encoder that works, libx265 last), 100 Mb/s at 4K by default, optional constant bitrate, audio as 32-bit float PCM. Files go to a `Developed` folder next to each clip.
-- Command line: `bluecompress develop <clip> [--rec709] [--exposure EV] [--kelvin K] [--tint T] [--iso N] [--auto] [--width 3840|1920] [--kbps N] [--cbr] [-o file.mov]`.
+- Export: 10-bit HEVC MOV (VideoToolbox on a Mac, else the first ffmpeg HEVC encoder that works, libx265 last), at full resolution, 4K or 1080p, 100 Mb/s at 4K by default (High quality doubles it), optional constant bitrate, audio as 32-bit float PCM. Files go to a `Developed` folder next to each clip.
+- Command line: `bluecompress develop <clip> [--rec709] [--exposure EV] [--kelvin K] [--tint T] [--iso N] [--auto] [--width 0|3840|1920] [--high] [--nr-luma N] [--nr-chroma N] [--kbps N] [--cbr] [-o file.mov]` (`--width 0` is full resolution).
 
 ## Languages
 

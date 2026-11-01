@@ -980,8 +980,10 @@ fn bad(what: &str) -> ExitCode {
 /// prints the sizes, to match the picks to the old steps on real footage. Reads only the
 /// container index, a few frame headers and the sampled frames.
 /// `bluecompress develop <clip> [--rec709] [--exposure EV] [--kelvin K] [--tint T] [--iso N]
-/// [--width W] [--kbps N] [--cbr] [--auto] [--stats] [-o FILE]`: develops a clip to 10-bit
-/// HEVC. `--stats` renders one frame on the CPU and the GPU and prints only numbers.
+/// [--width W] [--kbps N] [--cbr] [--high] [--nr-luma N] [--nr-chroma N] [--auto] [--stats]
+/// [--play SECONDS] [-o FILE]`: develops a clip to 10-bit HEVC (`--width 0`: full resolution).
+/// `--stats` renders one frame on the CPU and the GPU and prints only numbers; `--play`
+/// runs playback for a while at `--width` and prints the frame rate it kept.
 fn develop_cmd(args: Vec<String>) -> ExitCode {
     use bluecompress::develop::{self, Export, Output, Params};
     use std::time::Instant;
@@ -989,6 +991,7 @@ fn develop_cmd(args: Vec<String>) -> ExitCode {
     let (mut rec709, mut auto, mut stats, mut cbr) = (false, false, false, false);
     let (mut exposure, mut kelvin, mut tint, mut iso) = (None, None, None, None);
     let (mut width, mut kbps, mut out, mut frame) = (3840u32, None, None, 0usize);
+    let (mut nr_luma, mut nr_chroma, mut high, mut play) = (0f32, 0f32, false, None);
     let mut it = args.into_iter();
     while let Some(a) = it.next() {
         let num = |v: Option<String>| v.and_then(|v| v.parse::<f32>().ok());
@@ -997,6 +1000,10 @@ fn develop_cmd(args: Vec<String>) -> ExitCode {
             "--auto" => auto = true,
             "--stats" => stats = true,
             "--cbr" => cbr = true,
+            "--high" => high = true,
+            "--nr-luma" => nr_luma = num(it.next()).unwrap_or(0.0),
+            "--nr-chroma" => nr_chroma = num(it.next()).unwrap_or(0.0),
+            "--play" => play = num(it.next()),
             "--exposure" => exposure = num(it.next()),
             "--kelvin" => kelvin = num(it.next()),
             "--tint" => tint = num(it.next()),
@@ -1054,7 +1061,37 @@ fn develop_cmd(args: Vec<String>) -> ExitCode {
             sc.tint
         );
     }
-    println!("settings: exposure={:+.2} iso={} kelvin={}", p.exposure, p.iso, p.kelvin);
+    p.nr_luma = nr_luma;
+    p.nr_chroma = nr_chroma;
+    println!("settings: exposure={:+.2} iso={} kelvin={} nr={}/{}", p.exposure, p.iso, p.kelvin, nr_luma, nr_chroma);
+    if let Some(secs) = play {
+        let (ow, oh) = develop::output_size(&info, width);
+        let t = Instant::now();
+        let player = match develop::Player::start(&input, frame, &p, ow as usize, oh as usize, true) {
+            Ok(pl) => pl,
+            Err(e) => return bad(&e.to_string()),
+        };
+        let (mut shown, mut first, mut last) = (0usize, None, 0usize);
+        while t.elapsed().as_secs_f64() < secs as f64 {
+            match player.next(std::time::Duration::from_millis(500)) {
+                Some(develop::Played::Frame(f)) => {
+                    shown += 1;
+                    first.get_or_insert((f.index, t.elapsed().as_secs_f64()));
+                    last = f.index;
+                }
+                Some(develop::Played::End) => break,
+                Some(develop::Played::Failed(e)) => return bad(&e),
+                None => {}
+            }
+        }
+        let (f0, t0) = first.unwrap_or((frame, 0.0));
+        let el = t.elapsed().as_secs_f64() - t0;
+        println!(
+            "play {}x{}: first frame after {:.3}s, shown {} frames in {:.2}s = {:.1} fps, clip advanced {} frames ({:.1} fps clip time, source {:.3} fps)",
+            ow, oh, t0, shown, el, shown as f64 / el.max(1e-6), last - f0, (last - f0) as f64 / el.max(1e-6), info.fps
+        );
+        return ExitCode::SUCCESS;
+    }
     if auto {
         match develop::auto_exposure_for(&input, frame, &p) {
             Ok(ev) => {
@@ -1073,10 +1110,14 @@ fn develop_cmd(args: Vec<String>) -> ExitCode {
             Ok(m) => m,
             Err(e) => return bad(&e.to_string()),
         };
-        let pl = match develop::decode_planes(&input_file, &movie, frame) {
+        let mut pl = match develop::decode_planes(&input_file, &movie, frame) {
             Ok(p) => p,
             Err(e) => return bad(&e.to_string()),
         };
+        let t = Instant::now();
+        let noise = bluecompress::denoise::noise_gain(&pl);
+        bluecompress::denoise::denoise(&mut pl, nr_luma, nr_chroma);
+        println!("denoise {}x{} planes: {:.3}s (noise gain {:.4})", pl.w, pl.h, t.elapsed().as_secs_f64(), noise);
         for view in [false, true] {
             let s = develop::shade(&info, &p, pl.black, pl.white, view);
             let (ow, oh) = (960, (960 * info.height / info.width) as usize);
@@ -1111,7 +1152,7 @@ fn develop_cmd(args: Vec<String>) -> ExitCode {
     }
     let output = out.unwrap_or_else(|| develop::export_path(&input, p.output));
     let (w, h) = develop::output_size(&info, width);
-    let kbps = kbps.unwrap_or_else(|| develop::default_kbps(w, h, info.fps));
+    let kbps = kbps.unwrap_or_else(|| develop::quality_kbps(w, h, info.fps, high));
     let e = Export { input, output, params: p, width, kbps, cbr, encoder: None };
     let mut last = -1i64;
     match develop::export(&e, &CANCEL, &mut |f, fps| {

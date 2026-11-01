@@ -20,6 +20,8 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{sync_channel, Receiver};
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use rayon::prelude::*;
@@ -281,6 +283,9 @@ pub struct Params {
     pub color_boost: f32,
     /// N-RAW sharpness, 0 to 100, 20 is unity.
     pub sharpness: f32,
+    /// Noise reduction, 0 (off) to 100, luma and chroma (all formats).
+    pub nr_luma: f32,
+    pub nr_chroma: f32,
 }
 
 impl Params {
@@ -303,6 +308,8 @@ impl Params {
             saturation: 0.0,
             color_boost: 0.0,
             sharpness: 20.0,
+            nr_luma: 0.0,
+            nr_chroma: 0.0,
         }
     }
 }
@@ -681,9 +688,10 @@ pub fn auto_exposure(c: &ClipInfo, p: &Params, pl: &RawPlanes) -> f32 {
     ((ev * 10.0).round() / 10.0).clamp(-lim, lim)
 }
 
-/// Output size for a target width (even, keeping the aspect ratio of the sensor).
+/// Output size for a target width (even, keeping the aspect ratio of the sensor). Width 0
+/// is the full resolution of the clip.
 pub fn output_size(c: &ClipInfo, width: u32) -> (u32, u32) {
-    let w = width.max(16);
+    let w = if width == 0 { c.width & !1 } else { width }.max(16);
     let h = (w as f64 * c.height as f64 / c.width as f64 / 2.0).round() as u32 * 2;
     (w, h.max(2))
 }
@@ -692,6 +700,15 @@ pub fn output_size(c: &ClipInfo, width: u32) -> (u32, u32) {
 pub fn default_kbps(w: u32, h: u32, fps: f64) -> u32 {
     let k = UHD_KBPS as f64 * (w as f64 * h as f64) / (3840.0 * 2160.0) * (fps / 25.0).max(0.5);
     (k.round() as u32).clamp(8_000, 400_000)
+}
+
+/// Bitrate for a size at a quality: High doubles the default (up to 800 Mb/s).
+pub fn quality_kbps(w: u32, h: u32, fps: f64, high: bool) -> u32 {
+    if !high {
+        return default_kbps(w, h, fps);
+    }
+    let k = 2.0 * UHD_KBPS as f64 * (w as f64 * h as f64) / (3840.0 * 2160.0) * (fps / 25.0).max(0.5);
+    (k.round() as u32).clamp(16_000, 800_000)
 }
 
 // Export -----------------------------------------------------------------------
@@ -774,6 +791,13 @@ pub fn export(e: &Export, cancel: &AtomicBool, progress: &mut dyn FnMut(f64, f64
     let movie = Movie::parse(&input)?;
     let n = movie.video().samples.len();
     let (ow, oh) = output_size(&info, e.width);
+    // A hardware encoder may not take every size (large frames): fall back to libx265.
+    let encoder =
+        if e.encoder.is_none() && encoder != "libx265" && !proxy::encoder_works_size(&ffmpeg, &encoder, ow, oh) {
+            "libx265".to_string()
+        } else {
+            encoder
+        };
     let (ow, oh) = (ow as usize, oh as usize);
     if let Some(dir) = e.output.parent() {
         std::fs::create_dir_all(dir).map_err(|err| Error(format!("cannot create {}: {err}", dir.display())))?;
@@ -851,6 +875,10 @@ pub fn export(e: &Export, cancel: &AtomicBool, progress: &mut dyn FnMut(f64, f64
                 break;
             }
         };
+        let mut planes = planes;
+        for pl in planes.iter_mut() {
+            crate::denoise::denoise(pl, e.params.nr_luma, e.params.nr_chroma);
+        }
         for (k, pl) in planes.iter().enumerate() {
             let s = shade(&info, &e.params, pl.black, pl.white, false);
             let mut img = render(pl, &s, [0.0, 0.0, 1.0, 1.0], ow, oh);
@@ -910,7 +938,8 @@ pub fn preview(
     let info = clip_info(path)?;
     let input = InputFile::open(path)?;
     let movie = Movie::parse(&input)?;
-    let pl = decode_planes(&input, &movie, frame.min(movie.video().samples.len().saturating_sub(1)))?;
+    let mut pl = decode_planes(&input, &movie, frame.min(movie.video().samples.len().saturating_sub(1)))?;
+    crate::denoise::denoise(&mut pl, p.nr_luma, p.nr_chroma);
     let s = shade(&info, p, pl.black, pl.white, view709);
     let mut img = render(&pl, &s, crop, ow, oh);
     if !info.r3d {
@@ -921,6 +950,229 @@ pub fn preview(
         rgba.extend_from_slice(&[(px[0] >> 8) as u8, (px[1] >> 8) as u8, (px[2] >> 8) as u8, 255]);
     }
     Ok(rgba)
+}
+
+// Playback ---------------------------------------------------------------------
+
+/// One frame of playback, RGBA 8-bit.
+pub struct PlayFrame {
+    pub index: usize,
+    pub w: usize,
+    pub h: usize,
+    pub rgba: Vec<u8>,
+}
+
+/// What the playback thread hands over.
+pub enum Played {
+    Frame(PlayFrame),
+    End,
+    Failed(String),
+}
+
+type Look = Arc<Mutex<(Params, bool)>>;
+
+/// Playback of a clip with the current settings, in real time: frames are decoded ahead on
+/// several threads and paced to the clip's frame rate, and frames that cannot be ready in
+/// time are skipped so the picture keeps time with the clock.
+pub struct Player {
+    cancel: Arc<AtomicBool>,
+    look: Look,
+    rx: Receiver<Played>,
+    threads: Vec<std::thread::JoinHandle<()>>,
+}
+
+fn to_rgba(img: &[u16]) -> Vec<u8> {
+    let mut rgba = Vec::with_capacity(img.len() / 3 * 4);
+    for px in img.chunks(3) {
+        rgba.extend_from_slice(&[(px[0] >> 8) as u8, (px[1] >> 8) as u8, (px[2] >> 8) as u8, 255]);
+    }
+    rgba
+}
+
+fn develop_frame(info: &ClipInfo, look: &Look, mut pl: RawPlanes, ow: usize, oh: usize) -> Vec<u8> {
+    let (p, view) = look.lock().map(|l| l.clone()).unwrap_or_else(|e| e.into_inner().clone());
+    crate::denoise::denoise(&mut pl, p.nr_luma, p.nr_chroma);
+    let s = shade(info, &p, pl.black, pl.white, view);
+    let mut img = render(&pl, &s, [0.0, 0.0, 1.0, 1.0], ow, oh);
+    if !info.r3d {
+        sharpen(&mut img, ow, oh, p.sharpness);
+    }
+    to_rgba(&img)
+}
+
+impl Player {
+    /// Starts playing `path` from frame `from` at `ow` x `oh`.
+    pub fn start(path: &Path, from: usize, p: &Params, ow: usize, oh: usize, view709: bool) -> Result<Player> {
+        let info = Arc::new(clip_info(path)?);
+        let input = Arc::new(InputFile::open(path)?);
+        let movie = Arc::new(Movie::parse(&input)?);
+        let n = movie.video().samples.len();
+        let from = from.min(n.saturating_sub(1));
+        let fps = if info.fps > 0.0 { info.fps } else { 25.0 };
+        let cancel = Arc::new(AtomicBool::new(false));
+        let look: Look = Arc::new(Mutex::new((p.clone(), view709)));
+        let (tx, rx) = sync_channel::<Played>(2);
+        // Results in any order, and the order frames were picked in.
+        let (rtx, rrx) = sync_channel::<(usize, std::result::Result<Vec<u8>, String>)>(16);
+        let order = Arc::new(Mutex::new(std::collections::VecDeque::<usize>::new()));
+        let t0 = Instant::now();
+        let clock = move || from + (t0.elapsed().as_secs_f64() * fps) as usize;
+        let mut threads = Vec::new();
+        if crate::prores_raw::is_prr_codec(movie.video().codec) {
+            // One decoder process, frames in order: skip what is already late, and develop
+            // the frames on a few threads while the next ones decode.
+            let mut st = crate::prores_raw::MosaicStream::open_from(&input, &movie, from)?;
+            let (jtx, jrx) = sync_channel::<(usize, RawPlanes)>(3);
+            let jrx = Arc::new(Mutex::new(jrx));
+            for _ in 0..3 {
+                let (info, look, jrx, rtx) = (info.clone(), look.clone(), jrx.clone(), rtx.clone());
+                threads.push(std::thread::spawn(move || loop {
+                    let job = jrx.lock().unwrap().recv();
+                    let Ok((i, pl)) = job else { return };
+                    if rtx.send((i, Ok(develop_frame(&info, &look, pl, ow, oh)))).is_err() {
+                        return;
+                    }
+                }));
+            }
+            let (cancel, order, rtx) = (cancel.clone(), order.clone(), rtx.clone());
+            threads.push(std::thread::spawn(move || {
+                for i in from..n {
+                    if cancel.load(Ordering::Relaxed) {
+                        return;
+                    }
+                    let planes = st.next_planes();
+                    if planes.is_ok() && i + 1 < n && i + 1 < clock() && i != from {
+                        continue;
+                    }
+                    order.lock().unwrap().push_back(i);
+                    match planes {
+                        Ok(data) => {
+                            let pl = RawPlanes { w: st.w / 2, h: st.h / 2, data, black: st.map.black, white: 16383.0 };
+                            if jtx.send((i, pl)).is_err() {
+                                return;
+                            }
+                        }
+                        Err(e) => {
+                            let _ = rtx.send((i, Err(e.0)));
+                            return;
+                        }
+                    }
+                }
+            }));
+        } else {
+            let next = Arc::new(Mutex::new(from));
+            let workers = std::thread::available_parallelism().map(|v| v.get() / 3).unwrap_or(2).clamp(2, 6);
+            for _ in 0..workers {
+                let (info, look, cancel, order, next, rtx) =
+                    (info.clone(), look.clone(), cancel.clone(), order.clone(), next.clone(), rtx.clone());
+                let (input, movie) = (input.clone(), movie.clone());
+                threads.push(std::thread::spawn(move || loop {
+                    if cancel.load(Ordering::Relaxed) {
+                        return;
+                    }
+                    let i = {
+                        let mut nx = next.lock().unwrap();
+                        let i = (*nx).max(clock()).min(n);
+                        if i >= n {
+                            return;
+                        }
+                        *nx = i + 1;
+                        order.lock().unwrap().push_back(i);
+                        i
+                    };
+                    let r = decode_planes(&input, &movie, i)
+                        .map_err(|e| e.0)
+                        .map(|pl| develop_frame(&info, &look, pl, ow, oh));
+                    if rtx.send((i, r)).is_err() {
+                        return;
+                    }
+                }));
+            }
+        }
+        drop(rtx);
+        // Hands frames over in order, each at its time.
+        let c2 = cancel.clone();
+        threads.push(std::thread::spawn(move || {
+            let mut ready = std::collections::HashMap::new();
+            loop {
+                if c2.load(Ordering::Relaxed) {
+                    return;
+                }
+                let want = order.lock().unwrap().pop_front();
+                let Some(i) = want else {
+                    // Nothing picked yet: wait for a result (or the end of the workers).
+                    match rrx.recv_timeout(std::time::Duration::from_millis(20)) {
+                        Ok((k, r)) => {
+                            ready.insert(k, r);
+                        }
+                        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                            let _ = tx.send(Played::End);
+                            return;
+                        }
+                        Err(_) => {}
+                    }
+                    continue;
+                };
+                let r = loop {
+                    if let Some(r) = ready.remove(&i) {
+                        break Some(r);
+                    }
+                    match rrx.recv() {
+                        Ok((k, r)) => {
+                            ready.insert(k, r);
+                        }
+                        Err(_) => break None,
+                    }
+                };
+                let Some(r) = r else {
+                    let _ = tx.send(Played::End);
+                    return;
+                };
+                let due = t0 + std::time::Duration::from_secs_f64((i - from) as f64 / fps);
+                if let Some(wait) = due.checked_duration_since(Instant::now()) {
+                    std::thread::sleep(wait);
+                }
+                let msg = match r {
+                    Ok(rgba) => Played::Frame(PlayFrame { index: i, w: ow, h: oh, rgba }),
+                    Err(e) => Played::Failed(e),
+                };
+                let stop = matches!(msg, Played::Failed(_));
+                if tx.send(msg).is_err() || stop {
+                    return;
+                }
+            }
+        }));
+        Ok(Player { cancel, look, rx, threads })
+    }
+
+    /// New settings for the frames still to come.
+    pub fn set(&self, p: &Params, view709: bool) {
+        if let Ok(mut l) = self.look.lock() {
+            *l = (p.clone(), view709);
+        }
+    }
+
+    /// The next frame, waiting up to `timeout`.
+    pub fn next(&self, timeout: std::time::Duration) -> Option<Played> {
+        match self.rx.recv_timeout(timeout) {
+            Ok(m) => Some(m),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => None,
+            Err(_) => Some(Played::End),
+        }
+    }
+}
+
+impl Drop for Player {
+    fn drop(&mut self) {
+        self.cancel.store(true, Ordering::Relaxed);
+        // Unblock the threads: drain what is queued, then let them see the flag.
+        while self.rx.try_recv().is_ok() {}
+        let rx = std::mem::replace(&mut self.rx, sync_channel(1).1);
+        drop(rx);
+        for t in self.threads.drain(..) {
+            let _ = t.join();
+        }
+    }
 }
 
 /// Auto exposure for a frame of a clip with the given settings.

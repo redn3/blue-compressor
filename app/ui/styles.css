@@ -1408,3 +1408,7 @@ body.tab-develop .viewer { display: none; }
   cursor: help;
 }
 .bpp-span.one { margin-left: -1.5px; }
+
+.dev-transport .range { flex: 1; }
+.dev-transport .icon-btn { flex: none; cursor: pointer; }
+.dev-transport .scrub-tc { min-width: 92px; text-align: right; white-space: nowrap; }

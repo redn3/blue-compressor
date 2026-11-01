@@ -244,7 +244,13 @@
             <div class="v-loading" id="dev-loading" hidden><span class="spinner"></span></div>
             <div class="v-error" id="dev-error" hidden></div>
           </div>
-          <div class="scrub"><input type="range" id="dev-frame" min="0" max="0" value="0" class="range" aria-label="Frame" data-i18n-aria-label="Frame"></div>
+          <div class="scrub dev-transport">
+            <button class="icon-btn" id="dev-prev" title="Previous frame" data-i18n-title="Previous frame" aria-label="Previous frame" data-i18n-aria-label="Previous frame"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 3v10M13 3 6 8l7 5Z" fill="currentColor"/></svg></button>
+            <button class="icon-btn" id="dev-play" title="Space plays and pauses. The arrow keys step one frame." data-i18n-title="Space plays and pauses. The arrow keys step one frame." aria-label="Play" data-i18n-aria-label="Play"><svg viewBox="0 0 16 16" aria-hidden="true"><path id="dev-play-ico" d="M4 2.5v11L13.5 8Z" fill="currentColor"/></svg></button>
+            <button class="icon-btn" id="dev-next" title="Next frame" data-i18n-title="Next frame" aria-label="Next frame" data-i18n-aria-label="Next frame"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M12 3v10M3 3l7 5-7 5Z" fill="currentColor"/></svg></button>
+            <input type="range" id="dev-frame" min="0" max="0" value="0" class="range" aria-label="Frame" data-i18n-aria-label="Frame">
+            <span class="scrub-tc" id="dev-tc"></span>
+          </div>
         </div>
         <aside class="dev-panel">
           <div class="dev-actions">

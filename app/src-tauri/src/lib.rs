@@ -733,6 +733,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(updater::Pending::default())
         .manage(develop_cmd::Exporting::default())
+        .manage(develop_cmd::Playing::default())
         .manage(Runner { initial: Mutex::new(args), ..Default::default() })
         .invoke_handler(tauri::generate_handler![
             app_info,
@@ -759,7 +760,11 @@ pub fn run() {
             develop_cmd::develop_auto_exposure,
             develop_cmd::develop_default_kbps,
             develop_cmd::develop_export,
-            develop_cmd::develop_cancel
+            develop_cmd::develop_cancel,
+            develop_cmd::develop_play_start,
+            develop_cmd::develop_play_settings,
+            develop_cmd::develop_play_frame,
+            develop_cmd::develop_play_stop
         ])
         .setup(|app| {
             menu::install(app.handle())?;
