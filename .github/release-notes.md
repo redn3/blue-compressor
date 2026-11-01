@@ -1,4 +1,4 @@
-**What's new in 0.2.7**
+**What's new in 0.3.0**
 - **Noise reduction** in Develop: adjustable Luma and Chroma sliders, saved per clip. Applies to the preview, playback and export.
 - **Playback** in Develop: play and pause with the space bar or the play button, step frames with the arrow keys (Shift jumps 10 frames), and scrub the timeline.
 - **Full resolution export** with Standard or High quality 10-bit HEVC. For now, full resolution is upscaled from Develop's half-resolution image, so it is not sharper than 4K.
