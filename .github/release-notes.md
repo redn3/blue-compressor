@@ -1,3 +1,9 @@
+**What's new in 0.3.1**
+- **Zoom in Develop**: Fit, 100% (one clip pixel per screen pixel), 200% and 400%, pinch or scroll to zoom, drag to pan, click to toggle. Zoomed in, only the visible part is developed, at its size on screen.
+- **Your own LUTs**: import 1D or 3D .cube LUTs from the Output dropdown. They are kept between launches, apply to the log picture in the preview, playback and export (tagged Rec.709), and can be removed again.
+- Develop settings are grouped in **collapsible sections**, remembered between launches.
+- **Faster Develop export**: decoding, developing and encoding now run at the same time, and the 10-bit conversion uses all cores. About 1.6 to 1.8 times faster on an M4 Max.
+
 **What's new in 0.3.0**
 - **Noise reduction** in Develop: adjustable Luma and Chroma sliders, saved per clip. Applies to the preview, playback and export.
 - **Playback** in Develop: play and pause with the space bar or the play button, step frames with the arrow keys (Shift jumps 10 frames), and scrub the timeline.
