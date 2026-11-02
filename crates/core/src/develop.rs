@@ -286,6 +286,8 @@ pub struct Params {
     /// Noise reduction, 0 (off) to 100, luma and chroma (all formats).
     pub nr_luma: f32,
     pub nr_chroma: f32,
+    /// A user LUT applied to the native log output (the result is treated as Rec.709).
+    pub lut: Option<std::sync::Arc<crate::lut::Lut>>,
 }
 
 impl Params {
@@ -310,6 +312,7 @@ impl Params {
             sharpness: 20.0,
             nr_luma: 0.0,
             nr_chroma: 0.0,
+            lut: None,
         }
     }
 }
@@ -469,7 +472,7 @@ pub fn shade(c: &ClipInfo, p: &Params, black: f32, white: f32, view: bool) -> Sh
             Output::NLog => 1,
             Output::Rec709 => 2,
         },
-        view: u32::from(view && p.output != Output::Rec709),
+        view: u32::from(view && p.output != Output::Rec709 && p.lut.is_none()),
         m_out: pad(mul(&to, &cam)),
         m_709: pad(mul(&XYZ_TO_REC709, &cam)),
         highlights: p.highlights / 100.0,
@@ -740,14 +743,29 @@ pub struct ExportDone {
 
 /// Where a developed clip goes: `<clip folder>/Developed/<clip name>_<suffix>.mov`.
 pub fn export_path(clip: &Path, output: Output) -> PathBuf {
+    export_path_tag(
+        clip,
+        match output {
+            Output::Log3G10 => "Log3G10",
+            Output::NLog => "NLog",
+            Output::Rec709 => "Rec709",
+        },
+    )
+}
+
+/// Like [`export_path`] with any name tag (a user LUT's name).
+pub fn export_path_tag(clip: &Path, tag: &str) -> PathBuf {
     let dir = clip.parent().unwrap_or(Path::new(".")).join(DEVELOP_FOLDER);
     let stem = clip.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "clip".into());
-    let tag = match output {
-        Output::Log3G10 => "Log3G10",
-        Output::NLog => "NLog",
-        Output::Rec709 => "Rec709",
-    };
+    let tag: String = tag.chars().map(|c| if c.is_alphanumeric() || c == '-' { c } else { '_' }).collect();
     dir.join(format!("{stem}_{tag}.mov"))
+}
+
+/// Applies the user LUT of `p`, if any, to an encoded 16-bit RGB image.
+pub fn apply_lut(img: &mut [u16], p: &Params) {
+    if let Some(l) = &p.lut {
+        l.apply_rgb16(img);
+    }
 }
 
 fn tags(o: Output) -> [&'static str; 3] {
@@ -807,7 +825,7 @@ pub fn export(e: &Export, cancel: &AtomicBool, progress: &mut dyn FnMut(f64, f64
     let tmp = PathBuf::from(tmp);
     let _ = std::fs::remove_file(&tmp);
     let audio = proxy::has_readable_audio(&ffmpeg, &e.input);
-    let [prim, trc, mat] = tags(e.params.output);
+    let [prim, trc, mat] = tags(if e.params.lut.is_some() { Output::Rec709 } else { e.params.output });
     let mut cmd = Command::new(&ffmpeg);
     cmd.args(["-hide_banner", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb48le"]).args([
         "-s",
@@ -885,6 +903,7 @@ pub fn export(e: &Export, cancel: &AtomicBool, progress: &mut dyn FnMut(f64, f64
             if !info.r3d {
                 sharpen(&mut img, ow, oh, e.params.sharpness);
             }
+            apply_lut(&mut img, &e.params);
             bytes.clear();
             for v in &img {
                 bytes.extend_from_slice(&v.to_le_bytes());
@@ -945,6 +964,7 @@ pub fn preview(
     if !info.r3d {
         sharpen(&mut img, ow, oh, p.sharpness);
     }
+    apply_lut(&mut img, p);
     let mut rgba = Vec::with_capacity(ow * oh * 4);
     for px in img.chunks(3) {
         rgba.extend_from_slice(&[(px[0] >> 8) as u8, (px[1] >> 8) as u8, (px[2] >> 8) as u8, 255]);
@@ -989,20 +1009,29 @@ fn to_rgba(img: &[u16]) -> Vec<u8> {
     rgba
 }
 
-fn develop_frame(info: &ClipInfo, look: &Look, mut pl: RawPlanes, ow: usize, oh: usize) -> Vec<u8> {
+fn develop_frame(info: &ClipInfo, look: &Look, mut pl: RawPlanes, crop: [f32; 4], ow: usize, oh: usize) -> Vec<u8> {
     let (p, view) = look.lock().map(|l| l.clone()).unwrap_or_else(|e| e.into_inner().clone());
     crate::denoise::denoise(&mut pl, p.nr_luma, p.nr_chroma);
     let s = shade(info, &p, pl.black, pl.white, view);
-    let mut img = render(&pl, &s, [0.0, 0.0, 1.0, 1.0], ow, oh);
+    let mut img = render(&pl, &s, crop, ow, oh);
     if !info.r3d {
         sharpen(&mut img, ow, oh, p.sharpness);
     }
+    apply_lut(&mut img, &p);
     to_rgba(&img)
 }
 
 impl Player {
-    /// Starts playing `path` from frame `from` at `ow` x `oh`.
-    pub fn start(path: &Path, from: usize, p: &Params, ow: usize, oh: usize, view709: bool) -> Result<Player> {
+    /// Starts playing `crop` (fractions x, y, w, h) of `path` from frame `from` at `ow` x `oh`.
+    pub fn start(
+        path: &Path,
+        from: usize,
+        p: &Params,
+        crop: [f32; 4],
+        ow: usize,
+        oh: usize,
+        view709: bool,
+    ) -> Result<Player> {
         let info = Arc::new(clip_info(path)?);
         let input = Arc::new(InputFile::open(path)?);
         let movie = Arc::new(Movie::parse(&input)?);
@@ -1029,7 +1058,7 @@ impl Player {
                 threads.push(std::thread::spawn(move || loop {
                     let job = jrx.lock().unwrap().recv();
                     let Ok((i, pl)) = job else { return };
-                    if rtx.send((i, Ok(develop_frame(&info, &look, pl, ow, oh)))).is_err() {
+                    if rtx.send((i, Ok(develop_frame(&info, &look, pl, crop, ow, oh)))).is_err() {
                         return;
                     }
                 }));
@@ -1082,7 +1111,7 @@ impl Player {
                     };
                     let r = decode_planes(&input, &movie, i)
                         .map_err(|e| e.0)
-                        .map(|pl| develop_frame(&info, &look, pl, ow, oh));
+                        .map(|pl| develop_frame(&info, &look, pl, crop, ow, oh));
                     if rtx.send((i, r)).is_err() {
                         return;
                     }

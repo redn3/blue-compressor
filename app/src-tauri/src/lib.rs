@@ -764,9 +764,15 @@ pub fn run() {
             develop_cmd::develop_play_start,
             develop_cmd::develop_play_settings,
             develop_cmd::develop_play_frame,
-            develop_cmd::develop_play_stop
+            develop_cmd::develop_play_stop,
+            develop_cmd::lut_list,
+            develop_cmd::lut_import,
+            develop_cmd::lut_remove
         ])
         .setup(|app| {
+            if let Ok(dir) = app.path().app_config_dir() {
+                develop_cmd::set_lut_dir(dir.join("luts"));
+            }
             menu::install(app.handle())?;
             Ok(())
         })

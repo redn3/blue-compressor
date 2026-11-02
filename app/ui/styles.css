@@ -1338,7 +1338,22 @@ html:lang(zh-Hant) body { font-family: -apple-system, "PingFang TC", "Microsoft 
 .dev-top .v-title { min-width: 0; }
 .dev-top .v-name, .dev-top .v-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dev-stage { position: relative; flex: 1; min-height: 120px; display: flex; align-items: center; justify-content: center; overflow: hidden; background: rgba(127, 127, 127, 0.14); border-radius: 8px; }
-.dev-stage canvas { display: block; max-width: 100%; max-height: 100%; }
+.dev-stage { cursor: zoom-in; touch-action: none; }
+.dev-stage.zoomed { cursor: grab; }
+.dev-stage.zoomed.panning { cursor: grabbing; }
+.dev-stage canvas { display: block; position: absolute; image-rendering: auto; }
+.dev-stage.zoomed .v-zoom-badge { opacity: 1; top: 10px; }
+.dev-top-right { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.dev-group { display: flex; flex-direction: column; gap: 14px; }
+.dev-group-body { display: flex; flex-direction: column; gap: 14px; }
+.dev-group.collapsed .dev-group-body { display: none; }
+.dev-sec-btn { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 6px; cursor: pointer; margin-top: 12px; font-size: 11px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); }
+.dev-sec-btn:hover { color: var(--text-2); }
+.dev-sec-btn:focus-visible { outline: 2px solid var(--accent-ring); outline-offset: 2px; border-radius: 4px; }
+.dev-chev { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.8; transition: transform 0.15s; }
+.dev-group.collapsed .dev-chev { transform: rotate(-90deg); }
+.dev-lut-remove { align-self: flex-start; }
+.dev-stage .v-error { white-space: pre-line; }
 .dev-stage .v-loading[hidden], .dev-stage .v-error[hidden] { display: none; }
 .dev-panel { overflow: auto; border-left: 1px solid var(--border); padding: 12px 14px 18px; display: flex; flex-direction: column; gap: 14px; }
 .dev-actions { display: flex; gap: 6px; flex-wrap: wrap; }

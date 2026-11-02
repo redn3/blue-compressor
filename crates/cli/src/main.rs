@@ -980,7 +980,7 @@ fn bad(what: &str) -> ExitCode {
 /// prints the sizes, to match the picks to the old steps on real footage. Reads only the
 /// container index, a few frame headers and the sampled frames.
 /// `bluecompress develop <clip> [--rec709] [--exposure EV] [--kelvin K] [--tint T] [--iso N]
-/// [--width W] [--kbps N] [--cbr] [--high] [--nr-luma N] [--nr-chroma N] [--auto] [--stats]
+/// [--width W] [--kbps N] [--cbr] [--high] [--nr-luma N] [--nr-chroma N] [--auto] [--stats] [--lut FILE.cube]
 /// [--play SECONDS] [-o FILE]`: develops a clip to 10-bit HEVC (`--width 0`: full resolution).
 /// `--stats` renders one frame on the CPU and the GPU and prints only numbers; `--play`
 /// runs playback for a while at `--width` and prints the frame rate it kept.
@@ -992,6 +992,7 @@ fn develop_cmd(args: Vec<String>) -> ExitCode {
     let (mut exposure, mut kelvin, mut tint, mut iso) = (None, None, None, None);
     let (mut width, mut kbps, mut out, mut frame) = (3840u32, None, None, 0usize);
     let (mut nr_luma, mut nr_chroma, mut high, mut play) = (0f32, 0f32, false, None);
+    let mut lut: Option<PathBuf> = None;
     let mut it = args.into_iter();
     while let Some(a) = it.next() {
         let num = |v: Option<String>| v.and_then(|v| v.parse::<f32>().ok());
@@ -1001,6 +1002,7 @@ fn develop_cmd(args: Vec<String>) -> ExitCode {
             "--stats" => stats = true,
             "--cbr" => cbr = true,
             "--high" => high = true,
+            "--lut" => lut = it.next().map(PathBuf::from),
             "--nr-luma" => nr_luma = num(it.next()).unwrap_or(0.0),
             "--nr-chroma" => nr_chroma = num(it.next()).unwrap_or(0.0),
             "--play" => play = num(it.next()),
@@ -1063,14 +1065,21 @@ fn develop_cmd(args: Vec<String>) -> ExitCode {
     }
     p.nr_luma = nr_luma;
     p.nr_chroma = nr_chroma;
+    if let Some(l) = &lut {
+        match bluecompress::lut::Lut::load(l) {
+            Ok(l) => p.lut = Some(std::sync::Arc::new(l)),
+            Err(e) => return bad(&e.to_string()),
+        }
+    }
     println!("settings: exposure={:+.2} iso={} kelvin={} nr={}/{}", p.exposure, p.iso, p.kelvin, nr_luma, nr_chroma);
     if let Some(secs) = play {
         let (ow, oh) = develop::output_size(&info, width);
         let t = Instant::now();
-        let player = match develop::Player::start(&input, frame, &p, ow as usize, oh as usize, true) {
-            Ok(pl) => pl,
-            Err(e) => return bad(&e.to_string()),
-        };
+        let player =
+            match develop::Player::start(&input, frame, &p, [0.0, 0.0, 1.0, 1.0], ow as usize, oh as usize, true) {
+                Ok(pl) => pl,
+                Err(e) => return bad(&e.to_string()),
+            };
         let (mut shown, mut first, mut last) = (0usize, None, 0usize);
         while t.elapsed().as_secs_f64() < secs as f64 {
             match player.next(std::time::Duration::from_millis(500)) {

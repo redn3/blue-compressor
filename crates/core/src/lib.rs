@@ -20,6 +20,7 @@ pub mod develop;
 pub mod ffi;
 pub mod frame;
 mod gpu;
+pub mod lut;
 pub mod nraw;
 mod preview;
 pub mod prores_raw;

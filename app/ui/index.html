@@ -237,12 +237,18 @@
         <div class="dev-center">
           <div class="dev-top">
             <div class="v-title"><div class="v-name" id="dev-name"></div><div class="v-meta" id="dev-meta"></div></div>
+            <div class="dev-top-right">
+            <div class="seg seg-sm" id="dev-zoom" role="radiogroup" aria-label="Zoom" data-i18n-aria-label="Zoom" title="Click the picture to zoom in, pinch or scroll to zoom, drag to pan." data-i18n-title="Click the picture to zoom in, pinch or scroll to zoom, drag to pan.">
+              <button data-value="fit" data-i18n="Fit">Fit</button><button data-value="1">100%</button><button data-value="2">200%</button><button data-value="4">400%</button>
+            </div>
             <label class="dev-check" title="Shows log output as Rec.709 on screen. The export stays log." data-i18n-title="Shows log output as Rec.709 on screen. The export stays log."><input type="checkbox" id="dev-view" class="switch"><span data-i18n="Rec.709 view">Rec.709 view</span></label>
+            </div>
           </div>
           <div class="dev-stage" id="dev-stage">
             <canvas id="dev-canvas"></canvas>
             <div class="v-loading" id="dev-loading" hidden><span class="spinner"></span></div>
             <div class="v-error" id="dev-error" hidden></div>
+            <div class="v-zoom-badge" id="dev-zoom-badge"></div>
           </div>
           <div class="scrub dev-transport">
             <button class="icon-btn" id="dev-prev" title="Previous frame" data-i18n-title="Previous frame" aria-label="Previous frame" data-i18n-aria-label="Previous frame"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 3v10M13 3 6 8l7 5Z" fill="currentColor"/></svg></button>
@@ -258,7 +264,7 @@
             <button class="btn ghost" id="dev-auto" title="Sets exposure so the frame averages middle gray" data-i18n-title="Sets exposure so the frame averages middle gray" data-i18n="Auto exposure">Auto exposure</button>
           </div>
           <div id="dev-controls"></div>
-          <div class="dev-sec" data-i18n="Export">Export</div>
+          <div class="dev-sec" id="dev-export-head" data-i18n="Export">Export</div>
           <div id="dev-export"></div>
           <div class="dev-actions">
             <button class="btn primary" id="dev-export-one" data-i18n="Export Clip">Export Clip</button>
