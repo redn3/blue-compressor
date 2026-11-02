@@ -31,7 +31,26 @@ pub const PROXY_FOLDER: &str = "Proxies";
 pub const DEFAULT_MAX_WIDTH: u32 = 1920;
 
 /// HEVC encoders in the order they are tried. All but libx265 are hardware encoders.
-pub const ENCODERS: [&str; 5] = ["hevc_videotoolbox", "hevc_nvenc", "hevc_qsv", "hevc_amf", "libx265"];
+pub const ENCODERS: [&str; 6] = ["hevc_videotoolbox", "hevc_nvenc", "hevc_qsv", "hevc_amf", "hevc_vaapi", "libx265"];
+
+/// Global ffmpeg arguments an encoder needs before the inputs (VAAPI opens its device;
+/// BLUECOMPRESS_VAAPI_DEVICE picks another render node).
+pub fn hw_init_args(encoder: &str) -> Vec<String> {
+    if encoder != "hevc_vaapi" {
+        return Vec::new();
+    }
+    let dev = std::env::var("BLUECOMPRESS_VAAPI_DEVICE").unwrap_or_else(|_| "/dev/dri/renderD128".into());
+    vec!["-init_hw_device".into(), format!("vaapi=va:{dev}"), "-filter_hw_device".into(), "va".into()]
+}
+
+/// The end of the video filter chain an encoder needs (VAAPI: upload to the GPU).
+pub fn hw_filter(encoder: &str) -> &'static str {
+    if encoder == "hevc_vaapi" {
+        ",format=p010le,hwupload"
+    } else {
+        ""
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct ProxyOptions {
@@ -87,7 +106,14 @@ pub fn find_ffmpeg() -> Option<PathBuf> {
     }
     let exe_name = if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" };
     if let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf)) {
-        for c in [dir.join(exe_name), dir.join("../Resources").join(exe_name)] {
+        // Next to the program (Windows, command line), in the macOS app's Resources, or in the
+        // Linux packages' resource folder (/usr/lib/<product>, also inside the AppImage).
+        for c in [
+            dir.join(exe_name),
+            dir.join("../Resources").join(exe_name),
+            dir.join("../lib/Blue Compressor").join(exe_name),
+            dir.join("../lib/blue-compressor").join(exe_name),
+        ] {
             if c.is_file() {
                 return Some(c);
             }
@@ -145,6 +171,10 @@ pub(crate) fn cbr_args(encoder: &str, kbps: u32) -> Vec<String> {
             rate(&mut a);
             a.extend(["-pix_fmt".into(), "p010le".into()]);
         }
+        "hevc_vaapi" => {
+            a.extend(["-rc_mode".into(), "CBR".into()]);
+            rate(&mut a);
+        }
         "hevc_amf" => {
             a.extend(["-rc".into(), "cbr".into()]);
             rate(&mut a);
@@ -185,6 +215,7 @@ fn encoder_args(encoder: &str, cbr: Option<u32>) -> Vec<String> {
             "-pix_fmt",
             "p010le",
         ],
+        "hevc_vaapi" => vec!["-c:v", "hevc_vaapi", "-profile:v", "main10", "-rc_mode", "CQP", "-qp", "24"],
         "hevc_qsv" => vec!["-c:v", "hevc_qsv", "-profile:v", "main10", "-global_quality", "24", "-pix_fmt", "p010le"],
         "hevc_amf" => vec![
             "-c:v",
@@ -223,7 +254,10 @@ fn encoder_args(encoder: &str, cbr: Option<u32>) -> Vec<String> {
 /// GPU or driver).
 pub fn encoder_works(ffmpeg: &Path, encoder: &str) -> bool {
     let mut cmd = Command::new(ffmpeg);
-    cmd.args(["-hide_banner", "-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=256x144:r=25:d=0.2"])
+    cmd.args(["-hide_banner", "-v", "error"])
+        .args(hw_init_args(encoder))
+        .args(["-f", "lavfi", "-i", "color=c=gray:s=256x144:r=25:d=0.2"])
+        .args(["-vf", &format!("null{}", hw_filter(encoder))])
         .args(encoder_args(encoder, None))
         .args(["-frames:v", "2", "-f", "null", "-"])
         .stdin(Stdio::null())
@@ -235,7 +269,10 @@ pub fn encoder_works(ffmpeg: &Path, encoder: &str) -> bool {
 /// Whether `encoder` takes 10-bit frames of `w` x `h` (hardware encoders have size limits).
 pub fn encoder_works_size(ffmpeg: &Path, encoder: &str, w: u32, h: u32) -> bool {
     let mut cmd = Command::new(ffmpeg);
-    cmd.args(["-hide_banner", "-v", "error", "-f", "lavfi", "-i", &format!("color=c=gray:s={w}x{h}:r=25:d=0.12")])
+    cmd.args(["-hide_banner", "-v", "error"])
+        .args(hw_init_args(encoder))
+        .args(["-f", "lavfi", "-i", &format!("color=c=gray:s={w}x{h}:r=25:d=0.12")])
+        .args(["-vf", &format!("null{}", hw_filter(encoder))])
         .args(encoder_args(encoder, None))
         .args(["-frames:v", "2", "-f", "null", "-"])
         .stdin(Stdio::null())
@@ -503,18 +540,14 @@ pub fn encode(
     let _ = std::fs::remove_file(&tmp);
 
     let mut cmd = Command::new(ffmpeg);
-    cmd.args(["-hide_banner", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb48le"]).args([
-        "-s",
-        &format!("{ow}x{oh}"),
-        "-r",
-        &format!("{fps}"),
-        "-i",
-        "-",
-    ]);
+    cmd.args(["-hide_banner", "-v", "error", "-y"])
+        .args(hw_init_args(encoder))
+        .args(["-f", "rawvideo", "-pix_fmt", "rgb48le"])
+        .args(["-s", &format!("{ow}x{oh}"), "-r", &format!("{fps}"), "-i", "-"]);
     if let Some(a) = job.audio {
         cmd.arg("-i").arg(a).args(["-map", "0:v:0", "-map", "1:a:0", "-c:a", "aac", "-b:a", "256k", "-shortest"]);
     }
-    cmd.args(["-vf", "scale=out_color_matrix=bt709:out_range=tv,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv"])
+    cmd.args(["-vf", &format!("scale=out_color_matrix=bt709:out_range=tv,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv{}", hw_filter(encoder))])
         .args(encoder_args(encoder, job.cbr_kbps))
         .args(["-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-color_range", "tv"])
         .args(["-f", "mov"])

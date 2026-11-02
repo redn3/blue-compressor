@@ -39,8 +39,10 @@ jobs:
         include:
           - { name: macOS Apple silicon, os: macos-latest, target: aarch64-apple-darwin, arch: arm64, ffmpeg: "https://ffmpeg.martin-riedl.de/download/macos/arm64/1789931890_9.0.2/ffmpeg.zip" }
           - { name: macOS Intel, os: macos-latest, target: x86_64-apple-darwin, arch: x64, ffmpeg: "https://ffmpeg.martin-riedl.de/download/macos/amd64/1789931006_9.0.2/ffmpeg.zip" }
-          - { name: Windows x64, os: windows-latest, target: x86_64-pc-windows-msvc, arch: x64 }
-          - { name: Linux x64, os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, arch: x64 }
+          # Windows and Linux: static GPL ffmpeg 8.1 builds with NVENC, AMF, QSV (and VAAPI on
+          # Linux) next to libx265, so Develop exports use the GPU encoder when there is one.
+          - { name: Windows x64, os: windows-latest, target: x86_64-pc-windows-msvc, arch: x64, ffmpeg: "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-win64-gpl-8.1.zip" }
+          - { name: Linux x64, os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, arch: x64, ffmpeg: "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-linux64-gpl-8.1.tar.xz" }
     steps:
       - uses: actions/checkout@v4
         with:
@@ -74,6 +76,29 @@ jobs:
           chmod +x app/src-tauri/bin/ffmpeg
           app/src-tauri/bin/ffmpeg -hide_banner -encoders | grep -E "hevc_videotoolbox|libx265"
 
+      - name: Fetch ffmpeg (Windows, Linux)
+        if: runner.os != 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p app/src-tauri/bin /tmp/ffmpeg
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            curl -fsSL -o /tmp/ffmpeg.zip "${{ matrix.ffmpeg }}"
+            unzip -o -q /tmp/ffmpeg.zip -d /tmp/ffmpeg
+            cp /tmp/ffmpeg/*/bin/ffmpeg.exe app/src-tauri/bin/ffmpeg.exe
+            ff=app/src-tauri/bin/ffmpeg.exe
+            want="hevc_nvenc hevc_amf hevc_qsv libx265"
+          else
+            curl -fsSL -o /tmp/ffmpeg.tar.xz "${{ matrix.ffmpeg }}"
+            tar xf /tmp/ffmpeg.tar.xz -C /tmp/ffmpeg
+            cp /tmp/ffmpeg/*/bin/ffmpeg app/src-tauri/bin/ffmpeg
+            chmod +x app/src-tauri/bin/ffmpeg
+            ff=app/src-tauri/bin/ffmpeg
+            want="hevc_nvenc hevc_amf hevc_qsv hevc_vaapi libx265"
+          fi
+          enc=$("$ff" -hide_banner -encoders)
+          for e in $want; do echo "$enc" | grep -q " $e " || { echo "ffmpeg lacks $e"; exit 1; }; done
+
       - name: Build desktop app
         working-directory: app/src-tauri
         shell: bash
@@ -85,8 +110,10 @@ jobs:
         run: |
           if [ "${{ runner.os }}" = "macOS" ]; then
             cargo tauri build --target ${{ matrix.target }} --config '{"bundle":{"createUpdaterArtifacts":true,"resources":{"bin/ffmpeg":"ffmpeg"}}}'
+          elif [ "${{ runner.os }}" = "Windows" ]; then
+            cargo tauri build --target ${{ matrix.target }} --config '{"bundle":{"createUpdaterArtifacts":true,"resources":{"bin/ffmpeg.exe":"ffmpeg.exe"}}}'
           else
-            cargo tauri build --target ${{ matrix.target }} --config '{"bundle":{"createUpdaterArtifacts":true}}'
+            cargo tauri build --target ${{ matrix.target }} --config '{"bundle":{"createUpdaterArtifacts":true,"resources":{"bin/ffmpeg":"ffmpeg"}}}'
           fi
 
       - name: Build command line tool
