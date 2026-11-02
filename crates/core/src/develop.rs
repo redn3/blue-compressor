@@ -796,6 +796,39 @@ fn rate_args(encoder: &str, kbps: u32, cbr: bool) -> Vec<String> {
     a
 }
 
+/// Encoded RGB (16-bit, full range) to P010 (10-bit 4:2:0, limited range, values in the
+/// top bits): the Y plane, then interleaved Cb Cr at half size. BT.709 or BT.2020 matrix.
+/// `w` and `h` must be even.
+pub fn rgb16_to_p010(img: &[u16], w: usize, h: usize, bt709: bool, out: &mut [u8]) {
+    let (kr, kb) = if bt709 { (0.2126f32, 0.0722f32) } else { (0.2627, 0.0593) };
+    let kg = 1.0 - kr - kb;
+    let (cb_s, cr_s) = (0.5 / (1.0 - kb), 0.5 / (1.0 - kr));
+    let (ys, uv) = out.split_at_mut(w * h * 2);
+    let put = |b: &mut [u8], v: f32| {
+        let c = (v.round().clamp(0.0, 1023.0) as u16) << 6;
+        b.copy_from_slice(&c.to_le_bytes());
+    };
+    ys.par_chunks_mut(w * 4).zip(uv.par_chunks_mut(w * 2)).enumerate().for_each(|(py, (yrows, uvrow))| {
+        let mut cs = vec![(0f32, 0f32); w / 2];
+        for dy in 0..2 {
+            let y = py * 2 + dy;
+            let src = &img[y * w * 3..(y + 1) * w * 3];
+            for x in 0..w {
+                let [r, g, b] = [0, 1, 2].map(|k| src[x * 3 + k] as f32 / 65535.0);
+                let l = kr * r + kg * g + kb * b;
+                put(&mut yrows[(dy * w + x) * 2..(dy * w + x) * 2 + 2], 64.0 + 876.0 * l);
+                let c = &mut cs[x / 2];
+                c.0 += (b - l) * cb_s;
+                c.1 += (r - l) * cr_s;
+            }
+        }
+        for (i, (cb, cr)) in cs.iter().enumerate() {
+            put(&mut uvrow[i * 4..i * 4 + 2], 512.0 + 896.0 * cb / 4.0);
+            put(&mut uvrow[i * 4 + 2..i * 4 + 4], 512.0 + 896.0 * cr / 4.0);
+        }
+    });
+}
+
 /// Develops a clip to a 10-bit HEVC MOV with its audio as 32-bit float PCM. `progress`
 /// gets (fraction, fps); `cancel` stops it and removes the partial file.
 pub fn export(e: &Export, cancel: &AtomicBool, progress: &mut dyn FnMut(f64, f64)) -> Result<ExportDone> {
@@ -827,7 +860,7 @@ pub fn export(e: &Export, cancel: &AtomicBool, progress: &mut dyn FnMut(f64, f64
     let audio = proxy::has_readable_audio(&ffmpeg, &e.input);
     let [prim, trc, mat] = tags(if e.params.lut.is_some() { Output::Rec709 } else { e.params.output });
     let mut cmd = Command::new(&ffmpeg);
-    cmd.args(["-hide_banner", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb48le"]).args([
+    cmd.args(["-hide_banner", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "p010le"]).args([
         "-s",
         &format!("{ow}x{oh}"),
         "-r",
@@ -838,8 +871,7 @@ pub fn export(e: &Export, cancel: &AtomicBool, progress: &mut dyn FnMut(f64, f64
     if audio {
         cmd.arg("-i").arg(&e.input).args(["-map", "0:v:0", "-map", "1:a:0", "-c:a", "pcm_f32le", "-shortest"]);
     }
-    let matrix = if mat == "bt709" { "bt709" } else { "bt2020" };
-    cmd.args(["-vf", &format!("scale=out_color_matrix={matrix}:out_range=tv,setparams=color_primaries={prim}:color_trc={trc}:colorspace={mat}:range=tv")])
+    cmd.args(["-vf", &format!("setparams=color_primaries={prim}:color_trc={trc}:colorspace={mat}:range=tv")])
         .args(rate_args(&encoder, e.kbps, e.cbr))
         .args(["-color_primaries", prim, "-color_trc", trc, "-colorspace", mat, "-color_range", "tv"])
         .args(["-f", "mov"])
@@ -855,24 +887,30 @@ pub fn export(e: &Export, cancel: &AtomicBool, progress: &mut dyn FnMut(f64, f64
         let _ = stderr.read_to_string(&mut s);
         s
     });
-    let mut stdin = child.stdin.take().unwrap();
-    let mut result: Result<()> = Ok(());
+    let stdin = child.stdin.take().unwrap();
     let renderer = renderer_name();
-    // Decode the next frames in parallel while the current batch renders and encodes.
+    let bt709 = mat == "bt709";
+    // Three stages run at once: decoding the next batch, developing the current one (and
+    // converting it to 10-bit 4:2:0 on all cores), and a writer feeding the encoder.
+    let (wtx, wrx) = std::sync::mpsc::sync_channel::<Vec<u8>>(3);
+    let (ftx, frx) = std::sync::mpsc::channel::<Vec<u8>>();
+    let writer = std::thread::spawn(move || -> std::result::Result<(), String> {
+        let mut stdin = stdin;
+        for buf in wrx {
+            stdin.write_all(&buf).map_err(|err| format!("ffmpeg stopped reading: {err}"))?;
+            let _ = ftx.send(buf);
+        }
+        Ok(())
+    });
     let batch = rayon::current_num_threads().clamp(2, 8);
-    let mut bytes = Vec::with_capacity(ow * oh * 6);
     // ProRes RAW: one decoder process for the whole clip, frames in order.
     let mut prr = if crate::prores_raw::is_prr_codec(movie.video().codec) {
         Some(crate::prores_raw::MosaicStream::open(&input, &movie)?)
     } else {
         None
     };
-    'outer: for b0 in (0..n).step_by(batch) {
-        if cancel.load(Ordering::Relaxed) {
-            result = Err(Error("cancelled".into()));
-            break;
-        }
-        let decoded = match prr.as_mut() {
+    let mut decode = |b0: usize| -> Result<Vec<RawPlanes>> {
+        let mut planes: Vec<RawPlanes> = match prr.as_mut() {
             Some(st) => (b0..(b0 + batch).min(n))
                 .map(|_| {
                     st.next_planes().map(|data| RawPlanes {
@@ -883,40 +921,68 @@ pub fn export(e: &Export, cancel: &AtomicBool, progress: &mut dyn FnMut(f64, f64
                         white: 16383.0,
                     })
                 })
-                .collect::<Result<Vec<_>>>(),
-            None => (b0..(b0 + batch).min(n)).into_par_iter().map(|i| decode_planes(&input, &movie, i)).collect(),
+                .collect::<Result<Vec<_>>>()?,
+            None => (b0..(b0 + batch).min(n))
+                .into_par_iter()
+                .map(|i| decode_planes(&input, &movie, i))
+                .collect::<Result<Vec<_>>>()?,
         };
-        let planes = match decoded {
+        for pl in planes.iter_mut() {
+            crate::denoise::denoise(pl, e.params.nr_luma, e.params.nr_chroma);
+        }
+        Ok(planes)
+    };
+    let frame_bytes = ow * oh * 3; // P010: Y plus half size CbCr, 2 bytes each
+    let mut result: Result<()> = Ok(());
+    let mut cur = if n > 0 { decode(0) } else { Ok(Vec::new()) };
+    let mut b0 = 0;
+    while b0 < n {
+        let planes = match cur {
             Ok(p) => p,
             Err(err) => {
                 result = Err(err);
                 break;
             }
         };
-        let mut planes = planes;
-        for pl in planes.iter_mut() {
-            crate::denoise::denoise(pl, e.params.nr_luma, e.params.nr_chroma);
+        if cancel.load(Ordering::Relaxed) {
+            result = Err(Error("cancelled".into()));
+            break;
         }
-        for (k, pl) in planes.iter().enumerate() {
-            let s = shade(&info, &e.params, pl.black, pl.white, false);
-            let mut img = render(pl, &s, [0.0, 0.0, 1.0, 1.0], ow, oh);
-            if !info.r3d {
-                sharpen(&mut img, ow, oh, e.params.sharpness);
-            }
-            apply_lut(&mut img, &e.params);
-            bytes.clear();
-            for v in &img {
-                bytes.extend_from_slice(&v.to_le_bytes());
-            }
-            if let Err(err) = stdin.write_all(&bytes) {
-                result = Err(Error(format!("ffmpeg stopped reading: {err}")));
-                break 'outer;
-            }
-            let done = b0 + k + 1;
-            progress(done as f64 / n as f64, done as f64 / start.elapsed().as_secs_f64().max(1e-6));
+        let next0 = b0 + batch;
+        let (next, sent) = std::thread::scope(|sc| {
+            let dec = &mut decode;
+            let h = sc.spawn(move || if next0 < n { Some(dec(next0)) } else { None });
+            let sent = (|| -> Result<()> {
+                for (k, pl) in planes.iter().enumerate() {
+                    let s = shade(&info, &e.params, pl.black, pl.white, false);
+                    let mut img = render(pl, &s, [0.0, 0.0, 1.0, 1.0], ow, oh);
+                    if !info.r3d {
+                        sharpen(&mut img, ow, oh, e.params.sharpness);
+                    }
+                    apply_lut(&mut img, &e.params);
+                    let mut buf = frx.try_recv().unwrap_or_default();
+                    buf.resize(frame_bytes, 0);
+                    rgb16_to_p010(&img, ow, oh, bt709, &mut buf);
+                    wtx.send(buf).map_err(|_| Error("ffmpeg stopped reading".into()))?;
+                    let done = b0 + k + 1;
+                    progress(done as f64 / n as f64, done as f64 / start.elapsed().as_secs_f64().max(1e-6));
+                }
+                Ok(())
+            })();
+            (h.join().unwrap_or_else(|_| Some(Err(Error("decoder thread failed".into())))), sent)
+        });
+        if let Err(err) = sent {
+            result = Err(err);
+            break;
         }
+        cur = next.unwrap_or_else(|| Ok(Vec::new()));
+        b0 = next0;
     }
-    drop(stdin);
+    drop(wtx);
+    let wres = writer.join().unwrap_or_else(|_| Err("writer failed".into()));
+    if let (Ok(()), Err(err)) = (&result, wres) {
+        result = Err(Error(err));
+    }
     if result.is_err() {
         let _ = child.kill();
     }
@@ -1381,6 +1447,15 @@ mod tests {
         assert_eq!(rec709(&h, [8.0; 3])[0], 1.0);
         let mid = rec709(&s, [0.18; 3])[0];
         assert!(mid > 0.35 && mid < 0.55, "{mid}");
+    }
+
+    #[test]
+    fn p010_gray_and_white() {
+        let img = vec![65535u16; 4 * 2 * 3];
+        let mut out = vec![0u8; 4 * 2 * 3];
+        rgb16_to_p010(&img, 4, 2, true, &mut out);
+        assert_eq!(u16::from_le_bytes([out[0], out[1]]) >> 6, 940);
+        assert_eq!(u16::from_le_bytes([out[16], out[17]]) >> 6, 512);
     }
 
     #[test]
