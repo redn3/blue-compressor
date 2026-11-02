@@ -728,6 +728,9 @@ fn initial_paths(state: State<'_, Runner>) -> Vec<String> {
 pub fn run() {
     let args: Vec<String> = std::env::args().skip(1).filter(|a| !a.starts_with('-')).collect();
     let app = tauri::Builder::default()
+        .register_asynchronous_uri_scheme_protocol("bcframe", |ctx, req, responder| {
+            develop_cmd::frame_protocol(ctx.app_handle(), req, responder)
+        })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -767,7 +770,9 @@ pub fn run() {
             develop_cmd::develop_play_stop,
             develop_cmd::lut_list,
             develop_cmd::lut_import,
-            develop_cmd::lut_remove
+            develop_cmd::lut_remove,
+            develop_cmd::develop_bench,
+            develop_cmd::develop_bench_done
         ])
         .setup(|app| {
             if let Ok(dir) = app.path().app_config_dir() {

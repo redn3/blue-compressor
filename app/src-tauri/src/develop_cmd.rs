@@ -553,24 +553,25 @@ pub async fn develop_play_settings(app: AppHandle, settings: Settings, view709: 
 
 /// The next playback frame: 12-byte header (width, height, frame as u32 LE) then RGBA.
 /// Only the header when no frame came in time; frame u32::MAX at the end of the clip.
-#[tauri::command]
-pub async fn develop_play_frame(app: AppHandle) -> Result<tauri::ipc::Response, String> {
-    let r =
-        tauri::async_runtime::spawn_blocking(move || {
-            use tauri::Manager;
-            let state = app.state::<Playing>();
-            let g = state.0.lock().map_err(|e| e.to_string())?;
-            match g.as_ref() {
-                None => Ok::<_, String>(develop::Played::End),
-                Some(p) => Ok(p.next(std::time::Duration::from_millis(60)).unwrap_or(develop::Played::Frame(
-                    develop::PlayFrame { index: u32::MAX as usize - 1, w: 0, h: 0, rgba: Vec::new() },
-                ))),
+pub fn next_play_frame(app: &AppHandle) -> Result<Vec<u8>, String> {
+    use tauri::Manager;
+    let state = app.state::<Playing>();
+    let r = {
+        let g = state.0.lock().map_err(|e| e.to_string())?;
+        match g.as_ref() {
+            None => develop::Played::End,
+            Some(p) => {
+                p.next(std::time::Duration::from_millis(60)).unwrap_or(develop::Played::Frame(develop::PlayFrame {
+                    index: u32::MAX as usize - 1,
+                    w: 0,
+                    h: 0,
+                    rgba: Vec::new(),
+                }))
             }
-        })
-        .await
-        .map_err(|e| e.to_string())?;
+        }
+    };
     let mut out = Vec::new();
-    match r? {
+    match r {
         develop::Played::Frame(f) => {
             out.reserve(12 + f.rgba.len());
             out.extend_from_slice(&(f.w as u32).to_le_bytes());
@@ -584,11 +585,56 @@ pub async fn develop_play_frame(app: AppHandle) -> Result<tauri::ipc::Response, 
         }
         develop::Played::Failed(e) => return Err(e),
     }
+    Ok(out)
+}
+
+#[tauri::command]
+pub async fn develop_play_frame(app: AppHandle) -> Result<tauri::ipc::Response, String> {
+    let out =
+        tauri::async_runtime::spawn_blocking(move || next_play_frame(&app)).await.map_err(|e| e.to_string())??;
     Ok(tauri::ipc::Response::new(out))
+}
+
+/// The `bcframe` protocol: playback frames as plain HTTP bodies, which reach the page much
+/// faster than command results. `/play` is the next frame as from [`develop_play_frame`].
+pub fn frame_protocol(app: &AppHandle, req: tauri::http::Request<Vec<u8>>, responder: tauri::UriSchemeResponder) {
+    let app = app.clone();
+    let path = req.uri().path().to_string();
+    std::thread::spawn(move || {
+        let (status, body) = match path.as_str() {
+            "/play" => match next_play_frame(&app) {
+                Ok(b) => (200, b),
+                Err(e) => (500, e.into_bytes()),
+            },
+            _ => (404, Vec::new()),
+        };
+        let resp = tauri::http::Response::builder()
+            .status(status)
+            .header("Content-Type", "application/octet-stream")
+            .header("Access-Control-Allow-Origin", "*")
+            .body(body)
+            .unwrap_or_default();
+        responder.respond(resp);
+    });
 }
 
 #[tauri::command]
 pub async fn develop_play_stop(state: State<'_, Playing>) -> Result<(), String> {
     let old = state.0.lock().map_err(|e| e.to_string())?.take();
     tauri::async_runtime::spawn_blocking(move || drop(old)).await.map_err(|e| e.to_string())
+}
+
+/// Playback benchmark for development: with BLUECOMPRESS_BENCH_DEVELOP=<seconds> the UI
+/// opens Develop on the first clip, plays it and reports through develop_bench_done.
+#[tauri::command]
+pub fn develop_bench() -> Option<(f64, f32)> {
+    let secs = std::env::var("BLUECOMPRESS_BENCH_DEVELOP").ok().and_then(|v| v.parse().ok())?;
+    let nr = std::env::var("BLUECOMPRESS_BENCH_NR").ok().and_then(|v| v.parse().ok()).unwrap_or(0.0);
+    Some((secs, nr))
+}
+
+#[tauri::command]
+pub fn develop_bench_done(app: AppHandle, report: String) {
+    println!("bench: {report}");
+    app.exit(0);
 }

@@ -644,6 +644,20 @@ function devDraw(bytes, at, crop) {
   devLayout();
 }
 
+// Frames come over the bcframe protocol (much faster than command results).
+const devFrameUrl = (p) => (/windows/i.test(navigator.userAgent) || /android/i.test(navigator.userAgent) ? `http://bcframe.localhost/${p}` : `bcframe://localhost/${p}`);
+async function devNextFrame() {
+  if (devDemo || dev.noProtocol) return devInvoke("develop_play_frame");
+  try {
+    const r = await fetch(devFrameUrl("play"), { cache: "no-store" });
+    if (!r.ok) throw new Error(await r.text());
+    return await r.arrayBuffer();
+  } catch (e) {
+    if (e instanceof TypeError) { dev.noProtocol = true; return devInvoke("develop_play_frame"); }
+    throw e;
+  }
+}
+
 const devBytes = (buf) => new Uint8Array(buf instanceof ArrayBuffer ? buf : buf.buffer || new Uint8Array(buf).buffer);
 
 function devPlayIcon() {
@@ -668,13 +682,16 @@ async function devPlay() {
     await devInvoke("develop_play_start", { path: dev.path, frame: dev.frame, settings: c.s, crop, width: pw, height: ph, view709: (dev.view709 || c.s.output === "rec709") && !c.s.lut });
     let shown = 0, t0 = performance.now();
     while (dev.playing && run === dev.playRun) {
-      const bytes = devBytes(await devInvoke("develop_play_frame"));
+      const tw = performance.now();
+      const bytes = devBytes(await devNextFrame());
       if (!dev.playing || run !== dev.playRun) break;
       const dv = new DataView(bytes.buffer, bytes.byteOffset);
       const idx = dv.getUint32(8, true);
       if (idx === 0xffffffff) break;
       if (dv.getUint32(0, true) === 0) continue;
+      const t1 = performance.now();
       devDraw(bytes, 12, crop);
+      if (dev.bench) { dev.bench.wait += t1 - tw; dev.bench.draw += performance.now() - t1; dev.bench.frames++; dev.bench.bytes += bytes.length; dev.bench.last = performance.now(); dev.bench.size = `${cv0()}`; }
       devError("");
       dev.frame = idx;
       devEl("dev-frame").value = idx;
@@ -845,3 +862,24 @@ function devInit() {
 }
 
 devInit();
+
+const cv0 = () => { const c = devEl("dev-canvas"); return `${c.width}x${c.height}`; };
+// Development benchmark (see develop_bench): play the first clip and report the timing.
+(async () => {
+  if (devDemo) return;
+  const cfg = await devInvoke("develop_bench").catch(() => null);
+  if (!cfg) return;
+  const [secs, nr] = cfg;
+  for (let i = 0; i < 100 && !devClipsInQueue().length; i++) await new Promise((r) => setTimeout(r, 200));
+  devShowTab("develop");
+  await new Promise((r) => setTimeout(r, 3000));
+  const c = devClip();
+  if (c && nr) { c.s.nrLuma = nr; c.s.nrChroma = nr; }
+  dev.bench = { wait: 0, draw: 0, frames: 0, bytes: 0, t0: performance.now() };
+  devPlay();
+  await new Promise((r) => setTimeout(r, secs * 1000));
+  const b = dev.bench, el = ((b.last || performance.now()) - b.t0) / 1000;
+  const cv = devEl("dev-canvas");
+  devStop();
+  await devInvoke("develop_bench_done", { report: `${b.frames} frames in ${el.toFixed(2)}s = ${(b.frames / el).toFixed(1)} fps; frames ${b.size}; avg wait+transfer ${(b.wait / b.frames).toFixed(1)} ms, draw ${(b.draw / b.frames).toFixed(1)} ms, ${(b.bytes / b.frames / 1e6).toFixed(1)} MB/frame` });
+})();

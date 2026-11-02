@@ -9,8 +9,11 @@ license.workspace = true
 crate-type = ["rlib", "cdylib", "staticlib"]
 
 [features]
-default = ["metal"]
+default = ["metal", "wgpu"]
 metal = []
+# Develop on the GPU through wgpu: Metal on a Mac, Vulkan or DX12 on Windows and Linux. Without
+# a usable GPU the CPU path is used.
+wgpu = ["dep:wgpu", "dep:pollster"]
 # Untested NVIDIA backend (CUDA driver and NVRTC are loaded at run time; no toolkit needed to build).
 cuda = ["dep:cudarc"]
 # OpenCL backend for AMD (and other) GPUs. libOpenCL / OpenCL.dll is loaded at run time, so
@@ -19,6 +22,8 @@ opencl = ["dep:opencl3"]
 
 [dependencies]
 rayon = "1"
+wgpu = { version = "30", optional = true, default-features = false, features = ["std", "parking_lot", "wgsl", "metal", "vulkan", "dx12"] }
+pollster = { version = "1", optional = true }
 opencl3 = { version = "0.12", optional = true, default-features = false, features = ["dynamic"] }
 cudarc = { version = "0.19", optional = true, default-features = false, features = ["std", "driver", "nvrtc", "fallback-dynamic-loading", "cuda-12060"] }
 

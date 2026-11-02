@@ -600,18 +600,45 @@ fn sample(p: &[f32], w: usize, h: usize, u: f32, v: f32) -> f32 {
     a + (b - a) * fy
 }
 
+/// RGGB phases (x, y) of the planes G1, R, G2, B inside the 2x2 quad.
+const PHASE: [(f32, f32); 4] = [(1.0, 0.0), (0.0, 0.0), (0.0, 1.0), (1.0, 1.0)];
+
+/// Camera RGB (0..1 of the sensor range) at mosaic position (`mx`, `my`), edge based. With
+/// `debayer` the planes are read at their own phase for full resolution: green from both
+/// green sites, red and blue as differences to the green of their quads. Without, all four
+/// are read at the quad (for output at or below the quad size).
+#[inline]
+fn camera(pl: &RawPlanes, s: &Shade, mx: f32, my: f32, debayer: bool) -> [f32; 3] {
+    let norm = |x: f32| ((x - s.black) * s.inv_range).max(0.0);
+    let at = |c: usize, u: f32, v: f32| sample(&pl.data[c], pl.w, pl.h, u, v);
+    if !debayer {
+        let (u, v) = (mx * 0.5 - 0.5, my * 0.5 - 0.5);
+        return [norm(at(1, u, v)), 0.5 * (norm(at(0, u, v)) + norm(at(2, u, v))), norm(at(3, u, v))];
+    }
+    let q = PHASE.map(|(px, py)| ((mx - 0.5 - px) * 0.5, (my - 0.5 - py) * 0.5));
+    let g = 0.5 * (at(0, q[0].0, q[0].1) + at(2, q[2].0, q[2].1));
+    let gr = 0.5 * (at(0, q[1].0, q[1].1) + at(2, q[1].0, q[1].1));
+    let gb = 0.5 * (at(0, q[3].0, q[3].1) + at(2, q[3].0, q[3].1));
+    [norm(g + at(1, q[1].0, q[1].1) - gr), norm(g), norm(g + at(3, q[3].0, q[3].1) - gb)]
+}
+
+/// Whether an output of `ow` x `oh` for `crop` is debayered at full resolution: when it has
+/// more pixels across than the quad planes.
+pub fn full_debayer(pl: &RawPlanes, crop: [f32; 4], ow: usize, oh: usize) -> bool {
+    crop[2] * 2.0 * pl.w as f32 / (ow as f32) < 2.0 || crop[3] * 2.0 * pl.h as f32 / (oh as f32) < 2.0
+}
+
 /// Renders a crop (fractions x, y, w, h of the frame) to `ow` x `oh` 16-bit RGB on the CPU.
 pub fn render_cpu(pl: &RawPlanes, s: &Shade, crop: [f32; 4], ow: usize, oh: usize) -> Vec<u16> {
     let mut out = vec![0u16; ow * oh * 3];
-    let (sx, sy) = (crop[2] * pl.w as f32 / ow as f32, crop[3] * pl.h as f32 / oh as f32);
-    let (ox, oy) = (crop[0] * pl.w as f32, crop[1] * pl.h as f32);
+    let (sx, sy) = (crop[2] * 2.0 * pl.w as f32 / ow as f32, crop[3] * 2.0 * pl.h as f32 / oh as f32);
+    let (ox, oy) = (crop[0] * 2.0 * pl.w as f32, crop[1] * 2.0 * pl.h as f32);
+    let debayer = full_debayer(pl, crop, ow, oh);
     out.par_chunks_mut(ow * 3).enumerate().for_each(|(y, row)| {
-        let v = oy + (y as f32 + 0.5) * sy - 0.5;
+        let my = oy + (y as f32 + 0.5) * sy;
         for x in 0..ow {
-            let u = ox + (x as f32 + 0.5) * sx - 0.5;
-            let c = |i: usize| ((sample(&pl.data[i], pl.w, pl.h, u, v) - s.black) * s.inv_range).max(0.0);
-            let cam = [c(1), 0.5 * (c(0) + c(2)), c(3)];
-            let px = shade_pixel(s, cam);
+            let mx = ox + (x as f32 + 0.5) * sx;
+            let px = shade_pixel(s, camera(pl, s, mx, my, debayer));
             for k in 0..3 {
                 row[x * 3 + k] = (px[k].clamp(0.0, 1.0) * 65535.0 + 0.5) as u16;
             }
@@ -620,26 +647,98 @@ pub fn render_cpu(pl: &RawPlanes, s: &Shade, crop: [f32; 4], ow: usize, oh: usiz
     out
 }
 
-/// The renderer: Metal on a Mac when it works, the CPU otherwise.
+/// The CPU renderer (kept for comparisons; [`develop_image`] picks the GPU when there is one).
 pub fn render(pl: &RawPlanes, s: &Shade, crop: [f32; 4], ow: usize, oh: usize) -> Vec<u16> {
-    #[cfg(all(target_os = "macos", feature = "metal"))]
-    if std::env::var_os("BLUECOMPRESS_DEVELOP_CPU").is_none() {
-        if let Some(r) = crate::gpu::develop_metal(pl, s, crop, ow, oh) {
-            return r;
-        }
-    }
     render_cpu(pl, s, crop, ow, oh)
 }
 
-/// Which renderer [`render`] uses here.
+/// Which renderer [`develop_image`] uses here.
 pub fn renderer_name() -> String {
-    #[cfg(all(target_os = "macos", feature = "metal"))]
-    if std::env::var_os("BLUECOMPRESS_DEVELOP_CPU").is_none() {
-        if let Some(n) = crate::gpu::develop_metal_name() {
-            return n;
-        }
+    #[cfg(feature = "wgpu")]
+    if let Some(n) = crate::gpu::develop_wgpu::name() {
+        return n;
     }
     "CPU".into()
+}
+
+/// Output pixel format of [`develop_image`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Out {
+    /// RGBA 8-bit.
+    Rgba8,
+    /// 10-bit 4:2:0 P010 (Y, then interleaved CbCr), limited range; even sizes only.
+    P010 { bt2020: bool },
+}
+
+fn sharpen_amount(info: &ClipInfo, p: &Params) -> f32 {
+    let a = (p.sharpness - 20.0) / 80.0;
+    if info.r3d || a.abs() < 1e-3 {
+        0.0
+    } else {
+        a
+    }
+}
+
+/// Develops one frame completely: noise reduction, debayer, color, sharpening, the user LUT
+/// and the output format. On the GPU when there is one, else on the CPU.
+#[allow(clippy::too_many_arguments)]
+pub fn develop_image(
+    info: &ClipInfo,
+    p: &Params,
+    pl: RawPlanes,
+    crop: [f32; 4],
+    ow: usize,
+    oh: usize,
+    view709: bool,
+    out: Out,
+) -> Vec<u8> {
+    let s = shade(info, p, pl.black, pl.white, view709);
+    let amount = sharpen_amount(info, p);
+    #[cfg(feature = "wgpu")]
+    {
+        use crate::gpu::develop_wgpu as g;
+        let nr_on = p.nr_luma > 0.0 || p.nr_chroma > 0.0;
+        let nr =
+            nr_on.then(|| g::NrSettings { luma: p.nr_luma, chroma: p.nr_chroma, a: crate::denoise::noise_gain(&pl) });
+        let fmt = match out {
+            Out::Rgba8 => g::Format::Rgba8,
+            Out::P010 { bt2020 } => g::Format::P010 { bt2020 },
+        };
+        if let Some(v) = g::run(&pl, &s, nr, amount, p.lut.as_deref(), crop, ow, oh, fmt) {
+            return v;
+        }
+    }
+    develop_image_cpu(info, p, pl, crop, ow, oh, view709, out)
+}
+
+/// [`develop_image`] on the CPU only.
+#[allow(clippy::too_many_arguments)]
+pub fn develop_image_cpu(
+    info: &ClipInfo,
+    p: &Params,
+    mut pl: RawPlanes,
+    crop: [f32; 4],
+    ow: usize,
+    oh: usize,
+    view709: bool,
+    out: Out,
+) -> Vec<u8> {
+    let s = shade(info, p, pl.black, pl.white, view709);
+    let amount = sharpen_amount(info, p);
+    crate::denoise::denoise(&mut pl, p.nr_luma, p.nr_chroma);
+    let mut img = render_cpu(&pl, &s, crop, ow, oh);
+    if amount != 0.0 {
+        sharpen(&mut img, ow, oh, p.sharpness);
+    }
+    apply_lut(&mut img, p);
+    match out {
+        Out::Rgba8 => to_rgba(&img),
+        Out::P010 { bt2020 } => {
+            let mut buf = vec![0u8; ow * oh * 3];
+            rgb16_to_p010(&img, ow, oh, !bt2020, &mut buf);
+            buf
+        }
+    }
 }
 
 /// Sharpness (N-RAW): an unsharp mask on the encoded image, 20 is unity (no change).
@@ -787,6 +886,7 @@ fn rate_args(encoder: &str, kbps: u32, cbr: bool) -> Vec<String> {
         vec!["-c:v".into(), encoder.into(), "-profile:v".into(), "main10".into(), "-b:v".into(), r.clone()];
     match encoder {
         "hevc_videotoolbox" => a.extend(["-pix_fmt".into(), "p010le".into()]),
+        "hevc_vaapi" => a.extend(["-rc_mode".into(), "VBR".into(), "-maxrate".into(), max]),
         "libx265" => a.extend(
             ["-preset", "fast", "-pix_fmt", "yuv420p10le", "-x265-params", "log-level=error"].map(String::from),
         ),
@@ -860,25 +960,27 @@ pub fn export(e: &Export, cancel: &AtomicBool, progress: &mut dyn FnMut(f64, f64
     let audio = proxy::has_readable_audio(&ffmpeg, &e.input);
     let [prim, trc, mat] = tags(if e.params.lut.is_some() { Output::Rec709 } else { e.params.output });
     let mut cmd = Command::new(&ffmpeg);
-    cmd.args(["-hide_banner", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "p010le"]).args([
-        "-s",
-        &format!("{ow}x{oh}"),
-        "-r",
-        &format!("{}", info.fps),
-        "-i",
-        "-",
-    ]);
+    cmd.args(["-hide_banner", "-v", "error", "-y"])
+        .args(proxy::hw_init_args(&encoder))
+        .args(["-f", "rawvideo", "-pix_fmt", "p010le"])
+        .args(["-s", &format!("{ow}x{oh}"), "-r", &format!("{}", info.fps), "-i", "-"]);
     if audio {
         cmd.arg("-i").arg(&e.input).args(["-map", "0:v:0", "-map", "1:a:0", "-c:a", "pcm_f32le", "-shortest"]);
     }
-    cmd.args(["-vf", &format!("setparams=color_primaries={prim}:color_trc={trc}:colorspace={mat}:range=tv")])
-        .args(rate_args(&encoder, e.kbps, e.cbr))
-        .args(["-color_primaries", prim, "-color_trc", trc, "-colorspace", mat, "-color_range", "tv"])
-        .args(["-f", "mov"])
-        .arg(&tmp)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped());
+    cmd.args([
+        "-vf",
+        &format!(
+            "setparams=color_primaries={prim}:color_trc={trc}:colorspace={mat}:range=tv{}",
+            proxy::hw_filter(&encoder)
+        ),
+    ])
+    .args(rate_args(&encoder, e.kbps, e.cbr))
+    .args(["-color_primaries", prim, "-color_trc", trc, "-colorspace", mat, "-color_range", "tv"])
+    .args(["-f", "mov"])
+    .arg(&tmp)
+    .stdin(Stdio::piped())
+    .stdout(Stdio::null())
+    .stderr(Stdio::piped());
     let mut child =
         proxy::quiet(&mut cmd).spawn().map_err(|err| Error(format!("cannot run {}: {err}", ffmpeg.display())))?;
     let mut stderr = child.stderr.take().unwrap();
@@ -893,12 +995,10 @@ pub fn export(e: &Export, cancel: &AtomicBool, progress: &mut dyn FnMut(f64, f64
     // Three stages run at once: decoding the next batch, developing the current one (and
     // converting it to 10-bit 4:2:0 on all cores), and a writer feeding the encoder.
     let (wtx, wrx) = std::sync::mpsc::sync_channel::<Vec<u8>>(3);
-    let (ftx, frx) = std::sync::mpsc::channel::<Vec<u8>>();
     let writer = std::thread::spawn(move || -> std::result::Result<(), String> {
         let mut stdin = stdin;
         for buf in wrx {
             stdin.write_all(&buf).map_err(|err| format!("ffmpeg stopped reading: {err}"))?;
-            let _ = ftx.send(buf);
         }
         Ok(())
     });
@@ -910,7 +1010,7 @@ pub fn export(e: &Export, cancel: &AtomicBool, progress: &mut dyn FnMut(f64, f64
         None
     };
     let mut decode = |b0: usize| -> Result<Vec<RawPlanes>> {
-        let mut planes: Vec<RawPlanes> = match prr.as_mut() {
+        let planes: Vec<RawPlanes> = match prr.as_mut() {
             Some(st) => (b0..(b0 + batch).min(n))
                 .map(|_| {
                     st.next_planes().map(|data| RawPlanes {
@@ -927,12 +1027,8 @@ pub fn export(e: &Export, cancel: &AtomicBool, progress: &mut dyn FnMut(f64, f64
                 .map(|i| decode_planes(&input, &movie, i))
                 .collect::<Result<Vec<_>>>()?,
         };
-        for pl in planes.iter_mut() {
-            crate::denoise::denoise(pl, e.params.nr_luma, e.params.nr_chroma);
-        }
         Ok(planes)
     };
-    let frame_bytes = ow * oh * 3; // P010: Y plus half size CbCr, 2 bytes each
     let mut result: Result<()> = Ok(());
     let mut cur = if n > 0 { decode(0) } else { Ok(Vec::new()) };
     let mut b0 = 0;
@@ -953,19 +1049,37 @@ pub fn export(e: &Export, cancel: &AtomicBool, progress: &mut dyn FnMut(f64, f64
             let dec = &mut decode;
             let h = sc.spawn(move || if next0 < n { Some(dec(next0)) } else { None });
             let sent = (|| -> Result<()> {
-                for (k, pl) in planes.iter().enumerate() {
-                    let s = shade(&info, &e.params, pl.black, pl.white, false);
-                    let mut img = render(pl, &s, [0.0, 0.0, 1.0, 1.0], ow, oh);
-                    if !info.r3d {
-                        sharpen(&mut img, ow, oh, e.params.sharpness);
+                // A few frames at once keep the GPU busy while others upload and read back.
+                let bt2020 = !bt709;
+                let mut it = planes.into_iter().enumerate();
+                loop {
+                    let group: Vec<(usize, RawPlanes)> = it.by_ref().take(3).collect();
+                    if group.is_empty() {
+                        break;
                     }
-                    apply_lut(&mut img, &e.params);
-                    let mut buf = frx.try_recv().unwrap_or_default();
-                    buf.resize(frame_bytes, 0);
-                    rgb16_to_p010(&img, ow, oh, bt709, &mut buf);
-                    wtx.send(buf).map_err(|_| Error("ffmpeg stopped reading".into()))?;
-                    let done = b0 + k + 1;
-                    progress(done as f64 / n as f64, done as f64 / start.elapsed().as_secs_f64().max(1e-6));
+                    let frames: Vec<(usize, Vec<u8>)> = group
+                        .into_par_iter()
+                        .map(|(k, pl)| {
+                            (
+                                k,
+                                develop_image(
+                                    &info,
+                                    &e.params,
+                                    pl,
+                                    [0.0, 0.0, 1.0, 1.0],
+                                    ow,
+                                    oh,
+                                    false,
+                                    Out::P010 { bt2020 },
+                                ),
+                            )
+                        })
+                        .collect();
+                    for (k, buf) in frames {
+                        wtx.send(buf).map_err(|_| Error("ffmpeg stopped reading".into()))?;
+                        let done = b0 + k + 1;
+                        progress(done as f64 / n as f64, done as f64 / start.elapsed().as_secs_f64().max(1e-6));
+                    }
                 }
                 Ok(())
             })();
@@ -1023,19 +1137,8 @@ pub fn preview(
     let info = clip_info(path)?;
     let input = InputFile::open(path)?;
     let movie = Movie::parse(&input)?;
-    let mut pl = decode_planes(&input, &movie, frame.min(movie.video().samples.len().saturating_sub(1)))?;
-    crate::denoise::denoise(&mut pl, p.nr_luma, p.nr_chroma);
-    let s = shade(&info, p, pl.black, pl.white, view709);
-    let mut img = render(&pl, &s, crop, ow, oh);
-    if !info.r3d {
-        sharpen(&mut img, ow, oh, p.sharpness);
-    }
-    apply_lut(&mut img, p);
-    let mut rgba = Vec::with_capacity(ow * oh * 4);
-    for px in img.chunks(3) {
-        rgba.extend_from_slice(&[(px[0] >> 8) as u8, (px[1] >> 8) as u8, (px[2] >> 8) as u8, 255]);
-    }
-    Ok(rgba)
+    let pl = decode_planes(&input, &movie, frame.min(movie.video().samples.len().saturating_sub(1)))?;
+    Ok(develop_image(&info, p, pl, crop, ow, oh, view709, Out::Rgba8))
 }
 
 // Playback ---------------------------------------------------------------------
@@ -1075,16 +1178,9 @@ fn to_rgba(img: &[u16]) -> Vec<u8> {
     rgba
 }
 
-fn develop_frame(info: &ClipInfo, look: &Look, mut pl: RawPlanes, crop: [f32; 4], ow: usize, oh: usize) -> Vec<u8> {
+fn develop_frame(info: &ClipInfo, look: &Look, pl: RawPlanes, crop: [f32; 4], ow: usize, oh: usize) -> Vec<u8> {
     let (p, view) = look.lock().map(|l| l.clone()).unwrap_or_else(|e| e.into_inner().clone());
-    crate::denoise::denoise(&mut pl, p.nr_luma, p.nr_chroma);
-    let s = shade(info, &p, pl.black, pl.white, view);
-    let mut img = render(&pl, &s, crop, ow, oh);
-    if !info.r3d {
-        sharpen(&mut img, ow, oh, p.sharpness);
-    }
-    apply_lut(&mut img, &p);
-    to_rgba(&img)
+    develop_image(info, &p, pl, crop, ow, oh, view, Out::Rgba8)
 }
 
 impl Player {
@@ -1447,6 +1543,74 @@ mod tests {
         assert_eq!(rec709(&h, [8.0; 3])[0], 1.0);
         let mid = rec709(&s, [0.18; 3])[0];
         assert!(mid > 0.35 && mid < 0.55, "{mid}");
+    }
+
+    /// The GPU path matches the CPU path (skipped without a GPU; set
+    /// BLUECOMPRESS_DEVELOP_ANY_GPU=1 to test on a software Vulkan device).
+    #[test]
+    fn gpu_matches_cpu() {
+        if renderer_name() == "CPU" {
+            eprintln!("no GPU, skipped");
+            return;
+        }
+        let c = clip();
+        let (w, h) = (96usize, 64usize);
+        let mut seed = 7u32;
+        let mut rnd = || {
+            seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12345);
+            (seed >> 8) as f32 / (1u32 << 24) as f32
+        };
+        let data = [0, 1, 2, 3].map(|k| {
+            (0..w * h)
+                .map(|i| 600.0 + 3000.0 * ((i % w) as f32 / w as f32) + 400.0 * k as f32 + 200.0 * rnd())
+                .collect()
+        });
+        let pl = RawPlanes { w, h, data, black: 512.0, white: 16383.0 };
+        let id: String = {
+            let mut t = String::from("LUT_3D_SIZE 5\n");
+            for b in 0..5 {
+                for g in 0..5 {
+                    for r in 0..5 {
+                        t += &format!("{} {} {}\n", (r as f32 / 4.0).powf(0.8), g as f32 / 4.0, b as f32 / 4.0);
+                    }
+                }
+            }
+            t
+        };
+        let lut = std::sync::Arc::new(crate::lut::Lut::parse(&id).unwrap());
+        for (nr, sharp, lut, crop, ow, oh, out) in [
+            (0.0, 20.0, None, [0.0, 0.0, 1.0, 1.0], 80usize, 54usize, Out::Rgba8),
+            (60.0, 50.0, Some(lut.clone()), [0.0, 0.0, 1.0, 1.0], 192, 128, Out::Rgba8),
+            (40.0, 20.0, None, [0.25, 0.2, 0.5, 0.5], 96, 64, Out::P010 { bt2020: true }),
+            (0.0, 20.0, Some(lut), [0.0, 0.0, 1.0, 1.0], 192, 128, Out::P010 { bt2020: false }),
+        ] {
+            let mut p = Params::as_shot(&c);
+            p.nr_luma = nr;
+            p.nr_chroma = nr;
+            p.sharpness = sharp;
+            p.lut = lut;
+            let rp = || RawPlanes { w, h, data: pl.data.clone(), black: pl.black, white: pl.white };
+            let g = develop_image(&c, &p, rp(), crop, ow, oh, true, out);
+            let k = develop_image_cpu(&c, &p, rp(), crop, ow, oh, true, out);
+            assert_eq!(g.len(), k.len());
+            let diff = |a: &[u8], b: &[u8]| -> i32 {
+                if matches!(out, Out::Rgba8) {
+                    a.iter().zip(b).map(|(x, y)| (*x as i32 - *y as i32).abs()).max().unwrap()
+                } else {
+                    a.chunks(2)
+                        .zip(b.chunks(2))
+                        .map(|(x, y)| {
+                            ((u16::from_le_bytes([x[0], x[1]]) >> 6) as i32
+                                - (u16::from_le_bytes([y[0], y[1]]) >> 6) as i32)
+                                .abs()
+                        })
+                        .max()
+                        .unwrap()
+                }
+            };
+            let d = diff(&g, &k);
+            assert!(d <= 3, "nr {nr} sharp {sharp} {out:?}: max diff {d}");
+        }
     }
 
     #[test]
