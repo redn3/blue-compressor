@@ -1123,7 +1123,14 @@ mod read_retry_tests {
 
     impl Fake {
         fn new(script: Vec<Option<io::Result<usize>>>) -> Fake {
-            Fake { data: (0..=255u8).cycle().take(10_000).collect(), script, calls: 0, short: usize::MAX, reopens: 0, slept: Vec::new() }
+            Fake {
+                data: (0..=255u8).cycle().take(10_000).collect(),
+                script,
+                calls: 0,
+                short: usize::MAX,
+                reopens: 0,
+                slept: Vec::new(),
+            }
         }
 
         fn run(&mut self, offset: u64, n: usize) -> Result<Vec<u8>> {

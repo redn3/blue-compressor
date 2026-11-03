@@ -444,6 +444,7 @@ fn wait_while_paused(paused: &AtomicBool, cancel: &AtomicBool) -> bool {
 /// - the clip's drive or file is unreachable: pause the queue with the reason, and run the
 ///   clip again on Resume (cancelling ends it as usual);
 /// - a read failed but the clip is reachable again: run it once more after a short wait.
+///
 /// Other errors (a damaged clip, a full output drive) are returned as they are.
 fn run_recovering<T>(
     app: &AppHandle,
@@ -600,15 +601,17 @@ fn start(app: AppHandle, state: State<'_, Runner>, jobs: Vec<JobRequest>, settin
             let only = conv.only_output(&options.input);
             if only {
                 // Rewrap or R3D only: the conversion is the job's output.
-                let r = run_recovering(&app, &options.input, &paused, &cancel, || engine::r3d_job(&options, &conv, &cancel, &mut |fraction, _| {
-                    if fraction >= 1.0 || last.elapsed().as_millis() >= 100 {
-                        last = Instant::now();
-                        let _ = app.emit("job-progress", JobProgress { id: job.id, fraction, fps: 0.0 });
-                    }
-                    if paused.load(Ordering::SeqCst) {
-                        wait_while_paused(&paused, &cancel);
-                    }
-                }));
+                let r = run_recovering(&app, &options.input, &paused, &cancel, || {
+                    engine::r3d_job(&options, &conv, &cancel, &mut |fraction, _| {
+                        if fraction >= 1.0 || last.elapsed().as_millis() >= 100 {
+                            last = Instant::now();
+                            let _ = app.emit("job-progress", JobProgress { id: job.id, fraction, fps: 0.0 });
+                        }
+                        if paused.load(Ordering::SeqCst) {
+                            wait_while_paused(&paused, &cancel);
+                        }
+                    })
+                });
                 match r {
                     Ok(bluecompress::R3dJob::Done(d)) => {
                         let out = d.output.to_string_lossy().into_owned();
