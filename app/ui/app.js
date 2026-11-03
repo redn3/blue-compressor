@@ -91,6 +91,8 @@ let running = false;
 // Re-renders the text after a language change (see i18n.js).
 window.bcRerender = () => { sendMenuLabels(); renderSettings(); renderCompression(); renderAll(); renderFooter(); };
 let paused = false;
+// Set when the queue paused itself because a source drive or clip became unreachable.
+let pauseReason = null;
 // Totals of the current batch for the "saved so far" counter. Clips skipped at run time
 // because their output already existed count as done, not towards the bytes.
 const emptyBatch = () => ({ total: 0, done: 0, skipped: 0, failed: 0, inputBytes: 0, outputBytes: 0 });
@@ -985,7 +987,8 @@ function renderFooter() {
     } else {
       main.textContent = `${lead}${cur ? "Compressing" : "Preparing"} · ${count}`;
     }
-    sub.textContent = paused
+    sub.textContent = paused && pauseReason ? pauseReason
+      : paused
       ? (cur ? tr("{0} · {1}% · paused", cur.name, Math.floor(cur.fraction * 100)) : tr("Resume to continue with the next clip"))
       : cur ? `${cur.name}` + (fps > 0 ? tr(" · {0} fps · about {1} left for the queue", fpsText(fps), clock((frames - doneFrames) / fps)) : "") : "";
     fill.style.width = frames ? `${(doneFrames / frames) * 100}%` : "0";
@@ -1212,6 +1215,7 @@ function onEvents() {
   });
   api.listen("queue-paused", (p) => {
     paused = !!(p && p.paused);
+    pauseReason = paused && p && p.reason ? p.reason : null;
     renderAll();
   });
   api.listen("queue-changed", (snap) => syncQueue(snap));

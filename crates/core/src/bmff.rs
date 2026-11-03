@@ -7,6 +7,8 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use std::sync::RwLock;
+use std::time::Duration;
 
 use crate::{Error, Result};
 
@@ -91,17 +93,87 @@ pub struct Track {
 }
 
 /// Read-only clip file with thread-safe positional reads.
+///
+/// Reads survive transient failures: an external drive waking up or briefly dropping off
+/// the bus, a sharing violation or an antivirus scan holding the file, or Windows running
+/// short of kernel resources for a large read. A failed or empty read is retried with
+/// backoff on a freshly opened handle (see [`READ_RETRY_DELAYS`]); only when every retry
+/// fails does the read fail, with the operating system's own error text.
 pub struct InputFile {
     path: PathBuf,
-    file: File,
+    file: RwLock<File>,
     size: u64,
+}
+
+/// Waits between read attempts, about 15 seconds in all: long enough for a sleeping disk
+/// to spin up or a USB drive to come back, short enough that a dead drive is reported soon.
+pub const READ_RETRY_DELAYS: [Duration; 7] = [
+    Duration::from_millis(100),
+    Duration::from_millis(250),
+    Duration::from_millis(500),
+    Duration::from_secs(1),
+    Duration::from_secs(2),
+    Duration::from_secs(4),
+    Duration::from_secs(8),
+];
+
+/// Largest single read handed to the OS. Very large reads on Windows can fail with
+/// ERROR_NO_SYSTEM_RESOURCES (1450) under memory pressure; smaller ones do not.
+const MAX_READ: usize = 4 << 20;
+
+/// Start of the message of a read that failed after every retry (see [`is_read_error`]).
+pub const READ_ERROR: &str = "read error in ";
+
+/// True for errors from reading a source clip (after retries), as opposed to a bad clip.
+/// These usually mean the drive or file became unreachable.
+pub fn is_read_error(e: &Error) -> bool {
+    e.0.contains(READ_ERROR)
+}
+
+/// The retry loop of [`InputFile::read_into`], separate from the file so tests can drive it.
+/// `read(buf, offset)` is one positional read, `reopen()` replaces the handle.
+pub(crate) fn read_retrying(
+    dst: &mut [u8],
+    offset: u64,
+    delays: &[Duration],
+    read: &mut dyn FnMut(&mut [u8], u64) -> std::io::Result<usize>,
+    reopen: &mut dyn FnMut() -> std::io::Result<()>,
+    sleep: &mut dyn FnMut(Duration),
+    describe: &dyn Fn() -> String,
+) -> Result<()> {
+    let mut done = 0;
+    let mut attempt = 0;
+    while done < dst.len() {
+        let at = offset + done as u64;
+        let end = dst.len().min(done + MAX_READ);
+        let problem = match read(&mut dst[done..end], at) {
+            Ok(0) => "the drive returned no data (end of file before the clip's size)".to_string(),
+            Ok(n) => {
+                // Progress: a later failure gets the full set of retries again.
+                done += n;
+                attempt = 0;
+                continue;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) => e.to_string(),
+        };
+        if attempt >= delays.len() {
+            return fail(format!("{READ_ERROR}{} at byte {at}: {problem} (after {attempt} retries)", describe()));
+        }
+        sleep(delays[attempt]);
+        attempt += 1;
+        // A handle to a drive that went away stays broken; open the file again. When that
+        // fails too the next read fails and is retried, until the attempts run out.
+        let _ = reopen();
+    }
+    Ok(())
 }
 
 impl InputFile {
     pub fn open(path: &Path) -> Result<InputFile> {
-        let file = File::open(path).map_err(|e| Error(format!("cannot open {}: {e}", path.display())))?;
+        let file = open_retrying(path)?;
         let size = file.metadata().map_err(|e| Error(format!("cannot stat {}: {e}", path.display())))?.len();
-        Ok(InputFile { path: path.to_path_buf(), file, size })
+        Ok(InputFile { path: path.to_path_buf(), file: RwLock::new(file), size })
     }
 
     pub fn size(&self) -> u64 {
@@ -116,18 +188,26 @@ impl InputFile {
         if offset + dst.len() as u64 > self.size {
             return fail(format!("read past end of {}", self.path.display()));
         }
-        let mut done = 0;
-        while done < dst.len() {
-            #[cfg(unix)]
-            let r = std::os::unix::fs::FileExt::read_at(&self.file, &mut dst[done..], offset + done as u64);
-            #[cfg(windows)]
-            let r = std::os::windows::fs::FileExt::seek_read(&self.file, &mut dst[done..], offset + done as u64);
-            match r {
-                Ok(0) | Err(_) => return fail(format!("read error in {}", self.path.display())),
-                Ok(n) => done += n,
-            }
-        }
-        Ok(())
+        read_retrying(
+            dst,
+            offset,
+            &READ_RETRY_DELAYS,
+            &mut |buf, at| {
+                let f = self.file.read().unwrap_or_else(|p| p.into_inner());
+                #[cfg(unix)]
+                let r = std::os::unix::fs::FileExt::read_at(&*f, buf, at);
+                #[cfg(windows)]
+                let r = std::os::windows::fs::FileExt::seek_read(&*f, buf, at);
+                r
+            },
+            &mut || {
+                let f = File::open(&self.path)?;
+                *self.file.write().unwrap_or_else(|p| p.into_inner()) = f;
+                Ok(())
+            },
+            &mut std::thread::sleep,
+            &|| self.path.display().to_string(),
+        )
     }
 
     pub fn read(&self, offset: u64, n: usize) -> Result<Vec<u8>> {
@@ -135,6 +215,35 @@ impl InputFile {
         self.read_into(offset, &mut v)?;
         Ok(v)
     }
+}
+
+/// Opens a clip, retrying briefly as reads do (a drive waking up, a file held by a scan).
+fn open_retrying(path: &Path) -> Result<File> {
+    let mut last = None;
+    for d in std::iter::once(Duration::ZERO).chain(READ_RETRY_DELAYS.iter().copied().take(4)) {
+        std::thread::sleep(d);
+        match File::open(path) {
+            Ok(f) => return Ok(f),
+            // A path that is not there (and whose folder is) will not appear by waiting.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound && path.parent().is_some_and(|p| p.exists()) => {
+                return fail(format!("cannot open {}: {e}", path.display()))
+            }
+            Err(e) => last = Some(e),
+        }
+    }
+    fail(format!("cannot open {}: {}", path.display(), last.map(|e| e.to_string()).unwrap_or_default()))
+}
+
+/// True when the clip can be opened and a byte read from it, straight from the drive.
+pub fn source_reachable(path: &Path) -> bool {
+    let Ok(f) = File::open(path) else { return false };
+    let Ok(m) = f.metadata() else { return false };
+    let mut b = [0u8; 1];
+    #[cfg(unix)]
+    let r = std::os::unix::fs::FileExt::read_at(&f, &mut b, m.len() / 2);
+    #[cfg(windows)]
+    let r = std::os::windows::fs::FileExt::seek_read(&f, &mut b, m.len() / 2);
+    m.len() == 0 || matches!(r, Ok(1))
 }
 
 fn is_container(t: u32) -> bool {
@@ -992,5 +1101,157 @@ impl Drop for RawWriter {
         if !self.finished {
             let _ = std::fs::remove_file(&self.tmp_path);
         }
+    }
+}
+
+#[cfg(test)]
+mod read_retry_tests {
+    use super::*;
+    use std::io;
+
+    /// A fake drive over `data`: `script` decides what each read call does in turn
+    /// (None = serve normally, Some(Err) = fail, Some(Ok(0)) = empty read). Reads past the
+    /// script are served normally; `short` caps every served read.
+    struct Fake {
+        data: Vec<u8>,
+        script: Vec<Option<io::Result<usize>>>,
+        calls: usize,
+        short: usize,
+        reopens: usize,
+        slept: Vec<Duration>,
+    }
+
+    impl Fake {
+        fn new(script: Vec<Option<io::Result<usize>>>) -> Fake {
+            Fake { data: (0..=255u8).cycle().take(10_000).collect(), script, calls: 0, short: usize::MAX, reopens: 0, slept: Vec::new() }
+        }
+
+        fn run(&mut self, offset: u64, n: usize) -> Result<Vec<u8>> {
+            let mut dst = vec![0u8; n];
+            let data = self.data.clone();
+            let (script, calls, short) = (&mut self.script, &mut self.calls, self.short);
+            let reopens = &mut self.reopens;
+            let slept = &mut self.slept;
+            read_retrying(
+                &mut dst,
+                offset,
+                &READ_RETRY_DELAYS,
+                &mut |buf, at| {
+                    let step = script.get_mut(*calls).and_then(|s| s.take());
+                    *calls += 1;
+                    match step {
+                        Some(r) => r,
+                        None => {
+                            let n = buf.len().min(short);
+                            buf[..n].copy_from_slice(&data[at as usize..at as usize + n]);
+                            Ok(n)
+                        }
+                    }
+                },
+                &mut || {
+                    *reopens += 1;
+                    Ok(())
+                },
+                &mut |d| slept.push(d),
+                &|| "CLIP.R3D".to_string(),
+            )?;
+            Ok(dst)
+        }
+    }
+
+    fn os_err(code: i32) -> Option<io::Result<usize>> {
+        Some(Err(io::Error::from_raw_os_error(code)))
+    }
+
+    #[test]
+    fn transient_errors_are_retried_on_a_new_handle() {
+        // Sharing violation (32 on Windows; any OS error here), a resource error, an empty read.
+        let mut f = Fake::new(vec![os_err(32), os_err(1450), Some(Ok(0))]);
+        let got = f.run(100, 5000).unwrap();
+        assert_eq!(got, f.data[100..5100]);
+        assert_eq!(f.reopens, 3);
+        assert_eq!(f.slept, READ_RETRY_DELAYS[..3].to_vec());
+    }
+
+    #[test]
+    fn short_reads_are_not_errors() {
+        let mut f = Fake::new(vec![]);
+        f.short = 7;
+        assert_eq!(f.run(3, 1000).unwrap(), f.data[3..1003]);
+        assert_eq!(f.reopens, 0);
+        assert!(f.slept.is_empty());
+    }
+
+    #[test]
+    fn interrupted_reads_retry_at_once() {
+        let mut f = Fake::new(vec![Some(Err(io::Error::from(io::ErrorKind::Interrupted)))]);
+        assert_eq!(f.run(0, 10).unwrap(), f.data[..10]);
+        assert!(f.slept.is_empty());
+    }
+
+    #[test]
+    fn progress_resets_the_retry_budget() {
+        // Fail almost every attempt, but make progress in between: never gives up.
+        let mut script = Vec::new();
+        for _ in 0..5 {
+            for _ in 0..READ_RETRY_DELAYS.len() {
+                script.push(os_err(5));
+            }
+            script.push(None);
+        }
+        let mut f = Fake::new(script);
+        f.short = 100;
+        assert_eq!(f.run(0, 500).unwrap(), f.data[..500]);
+    }
+
+    #[test]
+    fn a_dead_drive_fails_with_the_os_error_text() {
+        let mut f = Fake::new((0..20).map(|_| os_err(21)).collect());
+        let e = f.run(4096, 10).unwrap_err();
+        assert!(is_read_error(&e), "{e}");
+        let os = io::Error::from_raw_os_error(21).to_string();
+        assert!(e.0.contains(&os), "{e} lacks {os}");
+        assert!(e.0.contains("CLIP.R3D at byte 4096"), "{e}");
+        assert!(e.0.contains("after 7 retries"), "{e}");
+        assert_eq!(f.calls, READ_RETRY_DELAYS.len() + 1);
+        assert_eq!(f.reopens, READ_RETRY_DELAYS.len());
+    }
+
+    #[test]
+    fn large_reads_are_split() {
+        let mut f = Fake::new(vec![]);
+        f.data = vec![7u8; MAX_READ * 2 + 10];
+        let mut sizes = Vec::new();
+        let mut dst = vec![0u8; MAX_READ * 2 + 10];
+        read_retrying(
+            &mut dst,
+            0,
+            &READ_RETRY_DELAYS,
+            &mut |buf, _| {
+                sizes.push(buf.len());
+                buf.fill(7);
+                Ok(buf.len())
+            },
+            &mut || Ok(()),
+            &mut |_| {},
+            &|| String::new(),
+        )
+        .unwrap();
+        assert_eq!(sizes, vec![MAX_READ, MAX_READ, 10]);
+    }
+
+    #[test]
+    fn a_real_file_reopens_and_reads() {
+        let dir = std::env::temp_dir().join(format!("bc-read-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("clip.bin");
+        std::fs::write(&p, (0..=255u8).collect::<Vec<_>>()).unwrap();
+        let f = InputFile::open(&p).unwrap();
+        assert_eq!(f.read(10, 5).unwrap(), vec![10, 11, 12, 13, 14]);
+        assert!(source_reachable(&p));
+        assert!(!source_reachable(&dir.join("gone.bin")));
+        let e = InputFile::open(&dir.join("gone.bin")).err().unwrap();
+        assert!(e.0.starts_with("cannot open"), "{e}");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

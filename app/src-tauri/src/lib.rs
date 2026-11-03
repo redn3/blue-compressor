@@ -118,6 +118,9 @@ fn yes() -> bool {
 #[derive(Serialize, Clone)]
 struct Paused {
     paused: bool,
+    /// Why the queue paused itself (a source drive went away); None when paused by hand.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -436,6 +439,50 @@ fn wait_while_paused(paused: &AtomicBool, cancel: &AtomicBool) -> bool {
     !cancel.load(Ordering::SeqCst)
 }
 
+/// Runs one clip with recovery from source read failures, so one bad moment of a drive
+/// does not fail the rest of the queue:
+/// - the clip's drive or file is unreachable: pause the queue with the reason, and run the
+///   clip again on Resume (cancelling ends it as usual);
+/// - a read failed but the clip is reachable again: run it once more after a short wait.
+/// Other errors (a damaged clip, a full output drive) are returned as they are.
+fn run_recovering<T>(
+    app: &AppHandle,
+    input: &Path,
+    paused: &AtomicBool,
+    cancel: &AtomicBool,
+    mut attempt: impl FnMut() -> bluecompress::Result<T>,
+) -> bluecompress::Result<T> {
+    let mut retried = false;
+    loop {
+        let e = match attempt() {
+            Ok(v) => return Ok(v),
+            Err(e) => e,
+        };
+        if cancel.load(Ordering::SeqCst) || !bluecompress::bmff::is_read_error(&e) {
+            return Err(e);
+        }
+        if !bluecompress::bmff::source_reachable(input) {
+            let reason = format!(
+                "Paused: cannot read {}. Check that the drive is connected and awake, then Resume. ({})",
+                input.display(),
+                e
+            );
+            paused.store(true, Ordering::SeqCst);
+            let _ = app.emit("queue-paused", Paused { paused: true, reason: Some(reason) });
+            if !wait_while_paused(paused, cancel) {
+                return Err(e);
+            }
+            retried = false;
+            continue;
+        }
+        if retried {
+            return Err(e);
+        }
+        retried = true;
+        std::thread::sleep(std::time::Duration::from_secs(2));
+    }
+}
+
 #[tauri::command]
 fn is_running(state: State<'_, Runner>) -> bool {
     state.running.load(Ordering::SeqCst)
@@ -553,7 +600,7 @@ fn start(app: AppHandle, state: State<'_, Runner>, jobs: Vec<JobRequest>, settin
             let only = conv.only_output(&options.input);
             if only {
                 // Rewrap or R3D only: the conversion is the job's output.
-                let r = engine::r3d_job(&options, &conv, &cancel, &mut |fraction, _| {
+                let r = run_recovering(&app, &options.input, &paused, &cancel, || engine::r3d_job(&options, &conv, &cancel, &mut |fraction, _| {
                     if fraction >= 1.0 || last.elapsed().as_millis() >= 100 {
                         last = Instant::now();
                         let _ = app.emit("job-progress", JobProgress { id: job.id, fraction, fps: 0.0 });
@@ -561,7 +608,7 @@ fn start(app: AppHandle, state: State<'_, Runner>, jobs: Vec<JobRequest>, settin
                     if paused.load(Ordering::SeqCst) {
                         wait_while_paused(&paused, &cancel);
                     }
-                });
+                }));
                 match r {
                     Ok(bluecompress::R3dJob::Done(d)) => {
                         let out = d.output.to_string_lossy().into_owned();
@@ -593,7 +640,9 @@ fn start(app: AppHandle, state: State<'_, Runner>, jobs: Vec<JobRequest>, settin
                 }
                 continue;
             }
-            let result = engine::transcode_staged(&options, &cancel, &mut on_progress);
+            let result = run_recovering(&app, &options.input, &paused, &cancel, || {
+                engine::transcode_staged(&options, &cancel, &mut on_progress)
+            });
             // R3D NE from the original .nev (not the compressed copy), next to the output.
             let (r3d, r3d_skipped, r3d_error) = match &result {
                 Ok(_)
@@ -651,7 +700,7 @@ fn start(app: AppHandle, state: State<'_, Runner>, jobs: Vec<JobRequest>, settin
         }
         running.store(false, Ordering::SeqCst);
         if paused.swap(false, Ordering::SeqCst) {
-            let _ = app.emit("queue-paused", Paused { paused: false });
+            let _ = app.emit("queue-paused", Paused { paused: false, reason: None });
         }
         let _ = app.emit("queue-finished", ());
         if app.state::<Runner>().quitting.load(Ordering::SeqCst) {
@@ -666,7 +715,7 @@ fn start(app: AppHandle, state: State<'_, Runner>, jobs: Vec<JobRequest>, settin
 fn cancel(app: AppHandle, state: State<'_, Runner>) {
     state.cancel.store(true, Ordering::SeqCst);
     if state.paused.swap(false, Ordering::SeqCst) {
-        let _ = app.emit("queue-paused", Paused { paused: false });
+        let _ = app.emit("queue-paused", Paused { paused: false, reason: None });
     }
 }
 
@@ -675,8 +724,8 @@ fn cancel(app: AppHandle, state: State<'_, Runner>) {
 fn set_paused(app: AppHandle, state: State<'_, Runner>, paused: bool) -> Paused {
     let p = paused && state.running.load(Ordering::SeqCst);
     state.paused.store(p, Ordering::SeqCst);
-    let _ = app.emit("queue-paused", Paused { paused: p });
-    Paused { paused: p }
+    let _ = app.emit("queue-paused", Paused { paused: p, reason: None });
+    Paused { paused: p, reason: None }
 }
 
 /// Quit after the running job has been cancelled and cleaned up.
