@@ -1,3 +1,10 @@
+**What's new in 0.3.3**
+- **Adaptive drive protection**: Blue Compressor watches how fast each read and write takes. When a drive starts to struggle (sudden slow responses, throughput collapsing, failed operations), it does fewer things at once and adds short pauses, then speeds back up step by step once the drive is stable again. While it eases off, the app shows "Drive is slowing down, easing off to keep it stable". This works for compressing, conversions, Develop exports, the command line tool, the Web UI and the watch folder.
+- Turn it off with `--no-throttle` on the command line or `BLUECOMPRESS_NO_THROTTLE=1`. Failed reads and writes are still retried either way.
+- **Writing output files now retries too**: a write that fails for a moment is tried again for about 15 seconds before the clip fails, and the error includes the operating system's message.
+- Rewrapping and converting without compression (R3D NE and N-RAW conversions) now retry failed reads and writes like compression does.
+- A **full output drive** is reported right away as "the output drive is full" instead of a generic write error.
+
 **What's new in 0.3.2**
 - **Queues no longer fail all at once when a drive hiccups**: when a source clip cannot be read for a moment (an external drive waking up or briefly disconnecting, a file held by an antivirus scan, Windows short on resources), Blue Compressor waits and tries again, for about 15 seconds, instead of failing the clip and every clip after it.
 - If the drive is really gone, the queue **pauses** with a message saying which file cannot be read. Reconnect the drive and press Resume to continue with that clip.
