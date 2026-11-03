@@ -1,3 +1,8 @@
+**What's new in 0.3.2**
+- **Queues no longer fail all at once when a drive hiccups**: when a source clip cannot be read for a moment (an external drive waking up or briefly disconnecting, a file held by an antivirus scan, Windows short on resources), Blue Compressor waits and tries again, for about 15 seconds, instead of failing the clip and every clip after it.
+- If the drive is really gone, the queue **pauses** with a message saying which file cannot be read. Reconnect the drive and press Resume to continue with that clip.
+- Read errors now include the operating system's own error message, so the cause is easier to find.
+
 **What's new in 0.3.1**
 - **Zoom in Develop**: Fit, 100% (one clip pixel per screen pixel), 200% and 400%, pinch or scroll to zoom, drag to pan, click to toggle. Zoomed in, only the visible part is developed, at its size on screen.
 - **Your own LUTs**: import 1D or 3D .cube LUTs from the Output dropdown. They are kept between launches, apply to the log picture in the preview, playback and export (tagged Rec.709), and can be removed again.
