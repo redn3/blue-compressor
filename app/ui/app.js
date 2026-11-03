@@ -93,6 +93,8 @@ window.bcRerender = () => { sendMenuLabels(); renderSettings(); renderCompressio
 let paused = false;
 // Set when the queue paused itself because a source drive or clip became unreachable.
 let pauseReason = null;
+// The drive throttle is easing off (from the latest progress event).
+let driveSlow = false;
 // Totals of the current batch for the "saved so far" counter. Clips skipped at run time
 // because their output already existed count as done, not towards the bytes.
 const emptyBatch = () => ({ total: 0, done: 0, skipped: 0, failed: 0, inputBytes: 0, outputBytes: 0 });
@@ -990,7 +992,8 @@ function renderFooter() {
     sub.textContent = paused && pauseReason ? pauseReason
       : paused
       ? (cur ? tr("{0} · {1}% · paused", cur.name, Math.floor(cur.fraction * 100)) : tr("Resume to continue with the next clip"))
-      : cur ? `${cur.name}` + (fps > 0 ? tr(" · {0} fps · about {1} left for the queue", fpsText(fps), clock((frames - doneFrames) / fps)) : "") : "";
+      : (cur ? `${cur.name}` + (fps > 0 ? tr(" · {0} fps · about {1} left for the queue", fpsText(fps), clock((frames - doneFrames) / fps)) : "") : "")
+        + (driveSlow ? " · " + tr("Drive is slowing down, easing off to keep it stable") : "");
     fill.style.width = frames ? `${(doneFrames / frames) * 100}%` : "0";
   } else if (batch.done > 0) {
     const savedIn = batch.inputBytes, savedOut = batch.outputBytes;
@@ -1184,6 +1187,7 @@ function onEvents() {
   api.listen("job-progress", (p) => {
     const j = find(p.id); if (!j) return;
     j.fraction = p.fraction; j.rate = p.fps; j.r3dPhase = false;
+    driveSlow = !!p.throttling;
     updateCard(j); renderFooter();
   });
   api.listen("job-r3d", (p) => {
@@ -1208,6 +1212,7 @@ function onEvents() {
   });
   api.listen("queue-finished", () => {
     running = false;
+    driveSlow = false;
     paused = false;
     // Outputs written by this run can make other waiting clips already done: check again.
     for (const j of jobs) { j.inRun = false; if (j.state === "waiting") j.existKey = null; }
@@ -1261,7 +1266,8 @@ function renderWatch(w) {
     $("watch-chip-text").textContent = tr("Watch: {0} ({1}%)", w.currentClip, pct);
     pill.textContent = `${pct}%`;
     pill.className = "job-pill running";
-    $("watch-stats").textContent = `${w.currentClip}${w.fps > 0 ? " · " + fpsText(w.fps) + " fps" : ""}`;
+    $("watch-stats").textContent = `${w.currentClip}${w.fps > 0 ? " · " + fpsText(w.fps) + " fps" : ""}`
+      + (w.throttling ? " · " + tr("Drive is slowing down, easing off to keep it stable") : "");
     meter.hidden = false;
     fill.style.width = `${(w.fraction || 0) * 100}%`;
   } else if (w.state === "stabilizing") {

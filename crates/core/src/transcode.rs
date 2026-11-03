@@ -159,7 +159,7 @@ pub(crate) fn transcode_with(
             scope.spawn(|| loop {
                 let first = {
                     let mut g = shared.lock().unwrap();
-                    while !g.stop && g.next < nframes && g.next >= g.written + max_in_flight {
+                    while !g.stop && g.next < nframes && g.next >= g.written + crate::drive::read_ahead(max_in_flight) {
                         g = cv.wait(g).unwrap();
                     }
                     if g.stop || g.next >= nframes {

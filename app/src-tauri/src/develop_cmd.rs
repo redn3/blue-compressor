@@ -397,6 +397,8 @@ struct Progress {
     path: String,
     fraction: f64,
     fps: f64,
+    /// The drive throttle is easing off (the drive is slowing down).
+    throttling: bool,
 }
 
 #[derive(Serialize, Clone)]
@@ -466,7 +468,10 @@ pub fn develop_export(app: AppHandle, state: State<'_, Exporting>, jobs: Vec<Exp
             let r = develop::export(&e, &cancel, &mut |fraction, fps| {
                 if fraction - last >= 0.005 || fraction >= 1.0 {
                     last = fraction;
-                    let _ = app.emit("develop-progress", Progress { path: path.clone(), fraction, fps });
+                    let _ = app.emit(
+                        "develop-progress",
+                        Progress { path: path.clone(), fraction, fps, throttling: bluecompress::drive::throttling() },
+                    );
                 }
             });
             let done = match r {

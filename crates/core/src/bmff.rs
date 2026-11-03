@@ -5,7 +5,6 @@
 
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 use std::time::Duration;
@@ -194,11 +193,14 @@ impl InputFile {
             &READ_RETRY_DELAYS,
             &mut |buf, at| {
                 let f = self.file.read().unwrap_or_else(|p| p.into_inner());
-                #[cfg(unix)]
-                let r = std::os::unix::fs::FileExt::read_at(&*f, buf, at);
-                #[cfg(windows)]
-                let r = std::os::windows::fs::FileExt::seek_read(&*f, buf, at);
-                r
+                let n = buf.len();
+                crate::drive::global().run(n, || {
+                    #[cfg(unix)]
+                    let r = std::os::unix::fs::FileExt::read_at(&*f, buf, at);
+                    #[cfg(windows)]
+                    let r = std::os::windows::fs::FileExt::seek_read(&*f, buf, at);
+                    r
+                })
             },
             &mut || {
                 let f = File::open(&self.path)?;
@@ -502,7 +504,7 @@ pub struct OutputWriter<'a> {
     input: &'a InputFile,
     movie: &'a Movie,
     opt: WriteOptions,
-    file: Option<std::io::BufWriter<File>>,
+    file: Option<crate::drive::OutFile>,
     pos: u64,
     mdat_offset: u64,
     ftyp_end: u64,
@@ -520,14 +522,14 @@ impl<'a> OutputWriter<'a> {
         let mut tmp = path.as_os_str().to_owned();
         tmp.push(".partial");
         let tmp_path = PathBuf::from(tmp);
-        let file = File::create(&tmp_path).map_err(|e| Error(format!("cannot create {}: {e}", tmp_path.display())))?;
+        let file = crate::drive::OutFile::create(&tmp_path)?;
         let mut w = OutputWriter {
             path: path.to_path_buf(),
             tmp_path,
             input,
             movie,
             opt,
-            file: Some(std::io::BufWriter::with_capacity(8 << 20, file)),
+            file: Some(file),
             pos: 0,
             mdat_offset: 0,
             ftyp_end: 0,
@@ -560,7 +562,7 @@ impl<'a> OutputWriter<'a> {
 
     fn write_raw(&mut self, p: &[u8]) -> Result<()> {
         let f = self.file.as_mut().unwrap();
-        f.write_all(p).map_err(|e| Error(format!("write error {}: {e}", self.tmp_path.display())))?;
+        f.write(p)?;
         self.pos += p.len() as u64;
         Ok(())
     }
@@ -685,18 +687,9 @@ impl<'a> OutputWriter<'a> {
         let moov_len = new_moov.len() as u64;
         let moov_front = ftyp_end + moov_len + 8 <= mdat_header_at || ftyp_end + moov_len == mdat_header_at;
 
-        let mut file = self
-            .file
-            .take()
-            .unwrap()
-            .into_inner()
-            .map_err(|e| Error(format!("write error {}: {}", self.tmp_path.display(), e.error())))?;
-        let tmp = self.tmp_path.clone();
-        let io = |e: std::io::Error| Error(format!("write error {}: {e}", tmp.display()));
-        let mut seek_write = |at: u64, p: &[u8]| -> Result<()> {
-            file.seek(SeekFrom::Start(at)).map_err(io)?;
-            file.write_all(p).map_err(io)
-        };
+        let mut file = self.file.take().unwrap();
+        file.flush()?;
+        let mut seek_write = |at: u64, p: &[u8]| -> Result<()> { file.write_at(at, p) };
         let mut hdr = Vec::new();
         if large {
             hdr.extend_from_slice(&1u32.to_be_bytes());
@@ -729,7 +722,7 @@ impl<'a> OutputWriter<'a> {
             }
             seek_write(at, &b)?;
         }
-        file.sync_all().map_err(io)?;
+        file.sync_all()?;
         drop(file);
         std::fs::rename(&self.tmp_path, &self.path)
             .map_err(|e| Error(format!("rename failed {}: {e}", self.path.display())))?;
@@ -984,7 +977,7 @@ pub fn moov_from_template(
 /// and the mdat header. Dropping an unfinished writer removes the file.
 pub struct RawWriter {
     tmp_path: PathBuf,
-    file: Option<std::io::BufWriter<File>>,
+    file: Option<crate::drive::OutFile>,
     pos: u64,
     ftyp_end: u64,
     mdat_offset: u64,
@@ -994,10 +987,10 @@ pub struct RawWriter {
 
 impl RawWriter {
     pub fn create(tmp_path: &Path, template_input: &InputFile, template: &Movie, source: &Movie) -> Result<RawWriter> {
-        let file = File::create(tmp_path).map_err(|e| Error(format!("cannot create {}: {e}", tmp_path.display())))?;
+        let file = crate::drive::OutFile::create(tmp_path)?;
         let mut w = RawWriter {
             tmp_path: tmp_path.to_path_buf(),
-            file: Some(std::io::BufWriter::with_capacity(8 << 20, file)),
+            file: Some(file),
             pos: 0,
             ftyp_end: 0,
             mdat_offset: 0,
@@ -1023,7 +1016,7 @@ impl RawWriter {
 
     pub fn write(&mut self, p: &[u8]) -> Result<()> {
         let f = self.file.as_mut().unwrap();
-        f.write_all(p).map_err(|e| Error(format!("write error {}: {e}", self.tmp_path.display())))?;
+        f.write(p)?;
         self.pos += p.len() as u64;
         Ok(())
     }
@@ -1050,18 +1043,9 @@ impl RawWriter {
         let large = payload + 8 > 0xffff_ffff;
         let hdr_at = self.mdat_offset - if large { 16 } else { 8 };
         let front = self.ftyp_end + moov.len() as u64 + 8 <= hdr_at;
-        let mut file = self
-            .file
-            .take()
-            .unwrap()
-            .into_inner()
-            .map_err(|e| Error(format!("write error {}: {}", self.tmp_path.display(), e.error())))?;
-        let tmp = self.tmp_path.clone();
-        let io = |e: std::io::Error| Error(format!("write error {}: {e}", tmp.display()));
-        let mut at = |o: u64, p: &[u8]| -> Result<()> {
-            file.seek(SeekFrom::Start(o)).map_err(io)?;
-            file.write_all(p).map_err(io)
-        };
+        let mut file = self.file.take().unwrap();
+        file.flush()?;
+        let mut at = |o: u64, p: &[u8]| -> Result<()> { file.write_at(o, p) };
         let mut h = Vec::new();
         if large {
             h.extend_from_slice(&1u32.to_be_bytes());
@@ -1087,7 +1071,7 @@ impl RawWriter {
             b.extend_from_slice(b"free");
             at(gap_at, &b)?;
         }
-        file.sync_all().map_err(io)?;
+        file.sync_all()?;
         drop(file);
         std::fs::rename(&self.tmp_path, path).map_err(|e| Error(format!("rename failed {}: {e}", path.display())))?;
         self.finished = true;

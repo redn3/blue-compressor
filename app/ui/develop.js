@@ -837,6 +837,7 @@ function devInit() {
   devListen("develop-progress", (p) => {
     const name = p.path.split(/[\\/]/).pop();
     dev.status = tr("Exporting {0}: {1}% at {2} fps", name, Math.round(p.fraction * 100), fpsText(p.fps));
+    if (p.throttling) dev.status += " · " + tr("Drive is slowing down, easing off to keep it stable");
     devEl("dev-status").textContent = dev.status;
   });
   devListen("develop-done", (d) => {

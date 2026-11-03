@@ -24,8 +24,6 @@
 //! N-RAW original (compared side by side in REDCINE-X PRO). The R3D keeps the real ISO; an
 //! `.RMD` sidecar (RSX layout) next to it carries the offset ([`zr_exposure_ev`]) so they match.
 
-use std::fs::File;
-use std::io::{BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
@@ -837,11 +835,9 @@ fn stream_patched(
     partial.push(".partial");
     let partial = PathBuf::from(partial);
     let r = (|| -> Result<()> {
-        let mut src = File::open(src_path).map_err(|e| Error(format!("cannot open {}: {e}", src_path.display())))?;
-        let mut dst = BufWriter::with_capacity(
-            1 << 20,
-            File::create(&partial).map_err(|e| Error(format!("cannot create {}: {e}", partial.display())))?,
-        );
+        // Reads and writes retry transient failures and go through the drive throttle.
+        let src = InputFile::open(src_path)?;
+        let mut dst = crate::drive::OutFile::create(&partial)?;
         let mut buf = vec![0u8; 8 << 20];
         let (mut at, mut next) = (0u64, 0usize);
         let mut last = Instant::now();
@@ -850,7 +846,7 @@ fn stream_patched(
                 return Err(Error("cancelled".into()));
             }
             let n = ((total - at) as usize).min(buf.len());
-            src.read_exact(&mut buf[..n]).map_err(|e| Error(format!("read error: {e}")))?;
+            src.read_into(at, &mut buf[..n])?;
             let end = at + n as u64;
             // Patches never overlap; one may straddle two blocks and is applied to both.
             let mut k = next;
@@ -867,7 +863,7 @@ fn stream_patched(
                 }
                 k += 1;
             }
-            dst.write_all(&buf[..n]).map_err(|e| Error(format!("write error: {e}")))?;
+            dst.write(&buf[..n])?;
             at = end;
             if last.elapsed().as_millis() >= 100 || at == total {
                 last = Instant::now();
@@ -875,7 +871,7 @@ fn stream_patched(
                 progress(at as f64 / total as f64, at as f64 / 1e6 / secs);
             }
         }
-        dst.flush().map_err(|e| Error(format!("write error: {e}")))
+        dst.sync_all()
     })();
     match r {
         Ok(()) => {

@@ -134,6 +134,8 @@ struct JobProgress {
     id: u64,
     fraction: f64,
     fps: f64,
+    /// The drive throttle is easing off (the drive is slowing down).
+    throttling: bool,
 }
 
 #[derive(Serialize, Clone)]
@@ -579,7 +581,10 @@ fn start(app: AppHandle, state: State<'_, Runner>, jobs: Vec<JobRequest>, settin
                 let fps = if active > 0.0 { fps * total / active } else { fps };
                 if fraction >= 1.0 || last.elapsed().as_millis() >= 100 {
                     last = Instant::now();
-                    let _ = app2.emit("job-progress", JobProgress { id: job.id, fraction, fps });
+                    let _ = app2.emit(
+                        "job-progress",
+                        JobProgress { id: job.id, fraction, fps, throttling: bluecompress::drive::throttling() },
+                    );
                 }
                 // Pause mid-clip: hold the writer here; the frame workers stop once their
                 // small read-ahead is full.
@@ -605,7 +610,15 @@ fn start(app: AppHandle, state: State<'_, Runner>, jobs: Vec<JobRequest>, settin
                     engine::r3d_job(&options, &conv, &cancel, &mut |fraction, _| {
                         if fraction >= 1.0 || last.elapsed().as_millis() >= 100 {
                             last = Instant::now();
-                            let _ = app.emit("job-progress", JobProgress { id: job.id, fraction, fps: 0.0 });
+                            let _ = app.emit(
+                                "job-progress",
+                                JobProgress {
+                                    id: job.id,
+                                    fraction,
+                                    fps: 0.0,
+                                    throttling: bluecompress::drive::throttling(),
+                                },
+                            );
                         }
                         if paused.load(Ordering::SeqCst) {
                             wait_while_paused(&paused, &cancel);
@@ -653,12 +666,28 @@ fn start(app: AppHandle, state: State<'_, Runner>, jobs: Vec<JobRequest>, settin
                         || (job.to_nev && bluecompress::r3d::is_r3d(&options.input)))
                         && !cancel.load(Ordering::SeqCst) =>
                 {
-                    let _ = app.emit("job-r3d", JobProgress { id: job.id, fraction: 0.0, fps: 0.0 });
+                    let _ = app.emit(
+                        "job-r3d",
+                        JobProgress {
+                            id: job.id,
+                            fraction: 0.0,
+                            fps: 0.0,
+                            throttling: bluecompress::drive::throttling(),
+                        },
+                    );
                     let mut last = Instant::now() - std::time::Duration::from_secs(1);
                     let r = engine::r3d_job(&options, &conv, &cancel, &mut |fraction, _| {
                         if fraction >= 1.0 || last.elapsed().as_millis() >= 100 {
                             last = Instant::now();
-                            let _ = app.emit("job-r3d", JobProgress { id: job.id, fraction, fps: 0.0 });
+                            let _ = app.emit(
+                                "job-r3d",
+                                JobProgress {
+                                    id: job.id,
+                                    fraction,
+                                    fps: 0.0,
+                                    throttling: bluecompress::drive::throttling(),
+                                },
+                            );
                         }
                         if paused.load(Ordering::SeqCst) {
                             wait_while_paused(&paused, &cancel);

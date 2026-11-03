@@ -354,6 +354,8 @@ struct JobProgress {
     id: u64,
     fraction: f64,
     fps: f64,
+    /// The drive throttle is easing off (the drive is slowing down).
+    throttling: bool,
 }
 
 #[derive(Serialize, Clone)]
@@ -953,7 +955,11 @@ fn run_job(st: &Arc<ServerState>, job: &QueueJob, settings: &Settings) {
                 j.fraction = fraction;
                 j.fps = fps;
             });
-            broadcast_event(&clients, "job-progress", JobProgress { id: job.id, fraction, fps });
+            broadcast_event(
+                &clients,
+                "job-progress",
+                JobProgress { id: job.id, fraction, fps, throttling: bluecompress::drive::throttling() },
+            );
         }
         // Pause mid-clip: hold the writer here, which stalls the frame workers once their
         // small read-ahead is full. The shared transcode lock is released while paused so
@@ -986,7 +992,11 @@ fn run_job(st: &Arc<ServerState>, job: &QueueJob, settings: &Settings) {
             if fraction >= 1.0 || last.elapsed().as_millis() >= 100 {
                 last = Instant::now();
                 update_job(st, job.id, |j| j.fraction = fraction);
-                broadcast_event(&clients, "job-progress", JobProgress { id: job.id, fraction, fps: 0.0 });
+                broadcast_event(
+                    &clients,
+                    "job-progress",
+                    JobProgress { id: job.id, fraction, fps: 0.0, throttling: bluecompress::drive::throttling() },
+                );
             }
         });
         drop(guard);
@@ -1036,13 +1046,21 @@ fn run_job(st: &Arc<ServerState>, job: &QueueJob, settings: &Settings) {
                 || (job.to_nev && bluecompress::r3d::is_r3d(&options.input)))
                 && !st.cancel.load(Ordering::SeqCst) =>
         {
-            broadcast_event(&st.sse_clients, "job-r3d", JobProgress { id: job.id, fraction: 0.0, fps: 0.0 });
+            broadcast_event(
+                &st.sse_clients,
+                "job-r3d",
+                JobProgress { id: job.id, fraction: 0.0, fps: 0.0, throttling: bluecompress::drive::throttling() },
+            );
             let mut last = Instant::now() - Duration::from_secs(1);
             let clients = st.sse_clients.clone();
             let r = bluecompress::r3d_job(&options, &conv, &st.cancel, &mut |fraction, _| {
                 if fraction >= 1.0 || last.elapsed().as_millis() >= 100 {
                     last = Instant::now();
-                    broadcast_event(&clients, "job-r3d", JobProgress { id: job.id, fraction, fps: 0.0 });
+                    broadcast_event(
+                        &clients,
+                        "job-r3d",
+                        JobProgress { id: job.id, fraction, fps: 0.0, throttling: bluecompress::drive::throttling() },
+                    );
                 }
             });
             match r {

@@ -17,6 +17,7 @@ pub mod bmff;
 pub mod calibrate;
 pub mod denoise;
 pub mod develop;
+pub mod drive;
 pub mod ffi;
 pub mod frame;
 mod gpu;

@@ -68,6 +68,8 @@ pub struct WatchSnapshot {
     pub current_clip: Option<String>,
     pub fraction: f64,
     pub fps: f64,
+    /// The drive throttle is easing off (the drive is slowing down).
+    pub throttling: bool,
     pub done_count: usize,
     pub failed_count: usize,
     pub saved_input_bytes: u64,
@@ -406,6 +408,7 @@ pub fn run_watch(
                         update_state(&state, hook.as_ref(), |s| {
                             s.fraction = fraction;
                             s.fps = fps;
+                            s.throttling = bluecompress::drive::throttling();
                         });
                     }
                 });

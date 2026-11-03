@@ -256,6 +256,9 @@ options:
                           recorded (about disk speed). Default: REWRAP, else off
       --json              JSON lines on stdout (start, progress, done, skipped, error, summary)
       --quiet             no progress on stderr
+      --no-throttle       do not ease off when the drive slows down (adaptive I/O
+                          throttling is on by default; also BLUECOMPRESS_NO_THROTTLE=1).
+                          Failed reads and writes are still retried
 
 serve and watch options:
       --listen ADDR       Web UI address for serve (default: 0.0.0.0:${{PORT:-9847}})
@@ -572,7 +575,8 @@ fn compress_cmd(o: &Cli) -> u8 {
                     let _ = std::io::stdout().flush();
                 }
             } else if !o.quiet {
-                eprint!("\r  {:5.1}%  {fps:6.1} fps", fraction * 100.0);
+                let note = if bluecompress::drive::throttling() { "  (drive is slowing down, easing off)" } else { "" };
+                eprint!("\r  {:5.1}%  {fps:6.1} fps{note:<38}", fraction * 100.0);
             }
         });
         if !o.json && !o.quiet {
@@ -1413,6 +1417,7 @@ fn main() -> ExitCode {
                 None => return bad("backend must be auto, cpu, metal, cuda or opencl"),
             },
             "--cpu" => o.backend = Some(Backend::Cpu),
+            "--no-throttle" => bluecompress::drive::set_enabled(false),
             "--gpu" => o.backend = Some(Backend::Auto),
             "-j" | "--threads" => match it.next().and_then(|v| v.parse::<usize>().ok()).filter(|v| *v <= 1024) {
                 Some(v) => o.threads = v,
