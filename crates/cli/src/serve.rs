@@ -100,6 +100,8 @@ struct Clip {
 struct AppInfo {
     version: String,
     gpu: String,
+    /// The GPU compression at the original resolution uses ("" for none).
+    compress_gpu: String,
     cpu: String,
     platform: String,
     web: bool,
@@ -1115,6 +1117,7 @@ fn invoke_command(state: &Arc<ServerState>, cmd: &str, body: &[u8]) -> HttpRespo
             let info = AppInfo {
                 version: bluecompress::VERSION.into(),
                 gpu: bluecompress::backend_description(Backend::Auto),
+                compress_gpu: bluecompress::compress_gpu(Backend::Auto).unwrap_or_default(),
                 cpu: bluecompress::backend_description(Backend::Cpu),
                 platform: std::env::consts::OS.into(),
                 web: true,

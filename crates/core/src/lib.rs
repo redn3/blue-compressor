@@ -183,6 +183,27 @@ pub fn output_size(width: u32, height: u32, resolution: Resolution) -> (u32, u32
     (g.width, g.height)
 }
 
+/// The GPU that same-resolution compression with a bpp target uses with `backend`, as
+/// "Metal (Apple M3 Max)", or None when it runs on the CPU: with [`Backend::Cpu`], when
+/// `BLUECOMPRESS_NO_GPU=1` is set, or without a usable GPU.
+pub fn compress_gpu(backend: Backend) -> Option<String> {
+    #[cfg(feature = "wgpu")]
+    if backend != Backend::Cpu && !gpu::requant_wgpu::disabled_by_env() {
+        return gpu::requant_wgpu::name();
+    }
+    let _ = backend;
+    None
+}
+
+/// (frames rate controlled on the GPU so far, frames that differed from the CPU's when
+/// `BLUECOMPRESS_GPU_VERIFY=1` codes each one on both).
+pub fn compress_gpu_counts() -> (usize, usize) {
+    #[cfg(feature = "wgpu")]
+    return gpu::requant_wgpu::counts();
+    #[cfg(not(feature = "wgpu"))]
+    (0, 0)
+}
+
 /// Human readable description of a backend ("Metal: Apple GPU", "CPU (12 threads)").
 pub fn backend_description(backend: Backend) -> String {
     match backend {

@@ -285,7 +285,7 @@ function renderSettings() {
   $("resolution-note").textContent = RESOLUTION_NOTES[settings.resolution];
   renderCompression();
   $("backend-note").textContent = backendNote();
-  $("seg-backend").classList.toggle("inactive", !anyResize());
+  $("seg-backend").classList.toggle("inactive", !anyResize() && !info.compressGpu);
   const custom = settings.dest === "custom" && settings.outputFolder;
   setSeg("seg-dest", custom ? "custom" : "next", running);
   $("dest-custom").textContent = custom ? tr("Folder") : tr("Choose folder");
@@ -316,11 +316,13 @@ function renderSettings() {
   }
   const chip = $("engine-chip");
   chip.classList.toggle("cpu", settings.backend === "cpu");
-  $("engine-text").textContent = settings.backend === "cpu" || !info.gpuAvailable ? (info.cpu || "CPU") : (info.gpu || "GPU");
+  const gpuText = anyResize() ? (info.gpuAvailable ? info.gpu || "GPU" : "") : info.compressGpu;
+  $("engine-text").textContent = settings.backend === "cpu" || !gpuText ? (info.cpu || "CPU") : gpuText;
 }
 
-// At the original resolution all the work is entropy coding, which is bit-serial and runs
-// on the CPU whatever is chosen; only resizing has GPU work. Say which applies.
+// At the original resolution the work is rate control and entropy coding, which runs on
+// the GPU when compression found one (info.compressGpu) and gives the CPU's exact bytes;
+// resizing has its own GPU path. Say which applies.
 function anyResize() {
   const pending = jobs.filter(toCompress);
   return pending.length ? pending.some((j) => resizes(j, resolutionOf(j))) : settings.resolution !== "original";
@@ -328,7 +330,9 @@ function anyResize() {
 function backendNote() {
   const gpuName = (info.gpu || "").replace(/^[^:]*:\s*/, "");
   if (!anyResize()) {
-    return tr("Not used at the original resolution: all the work then runs on the CPU cores.");
+    if (settings.backend === "cpu" || !info.compressGpu) return tr("At the original resolution, all the work runs on the CPU cores.");
+    const m = /\((.*)\)$/.exec(info.compressGpu);
+    return tr("At the original resolution, rate control and entropy coding run on the {0}, with exactly the same output as the CPU.", m ? m[1] : info.compressGpu);
   }
   if (settings.backend === "cpu") return tr("6K and 4K resizing runs on the CPU cores, about two to three times slower.");
   if (!info.gpuAvailable) return tr("No supported GPU found, so 6K and 4K resizing runs on the CPU cores.");
@@ -798,11 +802,11 @@ function updateCard(j) {
     const resized = j.ran && resizes(j, j.ran.resolution);
     const how = resized
       ? tr("resized on {0}", onGpu ? r.backend.replace(/\s*\(.*\)$/, "") + " GPU" : "CPU")
-      : tr("compressed on CPU");
+      : onGpu ? tr("compressed on {0}", r.backend.replace(/\s*\(.*\)$/, "") + " GPU") : tr("compressed on CPU");
     sub.textContent = tr("{0} · {1} fps · {2}", duration(r.seconds), fpsText(r.fps), how);
     sub.title = resized
       ? tr("Resized on {0}; final packing on the CPU", r.backend)
-      : tr("At the original resolution all the work runs on the CPU. The GPU is used for 6K and 4K.");
+      : onGpu ? tr("Compressed on {0}; reading and writing on the CPU", r.backend) : tr("At the original resolution, all the work runs on the CPU cores.");
     fill.style.width = "100%";
   } else if (j.state === "waiting" && j.ok) {
     const est = estimateBytes(j);

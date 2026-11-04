@@ -59,6 +59,8 @@ struct Clip {
 struct AppInfo {
     version: String,
     gpu: String,
+    /// The GPU compression at the original resolution uses ("" for none).
+    compress_gpu: String,
     cpu: String,
     platform: String,
 }
@@ -293,6 +295,7 @@ fn app_info() -> AppInfo {
     AppInfo {
         version: bluecompress::VERSION.into(),
         gpu: engine::backend_description(Backend::Auto),
+        compress_gpu: engine::compress_gpu(Backend::Auto).unwrap_or_default(),
         cpu: engine::backend_description(Backend::Cpu),
         platform: std::env::consts::OS.into(),
     }

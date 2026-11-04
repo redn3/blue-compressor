@@ -226,7 +226,9 @@ options:
   -q, --quality 1..4      legacy alias kept for existing scripts: 1 = --lossless, 2, 3 and
                           4 = --preset light, medium and strong
   -r, --resolution R      original (default), 6k or 4k
-  -b, --backend B         auto (default), cpu, metal, cuda or opencl; --cpu / --gpu also work
+  -b, --backend B         auto (default), cpu, metal, cuda or opencl; --cpu / --gpu also work.
+                          At the original resolution a bpp target runs on the GPU (Metal,
+                          Vulkan or DX12) unless cpu is chosen or BLUECOMPRESS_NO_GPU=1
   -j, --threads N         worker threads (default: all cores)
   -o, --output-dir DIR    write outputs here with the source file names
       --output FILE       single input: exact output path

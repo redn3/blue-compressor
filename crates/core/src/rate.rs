@@ -30,6 +30,37 @@ pub(crate) struct Coded {
     pub state: PredState,
 }
 
+/// A candidate coding of one precinct as [`finest_fitting`] sees it: its rank and size.
+pub(crate) trait Candidate {
+    fn rank(&self) -> i32;
+    fn size(&self) -> usize;
+}
+
+impl Candidate for Coded {
+    fn rank(&self) -> i32 {
+        self.rank
+    }
+    fn size(&self) -> usize {
+        self.bytes.len()
+    }
+}
+
+/// A candidate measured without being coded: its rank and exact coded size.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Measured {
+    pub rank: i32,
+    pub size: usize,
+}
+
+impl Candidate for Measured {
+    fn rank(&self) -> i32 {
+        self.rank
+    }
+    fn size(&self) -> usize {
+        self.size
+    }
+}
+
 /// Coarsest rank worth trying: every band truncated at the maximum.
 pub(crate) fn max_rank(l: &Layout) -> i32 {
     let nb = l.bands.len() as i32;
@@ -58,18 +89,18 @@ pub(crate) fn slice_budgets(l: &Layout, header_bytes: usize, budget: usize, weig
 /// not grow with rank; `hi` when nothing fits. `code(rank)` encodes one candidate. When the
 /// `hint` itself fits with at most `slack` bytes to spare it is taken without trying finer
 /// ranks (a good guess from the previous frame then costs one encode instead of two).
-pub(crate) fn finest_fitting(
+pub(crate) fn finest_fitting<C: Candidate>(
     lo: i32,
     hi: i32,
     hint: i32,
     budget: usize,
     slack: usize,
-    mut code: impl FnMut(i32) -> Result<Coded>,
-) -> Result<Coded> {
+    mut code: impl FnMut(i32) -> Result<C>,
+) -> Result<C> {
     let hi = hi.max(lo);
-    let fits = |c: &Coded| c.bytes.len() <= budget;
+    let fits = |c: &C| c.size() <= budget;
     let first = code(hint.clamp(lo, hi))?;
-    if fits(&first) && budget - first.bytes.len() <= slack {
+    if fits(&first) && budget - first.size() <= slack {
         return Ok(first);
     }
     let (mut bad, mut good) = if fits(&first) {
@@ -77,10 +108,10 @@ pub(crate) fn finest_fitting(
         let mut good = first;
         let mut step = 1;
         loop {
-            if good.rank == lo {
+            if good.rank() == lo {
                 return Ok(good);
             }
-            let probe = (good.rank - step).max(lo);
+            let probe = (good.rank() - step).max(lo);
             let c = code(probe)?;
             if fits(&c) {
                 good = c;
@@ -91,7 +122,7 @@ pub(crate) fn finest_fitting(
         }
     } else {
         // Gallop towards coarser ranks until one fits.
-        let mut bad = first.rank;
+        let mut bad = first.rank();
         let mut last = first;
         let mut step = 1;
         loop {
@@ -108,8 +139,8 @@ pub(crate) fn finest_fitting(
             step *= 2;
         }
     };
-    while bad + 1 < good.rank {
-        let mid = bad + (good.rank - bad) / 2;
+    while bad + 1 < good.rank() {
+        let mid = bad + (good.rank() - bad) / 2;
         let c = code(mid)?;
         if fits(&c) {
             good = c;

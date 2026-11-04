@@ -6,12 +6,16 @@ pub use bluecompress::{Backend, Codec, Options, Resolution, Target};
 #[cfg(not(feature = "mock"))]
 pub use bluecompress::r3d_job;
 #[cfg(not(feature = "mock"))]
-pub use bluecompress::{backend_description, output_size, preview_region_for, probe, thumbnail, transcode_staged};
+pub use bluecompress::{
+    backend_description, compress_gpu, output_size, preview_region_for, probe, thumbnail, transcode_staged,
+};
 
 #[cfg(feature = "mock")]
 pub use mock::r3d_job;
 #[cfg(feature = "mock")]
-pub use mock::{backend_description, output_size, preview_region_for, probe, thumbnail, transcode_staged};
+pub use mock::{
+    backend_description, compress_gpu, output_size, preview_region_for, probe, thumbnail, transcode_staged,
+};
 
 #[cfg(feature = "mock")]
 mod mock {
@@ -81,6 +85,10 @@ mod mock {
             Backend::OpenCl => "not available (OpenCL backend not built)".into(),
             _ => "Metal: Apple GPU".into(),
         }
+    }
+
+    pub fn compress_gpu(backend: Backend) -> Option<String> {
+        (backend != Backend::Cpu).then(|| "Metal (Apple GPU)".into())
     }
 
     fn keep_ratio(quality: u8, resolution: Resolution, width: u32) -> f64 {

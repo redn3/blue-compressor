@@ -11,6 +11,10 @@ pub mod metal;
 #[cfg(feature = "wgpu")]
 pub mod develop_wgpu;
 
+/// Same-resolution rate control on the GPU (wgpu).
+#[cfg(feature = "wgpu")]
+pub mod requant_wgpu;
+
 #[cfg(feature = "cuda")]
 pub mod cuda;
 

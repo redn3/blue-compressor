@@ -87,7 +87,14 @@ pub(crate) fn transcode_with(
     let quality = target.preset();
 
     let resizer: Option<Box<dyn Resizer>> = if resizing { Some(resize::create(opt.backend, src, dst)?) } else { None };
-    let backend = resizer.as_ref().map_or_else(|| "CPU".to_string(), |r| r.name());
+    // Same-resolution rate control runs on the GPU when there is one (same bytes as the CPU).
+    let gpu_name =
+        if resizing || passthrough || target.is_lossless() { None } else { crate::compress_gpu(opt.backend) };
+    let backend = match (&resizer, &gpu_name) {
+        (Some(r), _) => r.name(),
+        (None, Some(g)) => g.clone(),
+        (None, None) => "CPU".to_string(),
+    };
 
     let wopt = if resizing {
         WriteOptions {
@@ -143,7 +150,7 @@ pub(crate) fn transcode_with(
         } else if let Some(r) = &resizer {
             frame.build_padded(&r.process(cs, target, seed)?, Some((dst.width, dst.height)), pad_to)?
         } else {
-            let p = RequantParams { target_rank, budget, ..Default::default() };
+            let p = RequantParams { target_rank, budget, gpu: gpu_name.is_some(), ..Default::default() };
             frame.build_padded(&requant_codestream_seeded(cs, &p, 1, seed)?.0, None, pad_to)?
         };
         match r3d {

@@ -113,7 +113,7 @@ the earlier Q2 preset, that took the Z8 clip to 0.94 GB (−64%) at 6K and 0.49 
 
 Speed on a recent Apple silicon laptop, measured with the earlier fixed quality steps: about
 40 to 55 fps at the original resolution (entropy decoding and encoding on all CPU cores); a
-bpp target costs more CPU time, see below. 8K to 6K runs at about 31 fps with Metal and
+bpp target costs more CPU time, see below, and runs on the GPU when there is one. 8K to 6K runs at about 31 fps with Metal and
 12 fps on the CPU alone.
 
 ### How it works
@@ -125,7 +125,13 @@ square-root companding transfer curve. Blue Compressor:
 * **Original resolution**: entropy-decodes every precinct and requantizes the coefficients
   with a coarser truncation (never finer than the camera's). It then re-encodes with the
   cheapest coding modes and rebuilds the container's sample tables. Nothing is
-  transformed, so there is no generation loss beyond the chosen quantization.
+  transformed, so there is no generation loss beyond the chosen quantization. With a bpp
+  target, the rate controlled pass (decode, rank search and encode of every precinct) runs
+  on the GPU through wgpu: Metal on macOS, Vulkan or DX12 on Windows and Linux, one
+  workgroup per slice. It writes exactly the bytes the CPU would; a frame the GPU path does
+  not handle, or a machine without a usable GPU, uses the CPU. `--backend cpu` or
+  `BLUECOMPRESS_NO_GPU=1` keeps it on the CPU, and `BLUECOMPRESS_GPU_VERIFY=1` codes every
+  GPU frame on the CPU too, reports any difference and keeps the CPU's.
 * **6K / 4K**: decodes fully to the Bayer mosaic, then converts to linear raw. It
   area-resamples each CFA plane with phase-correct footprints (a box filter, so no
   ringing next to clipped highlights) and runs the forward transforms again. The
@@ -149,10 +155,11 @@ square-root companding transfer curve. Blue Compressor:
   thread count.
 * Targets go from 0.5 to 8 in 0.1 steps. Output is deterministic, whatever the thread
   count. It works at the original resolution and with 6K or 4K resizing, on every
-  backend (the GPU does the resizing; rate control is part of the entropy coding, which
-  is on the CPU). It costs more CPU time than the lossless repack, because some
-  precincts are coded more than once to find the finest fit; reusing the previous
-  frame's setting keeps that to about 1.3 to 1.9 codings per precinct on average.
+  backend (when resizing, the GPU does the resizing and rate control stays on the CPU; at
+  the original resolution rate control runs on the GPU when there is one). Candidate
+  settings are measured exactly without being written, and only the chosen one is coded,
+  so the search costs a fraction of a coding per extra try; reusing the previous frame's
+  setting keeps it to about 1.3 to 1.9 tries per precinct on average.
 
 The bits per pixel measure and the HE and HE\* figures come from *Nikon HE and HE\* RAW:
 Format analysis and decoding reference* (sections 2.1 and 2.2), copyright (c) 2026
