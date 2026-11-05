@@ -1,3 +1,8 @@
+**What's new in 0.3.6**
+- **Faster GPU compression**: at the original resolution with a bits per pixel target, the frames of all workers are now coded together in one GPU batch on reused buffers, and when the GPU is fully busy the next frame is coded on the CPU at the same time. About 1.3x faster on an M4 Max in our synthetic 6K tests. The output is still exactly the same file the CPU writes. This also speeds up conversions with a bpp target.
+- Thanks to DizzyKolb for the GPU ideas in issue #3.
+- `BLUECOMPRESS_GPU_ONLY=1` keeps every frame on the GPU.
+
 **What's new in 0.3.5**
 - **De-squeeze in Develop** for anamorphic footage: None, 1.25x, 1.33x, 1.5x, 1.6x, 1.8x, 2x or a custom factor (1 to 4), in the new Lens section. The preview and the HEVC export are stretched horizontally with the height kept (exports wider than 8192 pixels are scaled down to fit). Remembered per clip. Command line: `--desqueeze 1.33`.
 - **Slow motion preview** in Develop: the Speed control in the new Playback section plays high frame rate clips at a project rate such as 24, 25 or 30 fps, or at 50% or 25%. Remembered per clip.
