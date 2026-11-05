@@ -1,3 +1,8 @@
+**What's new in 0.3.5**
+- **De-squeeze in Develop** for anamorphic footage: None, 1.25x, 1.33x, 1.5x, 1.6x, 1.8x, 2x or a custom factor (1 to 4), in the new Lens section. The preview and the HEVC export are stretched horizontally with the height kept (exports wider than 8192 pixels are scaled down to fit). Remembered per clip. Command line: `--desqueeze 1.33`.
+- **Slow motion preview** in Develop: the Speed control in the new Playback section plays high frame rate clips at a project rate such as 24, 25 or 30 fps, or at 50% or 25%. Remembered per clip.
+- **Conform exports**: with "Conform to playback speed" on, the HEVC export writes every frame at the chosen rate, without sound. Command line: `--conform 24`.
+
 **What's new in 0.3.4**
 - **Compression runs on the GPU**: at the original resolution with a bits per pixel target, decoding, finding the best quality that fits and re-encoding every frame now run on the graphics card: Metal on a Mac, Vulkan or DX12 on Windows and Linux (NVIDIA, AMD and Intel). The output is exactly the same file the CPU writes, and the CPU is used when there is no suitable GPU.
 - The CPU path is faster too (about 1.3x): candidate settings are measured exactly without being written, and only the chosen one is coded.
