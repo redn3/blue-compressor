@@ -6,19 +6,19 @@ Blue Compressor was built, and is maintained, by AI agents. It is 100% vibecoded
 
 ## Download
 
-**[Latest release (v0.3.3 beta)](https://github.com/redn3/blue-compressor/releases/tag/v0.3.3)**. Pick the file for your computer:
+**[Latest release (v0.3.4 beta)](https://github.com/redn3/blue-compressor/releases/tag/v0.3.4)**. Pick the file for your computer:
 
 | Your computer | Download |
 | --- | --- |
-| Mac with Apple silicon (M1, M2, M3, M4, M5) | [Blue-Compressor_0.3.3_macOS_arm64.dmg](https://github.com/redn3/blue-compressor/releases/download/v0.3.3/Blue-Compressor_0.3.3_macOS_arm64.dmg) |
-| Mac with Intel processor | [Blue-Compressor_0.3.3_macOS_x64.dmg](https://github.com/redn3/blue-compressor/releases/download/v0.3.3/Blue-Compressor_0.3.3_macOS_x64.dmg) |
-| Windows 10 or 11 | [Blue-Compressor_0.3.3_Windows_x64-setup.exe](https://github.com/redn3/blue-compressor/releases/download/v0.3.3/Blue-Compressor_0.3.3_Windows_x64-setup.exe) |
-| Linux (any distribution) | [Blue-Compressor_0.3.3_Linux_x64.AppImage](https://github.com/redn3/blue-compressor/releases/download/v0.3.3/Blue-Compressor_0.3.3_Linux_x64.AppImage) |
+| Mac with Apple silicon (M1, M2, M3, M4, M5) | [Blue-Compressor_0.3.4_macOS_arm64.dmg](https://github.com/redn3/blue-compressor/releases/download/v0.3.4/Blue-Compressor_0.3.4_macOS_arm64.dmg) |
+| Mac with Intel processor | [Blue-Compressor_0.3.4_macOS_x64.dmg](https://github.com/redn3/blue-compressor/releases/download/v0.3.4/Blue-Compressor_0.3.4_macOS_x64.dmg) |
+| Windows 10 or 11 | [Blue-Compressor_0.3.4_Windows_x64-setup.exe](https://github.com/redn3/blue-compressor/releases/download/v0.3.4/Blue-Compressor_0.3.4_Windows_x64-setup.exe) |
+| Linux (any distribution) | [Blue-Compressor_0.3.4_Linux_x64.AppImage](https://github.com/redn3/blue-compressor/releases/download/v0.3.4/Blue-Compressor_0.3.4_Linux_x64.AppImage) |
 | Docker / Synology NAS (`amd64` and `arm64`) | `docker pull ghcr.io/redn3/blue-compressor:latest` ([setup guide](#docker-and-synology-nas)) |
 
 Not sure which Mac you have? Open the Apple menu and choose About This Mac. If it says "Chip", get Apple silicon; if it says "Processor" with Intel, get Intel.
 
-Other formats (Windows `.msi`, Linux `.deb` and `.rpm`) and the command line tool are on the [release page](https://github.com/redn3/blue-compressor/releases/tag/v0.3.3).
+Other formats (Windows `.msi`, Linux `.deb` and `.rpm`) and the command line tool are on the [release page](https://github.com/redn3/blue-compressor/releases/tag/v0.3.4).
 
 Blue Compressor makes Nikon **N-RAW** (`.NEV`, e.g. Z8, Z9, Z6III) and **R3D NE**
 (`.R3D`, e.g. Nikon ZR) clips smaller. It also converts Nikon **ProRes RAW** (`.MOV`)

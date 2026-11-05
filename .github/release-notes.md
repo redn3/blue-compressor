@@ -1,3 +1,8 @@
+**What's new in 0.3.4**
+- **Compression runs on the GPU**: at the original resolution with a bits per pixel target, decoding, finding the best quality that fits and re-encoding every frame now run on the graphics card: Metal on a Mac, Vulkan or DX12 on Windows and Linux (NVIDIA, AMD and Intel). The output is exactly the same file the CPU writes, and the CPU is used when there is no suitable GPU.
+- The CPU path is faster too (about 1.3x): candidate settings are measured exactly without being written, and only the chosen one is coded.
+- Choose CPU in the engine setting, `--backend cpu` on the command line or `BLUECOMPRESS_NO_GPU=1` to keep compression on the CPU.
+
 **What's new in 0.3.3**
 - **Adaptive drive protection**: Blue Compressor watches how fast each read and write takes. When a drive starts to struggle (sudden slow responses, throughput collapsing, failed operations), it does fewer things at once and adds short pauses, then speeds back up step by step once the drive is stable again. While it eases off, the app shows "Drive is slowing down, easing off to keep it stable". This works for compressing, conversions, Develop exports, the command line tool, the Web UI and the watch folder.
 - Turn it off with `--no-throttle` on the command line or `BLUECOMPRESS_NO_THROTTLE=1`. Failed reads and writes are still retried either way.
