@@ -12,6 +12,15 @@ const DEV_WB = [
 const DEV_ROLL = [["none", N_("None")], ["hard", N_("Hard")], ["medium", N_("Medium")], ["soft", N_("Soft")], ["verySoft", N_("Very Soft")]];
 const DEV_TONE = [["none", N_("None")], ["low", N_("Low")], ["medium", N_("Medium")], ["high", N_("High")]];
 const DEV_SIZES = [[0, ""], [3840, "4K"], [1920, "1080p"]];
+// Anamorphic de-squeeze factors (stretch the width, keep the height).
+const DEV_DESQUEEZE = [["1", N_("None")], ["1.25", "1.25x"], ["1.33", "1.33x"], ["1.5", "1.5x"], ["1.6", "1.6x"], ["1.8", "1.8x"], ["2", "2x"], ["custom", N_("Custom")]];
+const devDsq = (c) => (c && c.s.desqueeze > 0 ? c.s.desqueeze : 1);
+// Playback speeds: the clip's rate, a project rate below it (slow motion) or 50% / 25%.
+function devSpeeds(fps) {
+  const ntsc = Math.abs(fps - Math.round(fps)) > 0.01;
+  const rates = (ntsc ? [23.976, 25, 29.97] : [24, 25, 30]).filter((r) => r < fps - 0.5);
+  return [["", N_("Normal")], ...rates.map((r) => [String(r), tr("{0} fps", String(r))]), ["50%", "50%"], ["25%", "25%"]];
+}
 const DEV_QUALITY = [["standard", N_("Standard")], ["high", N_("High")]];
 // Noise reduction sliders (all formats), 0 is off.
 const NR_SLIDERS = [
@@ -66,7 +75,7 @@ const dev = {
   timer: 0,
   exporting: false,
   status: "",
-  export: { width: 3840, mbps: null, cbr: false, output: "native", high: false },
+  export: { width: 3840, mbps: null, cbr: false, output: "native", high: false, conform: false },
   playing: false,
   playRun: 0,
   luts: [], // imported LUTs: { name, title, threeD, size }
@@ -173,7 +182,8 @@ async function devStandIn(cmd, a) {
     case "develop_play_frame": {
       const p = dev.demoPlay;
       if (!p) return new ArrayBuffer(12);
-      const i = p.frame + Math.floor(((performance.now() - p.at) / 1000) * 25);
+      const sp = p.settings.speed || "", rate = sp.endsWith("%") ? 25 * parseFloat(sp) / 100 : Number(sp) || 25;
+      const i = p.frame + Math.floor(((performance.now() - p.at) / 1000) * rate);
       const n = dev.clips.get(p.path)?.info.frames || 300;
       if (i >= n) { const b = new ArrayBuffer(12); new DataView(b).setUint32(8, 0xffffffff, true); return b; }
       const img = new Uint8Array(await devStandIn("develop_preview", { ...p, frame: i }));
@@ -214,6 +224,7 @@ function devClipsInQueue() {
 async function devEnsure(path) {
   if (dev.clips.has(path)) return dev.clips.get(path);
   const info = await devInvoke("develop_info", { path });
+  info.asShot = { desqueeze: 1, speed: "", ...info.asShot };
   const c = { info, s: { ...info.asShot }, wb: "asShot" };
   dev.clips.set(path, c);
   return c;
@@ -361,8 +372,42 @@ function devRenderControls() {
   }
   const nr = devSection(box, "nr", N_("Noise Reduction"));
   for (const k of NR_SLIDERS) nr.append(devSlider(c, k));
+  devLensControls(devSection(box, "lens", N_("Lens")), c);
+  const pb = devSection(box, "playback", N_("Playback"));
+  const speeds = devSpeeds(i.fps);
+  if (!speeds.some(([v]) => v === c.s.speed)) c.s.speed = "";
+  pb.append(devSelect(N_("Speed"), speeds, c.s.speed, (v) => {
+    c.s.speed = v;
+    devChanged();
+    devRenderExport();
+    if (dev.playing) { devStop(true); devPlay(); }
+  }, N_("Plays high frame rate clips slower: at a project rate such as 24 fps, or at 50% or 25%.")));
   devRenderOutput();
   devRenderExport();
+}
+
+// De-squeeze: a factor from the list, or a custom one typed in.
+function devLensControls(sec, c) {
+  const known = DEV_DESQUEEZE.some(([v]) => v !== "custom" && Number(v) === devDsq(c));
+  if (c.dsqCustom == null) c.dsqCustom = !known;
+  const set = (f) => { c.s.desqueeze = f; devChanged(); devViewChanged(); devRenderExport(); };
+  sec.append(devSelect(N_("De-squeeze"), DEV_DESQUEEZE, c.dsqCustom ? "custom" : String(devDsq(c)), (v) => {
+    c.dsqCustom = v === "custom";
+    if (!c.dsqCustom) set(Number(v));
+    devRenderControls();
+  }, N_("Stretches anamorphic footage to its true width, in the preview and the export.")));
+  if (!c.dsqCustom) return;
+  const row = document.createElement("div");
+  row.className = "dev-row";
+  row.innerHTML = `<div class="dev-row-head"><span class="dev-label">${esc(tr("Custom"))}</span><input class="mini-input dev-num" type="text" inputmode="decimal" aria-label="${esc(tr("De-squeeze"))}"><span class="dev-unit">x</span></div>`;
+  const inp = row.querySelector("input");
+  inp.value = num(devDsq(c), 0, 3);
+  inp.addEventListener("change", () => {
+    const x = parseFloat(inp.value.replace(",", "."));
+    if (Number.isFinite(x) && x >= 1 && x <= 4) set(Math.round(x * 1000) / 1000);
+    inp.value = num(devDsq(c), 0, 3);
+  });
+  sec.append(row);
 }
 
 const devNative = (c) => (c.info.r3d ? "log3g10" : "nlog");
@@ -445,7 +490,7 @@ function devRenderExport() {
   const mb = row.querySelector("#dev-mbps");
   const ew = dev.export.width || Math.floor(c.info.width / 2) * 2;
   const h = Math.round((ew * c.info.height) / c.info.width / 2) * 2;
-  devInvoke("develop_default_kbps", { width: ew, height: h, fps: c.info.fps, high: dev.export.high }).then((k) => {
+  devInvoke("develop_default_kbps", { width: Math.min(8192, Math.round(ew * devDsq(c))), height: h, fps: c.info.fps, high: dev.export.high }).then((k) => {
     if (dev.export.mbps == null) mb.value = num(k / 1000, 0, 0);
   });
   if (dev.export.mbps != null) mb.value = num(dev.export.mbps, 0, 1);
@@ -457,6 +502,15 @@ function devRenderExport() {
   const cbr = row.querySelector("#dev-cbr");
   cbr.checked = dev.export.cbr;
   cbr.addEventListener("change", () => { dev.export.cbr = cbr.checked; });
+  if (c.s.speed) {
+    const cf = document.createElement("div");
+    cf.className = "dev-row";
+    cf.innerHTML = `<label class="dev-check"><input type="checkbox" class="switch"><span>${esc(tr("Conform to playback speed"))}</span></label><p class="hint">${esc(tr("Every frame at the playback speed. The sound is left out."))}</p>`;
+    const cb = cf.querySelector("input");
+    cb.checked = dev.export.conform;
+    cb.addEventListener("change", () => { dev.export.conform = cb.checked; });
+    box.append(cf);
+  }
   const where = document.createElement("p");
   where.className = "hint";
   where.textContent = tr("Saved in a Developed folder next to each clip.");
@@ -496,7 +550,7 @@ const DEV_MAX_ZOOM = 8; // 800%
 const devDpr = () => window.devicePixelRatio || 1;
 const devFitK = (c) => {
   const st = devEl("dev-stage");
-  return Math.min(st.clientWidth / c.info.width, st.clientHeight / c.info.height);
+  return Math.min(st.clientWidth / (c.info.width * devDsq(c)), st.clientHeight / c.info.height);
 };
 const devZoomPct = (c) => (dev.view.fit ? devFitK(c) : dev.view.k) * devDpr() * 100;
 
@@ -504,7 +558,7 @@ const devZoomPct = (c) => (dev.view.fit ? devFitK(c) : dev.view.k) * devDpr() * 
 function devFrameRect(c) {
   const st = devEl("dev-stage");
   const k = dev.view.fit ? devFitK(c) : dev.view.k;
-  const w = c.info.width * k, h = c.info.height * k;
+  const w = c.info.width * devDsq(c) * k, h = c.info.height * k;
   const cx = dev.view.fit ? 0.5 : dev.view.cx, cy = dev.view.fit ? 0.5 : dev.view.cy;
   return { x: st.clientWidth / 2 - cx * w, y: st.clientHeight / 2 - cy * h, w, h };
 }
@@ -751,7 +805,7 @@ async function devPreview() {
 
 function devRequest(path) {
   const c = dev.clips.get(path);
-  return { path, settings: c.s, width: dev.export.width, kbps: dev.export.mbps != null ? Math.round(dev.export.mbps * 1000) : null, cbr: dev.export.cbr, high: dev.export.high };
+  return { path, settings: c.s, width: dev.export.width, kbps: dev.export.mbps != null ? Math.round(dev.export.mbps * 1000) : null, cbr: dev.export.cbr, high: dev.export.high, conform: dev.export.conform };
 }
 
 async function devExport(all) {

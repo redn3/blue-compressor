@@ -254,8 +254,10 @@ The Develop tab is a quick turnaround with basic tools for developing your digit
 - Noise Reduction (all formats): Luma and Chroma, 0 (off) to 100, saved per clip. A fast edge preserving filter on the RAW planes, scaled to the noise measured in each frame, so the preview, playback and export look the same.
 - Playback: play and pause with the space bar, step frames with the arrow keys or the buttons, scrub on the timeline. Frames are developed with the current settings in real time; frames that cannot be ready in time are skipped so playback keeps time. Pausing shows the frame at full preview quality.
 - Output: the clip's own log (Log3G10 / REDWideGamutRGB or N-Log / Rec.2020) or Rec.709. The preview can show log through a Rec.709 view.
+- Lens: de-squeeze for anamorphic footage (None, 1.25x, 1.33x, 1.5x, 1.6x, 1.8x, 2x or a custom factor from 1 to 4). The preview and the export are stretched horizontally with the height kept; an export wider than 8192 pixels is scaled down to fit. Remembered per clip.
+- Slow motion: the Speed control in Playback plays high frame rate clips at a project rate below the clip's (24, 25 or 30 fps, or 23.976 and 29.97 for NTSC rates) or at 50% or 25%. Remembered per clip. With "Conform to playback speed" on, the export writes every frame at that rate (without sound, which would run out of step).
 - Export: 10-bit HEVC MOV (VideoToolbox on a Mac, else the first ffmpeg HEVC encoder that works, libx265 last), at full resolution, 4K or 1080p, 100 Mb/s at 4K by default (High quality doubles it), optional constant bitrate, audio as 32-bit float PCM. Files go to a `Developed` folder next to each clip.
-- Command line: `bluecompress develop <clip> [--rec709] [--exposure EV] [--kelvin K] [--tint T] [--iso N] [--auto] [--width 0|3840|1920] [--high] [--nr-luma N] [--nr-chroma N] [--kbps N] [--cbr] [-o file.mov]` (`--width 0` is full resolution).
+- Command line: `bluecompress develop <clip> [--rec709] [--exposure EV] [--kelvin K] [--tint T] [--iso N] [--auto] [--width 0|3840|1920] [--high] [--nr-luma N] [--nr-chroma N] [--kbps N] [--cbr] [--desqueeze F] [--conform FPS|50%|25%] [-o file.mov]` (`--width 0` is full resolution; `--desqueeze 1.33` stretches anamorphic footage; `--conform 24` writes every frame at 24 fps, without sound).
 
 ## Languages
 

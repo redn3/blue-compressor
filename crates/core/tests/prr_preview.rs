@@ -120,7 +120,17 @@ fn prores_raw_develop_export() {
         let mut params = Params::as_shot(&info);
         params.output = out;
         let output = Path::new(&dir).join(format!("prr_{out:?}.mov"));
-        let e = Export { input: clip.clone(), output, params, width: 1920, kbps: 20_000, cbr: false, encoder: None };
+        let e = Export {
+            input: clip.clone(),
+            output,
+            params,
+            width: 1920,
+            kbps: 20_000,
+            cbr: false,
+            encoder: None,
+            desqueeze: 1.0,
+            fps: None,
+        };
         let t = std::time::Instant::now();
         let d = export(&e, &std::sync::atomic::AtomicBool::new(false), &mut |_, _| {}).expect("export");
         println!(

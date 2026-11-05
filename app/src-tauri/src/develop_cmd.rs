@@ -67,6 +67,16 @@ pub struct Settings {
     /// The name of a user LUT (in the app's LUT folder) applied to the log output.
     #[serde(default)]
     lut: Option<String>,
+    /// Anamorphic de-squeeze factor (1 is none).
+    #[serde(default = "one")]
+    desqueeze: f32,
+    /// Playback speed: empty for the clip's rate, `50%`, `25%`, or a frame rate such as `24`.
+    #[serde(default)]
+    speed: String,
+}
+
+fn one() -> f32 {
+    1.0
 }
 
 fn output_name(o: Output) -> &'static str {
@@ -109,6 +119,8 @@ impl From<&Params> for Settings {
             nr_luma: p.nr_luma,
             nr_chroma: p.nr_chroma,
             lut: None,
+            desqueeze: 1.0,
+            speed: String::new(),
         }
     }
 }
@@ -389,6 +401,9 @@ pub struct ExportRequest {
     cbr: bool,
     #[serde(default)]
     high: bool,
+    /// Conform to the playback speed (every frame at the slower or other rate, no sound).
+    #[serde(default)]
+    conform: bool,
 }
 
 #[derive(Serialize, Clone)]
@@ -462,7 +477,22 @@ pub fn develop_export(app: AppHandle, state: State<'_, Exporting>, jobs: Vec<Exp
                     })
                     .unwrap_or(develop::UHD_KBPS)
             });
-            let e = Export { input, output, params, width: j.width, kbps, cbr: j.cbr, encoder: None };
+            let fps = if j.conform && !j.settings.speed.is_empty() {
+                develop::clip_info(&input).ok().map(|c| develop::speed_fps(c.fps, &j.settings.speed))
+            } else {
+                None
+            };
+            let e = Export {
+                input,
+                output,
+                params,
+                width: j.width,
+                kbps,
+                cbr: j.cbr,
+                encoder: None,
+                desqueeze: j.settings.desqueeze,
+                fps,
+            };
             let path = j.path.clone();
             let mut last = 0.0;
             let r = develop::export(&e, &cancel, &mut |fraction, fps| {
@@ -530,9 +560,15 @@ pub async fn develop_play_start(
     let old = state.0.lock().map_err(|e| e.to_string())?.take();
     let p = settings.params()?;
     let crop = crop.unwrap_or([0.0, 0.0, 1.0, 1.0]);
+    let speed = settings.speed.clone();
     let player = tauri::async_runtime::spawn_blocking(move || {
         drop(old);
-        develop::Player::start(Path::new(&path), frame as usize, &p, crop, w, h, view709)
+        let rate = if speed.is_empty() {
+            0.0
+        } else {
+            develop::clip_info(Path::new(&path)).map(|c| develop::speed_fps(c.fps, &speed)).unwrap_or(0.0)
+        };
+        develop::Player::start(Path::new(&path), frame as usize, &p, crop, w, h, view709, rate)
     })
     .await
     .map_err(|e| e.to_string())?

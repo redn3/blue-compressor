@@ -987,7 +987,10 @@ fn bad(what: &str) -> ExitCode {
 /// container index, a few frame headers and the sampled frames.
 /// `bluecompress develop <clip> [--rec709] [--exposure EV] [--kelvin K] [--tint T] [--iso N]
 /// [--width W] [--kbps N] [--cbr] [--high] [--nr-luma N] [--nr-chroma N] [--auto] [--stats] [--lut FILE.cube]
-/// [--play SECONDS] [-o FILE]`: develops a clip to 10-bit HEVC (`--width 0`: full resolution).
+/// [--desqueeze F] [--conform FPS|50%|25%] [--play SECONDS] [-o FILE]`: develops a clip to
+/// 10-bit HEVC (`--width 0`: full resolution). `--desqueeze` stretches anamorphic footage
+/// horizontally (for example 1.33 or 2); `--conform` writes every frame at another rate
+/// (slow motion, without sound) and sets the `--play` rate.
 /// `--stats` renders one frame on the CPU and the GPU and prints only numbers; `--play`
 /// runs playback for a while at `--width` and prints the frame rate it kept.
 fn develop_cmd(args: Vec<String>) -> ExitCode {
@@ -999,6 +1002,7 @@ fn develop_cmd(args: Vec<String>) -> ExitCode {
     let (mut width, mut kbps, mut out, mut frame) = (3840u32, None, None, 0usize);
     let (mut nr_luma, mut nr_chroma, mut high, mut play) = (0f32, 0f32, false, None);
     let mut lut: Option<PathBuf> = None;
+    let (mut desqueeze, mut conform) = (1f32, None::<String>);
     let mut it = args.into_iter();
     while let Some(a) = it.next() {
         let num = |v: Option<String>| v.and_then(|v| v.parse::<f32>().ok());
@@ -1012,6 +1016,11 @@ fn develop_cmd(args: Vec<String>) -> ExitCode {
             "--nr-luma" => nr_luma = num(it.next()).unwrap_or(0.0),
             "--nr-chroma" => nr_chroma = num(it.next()).unwrap_or(0.0),
             "--play" => play = num(it.next()),
+            "--desqueeze" => match num(it.next()) {
+                Some(f) if (1.0..=4.0).contains(&f) => desqueeze = f,
+                _ => return bad("--desqueeze needs a factor from 1 to 4"),
+            },
+            "--conform" => conform = it.next(),
             "--exposure" => exposure = num(it.next()),
             "--kelvin" => kelvin = num(it.next()),
             "--tint" => tint = num(it.next()),
@@ -1080,9 +1089,12 @@ fn develop_cmd(args: Vec<String>) -> ExitCode {
     println!("settings: exposure={:+.2} iso={} kelvin={} nr={}/{}", p.exposure, p.iso, p.kelvin, nr_luma, nr_chroma);
     if let Some(secs) = play {
         let (ow, oh) = develop::output_size(&info, width);
+        let (ow, oh) = develop::desqueeze_size(ow, oh, desqueeze);
+        let rate = conform.as_deref().map_or(0.0, |c| develop::speed_fps(info.fps, c));
         let t = Instant::now();
         let player =
-            match develop::Player::start(&input, frame, &p, [0.0, 0.0, 1.0, 1.0], ow as usize, oh as usize, true) {
+            match develop::Player::start(&input, frame, &p, [0.0, 0.0, 1.0, 1.0], ow as usize, oh as usize, true, rate)
+            {
                 Ok(pl) => pl,
                 Err(e) => return bad(&e.to_string()),
             };
@@ -1168,7 +1180,17 @@ fn develop_cmd(args: Vec<String>) -> ExitCode {
     let output = out.unwrap_or_else(|| develop::export_path(&input, p.output));
     let (w, h) = develop::output_size(&info, width);
     let kbps = kbps.unwrap_or_else(|| develop::quality_kbps(w, h, info.fps, high));
-    let e = Export { input, output, params: p, width, kbps, cbr, encoder: None };
+    let e = Export {
+        input,
+        output,
+        params: p,
+        width,
+        kbps,
+        cbr,
+        encoder: None,
+        desqueeze,
+        fps: conform.as_deref().map(|c| develop::speed_fps(info.fps, c)),
+    };
     let mut last = -1i64;
     match develop::export(&e, &CANCEL, &mut |f, fps| {
         let pc = (f * 100.0) as i64;

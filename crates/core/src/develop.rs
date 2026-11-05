@@ -790,6 +790,39 @@ pub fn auto_exposure(c: &ClipInfo, p: &Params, pl: &RawPlanes) -> f32 {
     ((ev * 10.0).round() / 10.0).clamp(-lim, lim)
 }
 
+/// The size with an anamorphic de-squeeze: the width stretched by `factor`, the height kept,
+/// both scaled down together when the width would pass 8192.
+pub fn desqueeze_size(w: u32, h: u32, factor: f32) -> (u32, u32) {
+    let f = if factor.is_finite() && factor > 0.0 { factor.clamp(0.5, 4.0) as f64 } else { 1.0 };
+    if (f - 1.0).abs() < 1e-6 {
+        return (w, h);
+    }
+    let even = |v: f64| ((v / 2.0).round() as u32 * 2).max(16);
+    let sw = w as f64 * f;
+    if sw <= 8192.0 {
+        (even(sw), h)
+    } else {
+        (8192, even(h as f64 * 8192.0 / sw))
+    }
+}
+
+/// The playback (or conform) frame rate for a speed: `50%` or `25%` of the clip's rate,
+/// a frame rate such as `24` or `23.976`, or the clip's own rate for anything else.
+pub fn speed_fps(clip_fps: f64, speed: &str) -> f64 {
+    let clip = if clip_fps > 0.0 { clip_fps } else { 25.0 };
+    let s = speed.trim();
+    if let Some(p) = s.strip_suffix('%') {
+        return match p.trim().parse::<f64>() {
+            Ok(v) if v > 0.0 && v <= 400.0 => clip * v / 100.0,
+            _ => clip,
+        };
+    }
+    match s.parse::<f64>() {
+        Ok(v) if (1.0..=240.0).contains(&v) => v,
+        _ => clip,
+    }
+}
+
 /// Output size for a target width (even, keeping the aspect ratio of the sensor). Width 0
 /// is the full resolution of the clip.
 pub fn output_size(c: &ClipInfo, width: u32) -> (u32, u32) {
@@ -826,6 +859,12 @@ pub struct Export {
     pub cbr: bool,
     /// Force an encoder; `None` takes the first that works (VideoToolbox on a Mac).
     pub encoder: Option<String>,
+    /// Anamorphic de-squeeze: the picture is stretched this much horizontally, the height
+    /// kept (1.0 is none).
+    pub desqueeze: f32,
+    /// Conform to this frame rate (every frame kept, played slower or faster; the sound is
+    /// left out). `None` keeps the clip's rate.
+    pub fps: Option<f64>,
 }
 
 #[derive(Debug, Clone)]
@@ -942,6 +981,12 @@ pub fn export(e: &Export, cancel: &AtomicBool, progress: &mut dyn FnMut(f64, f64
     let movie = Movie::parse(&input)?;
     let n = movie.video().samples.len();
     let (ow, oh) = output_size(&info, e.width);
+    let (ow, oh) = desqueeze_size(ow, oh, e.desqueeze);
+    let fps = match e.fps {
+        Some(f) if f > 0.0 && (f - info.fps).abs() > 1e-3 => f,
+        _ => info.fps,
+    };
+    let conformed = (fps - info.fps).abs() > 1e-3;
     // A hardware encoder may not take every size (large frames): fall back to libx265.
     let encoder =
         if e.encoder.is_none() && encoder != "libx265" && !proxy::encoder_works_size(&ffmpeg, &encoder, ow, oh) {
@@ -957,13 +1002,14 @@ pub fn export(e: &Export, cancel: &AtomicBool, progress: &mut dyn FnMut(f64, f64
     tmp.push(".bluecompress.tmp");
     let tmp = PathBuf::from(tmp);
     let _ = std::fs::remove_file(&tmp);
-    let audio = proxy::has_readable_audio(&ffmpeg, &e.input);
+    // Conformed, the sound would run out of step: leave it out.
+    let audio = !conformed && proxy::has_readable_audio(&ffmpeg, &e.input);
     let [prim, trc, mat] = tags(if e.params.lut.is_some() { Output::Rec709 } else { e.params.output });
     let mut cmd = Command::new(&ffmpeg);
     cmd.args(["-hide_banner", "-v", "error", "-y"])
         .args(proxy::hw_init_args(&encoder))
         .args(["-f", "rawvideo", "-pix_fmt", "p010le"])
-        .args(["-s", &format!("{ow}x{oh}"), "-r", &format!("{}", info.fps), "-i", "-"]);
+        .args(["-s", &format!("{ow}x{oh}"), "-r", &format!("{fps}"), "-i", "-"]);
     if audio {
         cmd.arg("-i").arg(&e.input).args(["-map", "0:v:0", "-map", "1:a:0", "-c:a", "pcm_f32le", "-shortest"]);
     }
@@ -1184,7 +1230,9 @@ fn develop_frame(info: &ClipInfo, look: &Look, pl: RawPlanes, crop: [f32; 4], ow
 }
 
 impl Player {
-    /// Starts playing `crop` (fractions x, y, w, h) of `path` from frame `from` at `ow` x `oh`.
+    /// Starts playing `crop` (fractions x, y, w, h) of `path` from frame `from` at `ow` x `oh`,
+    /// `rate` frames a second (0 plays at the clip's own rate; lower plays slow motion).
+    #[allow(clippy::too_many_arguments)]
     pub fn start(
         path: &Path,
         from: usize,
@@ -1193,13 +1241,20 @@ impl Player {
         ow: usize,
         oh: usize,
         view709: bool,
+        rate: f64,
     ) -> Result<Player> {
         let info = Arc::new(clip_info(path)?);
         let input = Arc::new(InputFile::open(path)?);
         let movie = Arc::new(Movie::parse(&input)?);
         let n = movie.video().samples.len();
         let from = from.min(n.saturating_sub(1));
-        let fps = if info.fps > 0.0 { info.fps } else { 25.0 };
+        let fps = if rate > 0.0 {
+            rate
+        } else if info.fps > 0.0 {
+            info.fps
+        } else {
+            25.0
+        };
         let cancel = Arc::new(AtomicBool::new(false));
         let look: Look = Arc::new(Mutex::new((p.clone(), view709)));
         let (tx, rx) = sync_channel::<Played>(2);
@@ -1626,5 +1681,24 @@ mod tests {
     fn planck_matches_known_points() {
         let (x, y) = planck_xy(6504.0);
         assert!((x - 0.3135).abs() < 0.003 && (y - 0.3237).abs() < 0.004);
+    }
+
+    #[test]
+    fn desqueeze_stretches_width_only() {
+        assert_eq!(desqueeze_size(3840, 2160, 1.0), (3840, 2160));
+        assert_eq!(desqueeze_size(3840, 2160, 1.33), (5108, 2160));
+        assert_eq!(desqueeze_size(1920, 1080, 2.0), (3840, 1080));
+        // Past 8192 wide, both shrink together.
+        assert_eq!(desqueeze_size(6048, 3402, 2.0), (8192, 2304));
+    }
+
+    #[test]
+    fn speed_fps_parses() {
+        assert_eq!(speed_fps(120.0, "24"), 24.0);
+        assert_eq!(speed_fps(119.88, "23.976"), 23.976);
+        assert_eq!(speed_fps(100.0, "50%"), 50.0);
+        assert_eq!(speed_fps(100.0, "25%"), 25.0);
+        assert_eq!(speed_fps(50.0, ""), 50.0);
+        assert_eq!(speed_fps(50.0, "x"), 50.0);
     }
 }
