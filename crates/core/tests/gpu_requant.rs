@@ -152,3 +152,27 @@ fn gpu_matches_cpu_on_other_layouts() {
         }
     }
 }
+
+#[test]
+fn gpu_batches_frames_of_different_layouts() {
+    if !gpu() {
+        return;
+    }
+    // Workers coding at once share GPU dispatches; each frame must still match the CPU.
+    let cases = [
+        (2048u16, 512u16, [(5u8, 1u8), (5, 1), (0, 0), (5, 1)], 0.9),
+        (1000, 202, [(5, 1), (5, 1), (0, 0), (5, 1)], 1.1),
+        (1024, 160, [(4, 1), (3, 1), (0, 0), (5, 1)], 0.7),
+        (1334, 90, [(5, 1), (5, 1), (0, 0), (5, 1)], 1.3),
+    ];
+    std::thread::scope(|sc| {
+        for (k, (w, h, levels, bpp)) in cases.into_iter().enumerate() {
+            sc.spawn(move || {
+                let (hd, l) = header_with(w, h, levels);
+                let frames: Vec<Vec<u8>> =
+                    (0..3).map(|i| encode_frame(&hd, &l, &scene(&l, 20 + k as u32 + i), 120).unwrap()).collect();
+                same(&frames, w, h, bpp);
+            });
+        }
+    });
+}

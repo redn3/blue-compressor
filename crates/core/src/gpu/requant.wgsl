@@ -39,6 +39,16 @@ const LINE_WORDS: u32 = 12u;
 @group(0) @binding(3) var<storage, read_write> outw: array<atomic<u32>>;
 @group(0) @binding(4) var<storage, read_write> res: array<u32>;
 @group(0) @binding(5) var<storage, read_write> scr: array<u32>;
+// Frames batched into one dispatch: per frame (workgroup_id.y), the word offsets of its
+// parts of tab, cs, fm, outw, res and scr, and its slice count.
+@group(0) @binding(6) var<storage, read> frames: array<u32>;
+const FRAME_WORDS: u32 = 8u;
+var<private> fT: u32;
+var<private> fC: u32;
+var<private> fM: u32;
+var<private> fO: u32;
+var<private> fR: u32;
+var<private> fS: u32;
 
 var<workgroup> wscan: array<vec4<u32>, 256>;
 var<workgroup> cam_mode: array<u32, 32>;
@@ -82,11 +92,11 @@ const C_OPOS: u32 = 9u;
 const DONE: u32 = 0xffffffffu;
 
 fn prm(i: u32) -> u32 {
-    return tab[i];
+    return tab[fT + i];
 }
 
 fn ln(l: u32, f: u32) -> u32 {
-    return tab[prm(P_LINES) + l * LINE_WORDS + f];
+    return tab[fT + prm(P_LINES) + l * LINE_WORDS + f];
 }
 
 fn fail(code: u32) {
@@ -97,7 +107,7 @@ fn byte_at(i: u32) -> u32 {
     if (i >= prm(P_CSLEN)) {
         return 0u;
     }
-    return (cs[i >> 2u] >> ((i & 3u) * 8u)) & 0xffu;
+    return (cs[fC + (i >> 2u)] >> ((i & 3u) * 8u)) & 0xffu;
 }
 
 // `n` (1 to 32) bits MSB first from bit `pos` of the codestream.
@@ -311,7 +321,7 @@ fn measure(lid: u32, sb: u32, rank: u32, rank0: u32, emit: bool, ob: u32) {
     let g0 = min(G, lid * chunk);
     let g1 = min(G, g0 + chunk);
     for (var g = g0; g < g1; g++) {
-        let l = tab[prm(P_G2L) + g];
+        let l = tab[fT + prm(P_G2L) + g];
         let t0 = line_t0[l];
         let t1 = line_t1[l];
         let info = scr[s_info(sb, g)];
@@ -353,7 +363,7 @@ fn measure(lid: u32, sb: u32, rank: u32, rank0: u32, emit: bool, ob: u32) {
     let s0 = min(nsg, lid * sc);
     let s1 = min(nsg, s0 + sc);
     for (var sg = s0; sg < s1; sg++) {
-        let l = tab[prm(P_SG2L) + sg];
+        let l = tab[fT + prm(P_SG2L) + sg];
         let loc = sg - ln(l, 11u);
         let goff = ln(l, 2u);
         let groups = ln(l, 3u);
@@ -423,7 +433,7 @@ fn measure(lid: u32, sb: u32, rank: u32, rank0: u32, emit: bool, ob: u32) {
             var gb = 0u;
             var db = 0u;
             var sb2 = 0u;
-            for (var l = tab[pk]; l < tab[pk + 1u]; l++) {
+            for (var l = tab[fT + pk]; l < tab[fT + pk + 1u]; l++) {
                 let mode = out_mode[ln(l, 0u)];
                 let sgs = ln(l, 5u);
                 line_sigoff[l] = sig;
@@ -486,7 +496,7 @@ fn measure(lid: u32, sb: u32, rank: u32, rank0: u32, emit: bool, ob: u32) {
     }
     // Significance flags.
     for (var sg = s0; sg < s1; sg++) {
-        let l = tab[prm(P_SG2L) + sg];
+        let l = tab[fT + prm(P_SG2L) + sg];
         let b = ln(l, 0u);
         let mode = out_mode[b];
         if ((mode & 2u) != 0u) {
@@ -506,7 +516,7 @@ fn measure(lid: u32, sb: u32, rank: u32, rank0: u32, emit: bool, ob: u32) {
     }
     var off = scan(lid, local);
     for (var g = g0; g < g1; g++) {
-        let l = tab[prm(P_G2L) + g];
+        let l = tab[fT + prm(P_G2L) + g];
         let k = ln(l, 1u);
         let lens = group_lengths(sb, g);
         let b = ln(l, 0u);
@@ -594,7 +604,7 @@ fn measure(lid: u32, sb: u32, rank: u32, rank0: u32, emit: bool, ob: u32) {
 
 // (gcli code bits, data bits, sign bits, 0) of group `g` at the candidate in `scr`.
 fn group_lengths(sb: u32, g: u32) -> vec4<u32> {
-    let l = tab[prm(P_G2L) + g];
+    let l = tab[fT + prm(P_G2L) + g];
     let b = ln(l, 0u);
     let mode = out_mode[b];
     let t = line_t1[l];
@@ -646,14 +656,25 @@ fn group_lengths(sb: u32, g: u32) -> vec4<u32> {
 
 @compute @workgroup_size(256)
 fn requant(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_index) lid: u32) {
+    let fb = wid.y * FRAME_WORDS;
+    fT = frames[fb];
+    fC = frames[fb + 1u];
+    fM = frames[fb + 2u];
+    fO = frames[fb + 3u];
+    fR = frames[fb + 4u];
+    fS = frames[fb + 5u];
     let s = wid.x;
+    // Frames have different slice counts: the extra workgroups of this frame stop here.
+    if (s >= frames[fb + 6u]) {
+        return;
+    }
     let nb = prm(P_NB);
     let nl = prm(P_NLINES);
     let G = prm(P_G);
     let P = prm(P_PRECINCTS);
     let sliceh = prm(P_SLICEH);
-    let sb = s * prm(P_STRIDE);
-    let ob = s * prm(P_CAP);
+    let sb = fS + s * prm(P_STRIDE);
+    let ob = fO + s * prm(P_CAP);
     let chunk = (G + WG - 1u) / WG;
     let g0 = min(G, lid * chunk);
     let g1 = min(G, g0 + chunk);
@@ -674,9 +695,9 @@ fn requant(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_inde
             dec_gtli[b] = 0;
             enc_gtli[b] = 0;
         }
-        left = fm[3u * P + s];
+        left = fm[fM + 3u * P + s];
         for (var p = p0; p < p1; p++) {
-            wleft += fm[P + p];
+            wleft += fm[fM + P + p];
         }
         ctl[C_OPOS] = 6u;
         put_byte(ob, 0u, 0xffu);
@@ -691,7 +712,7 @@ fn requant(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_inde
     for (var p = p0; p < p1; p++) {
         // ---- Decode the precinct (tico::decode_precinct with magnitudes).
         if (lid == 0u) {
-            let off = fm[p];
+            let off = fm[fM + p];
             let hlen = prm(P_HLEN);
             let length = (byte_at(off) << 16u) | (byte_at(off + 1u) << 8u) | byte_at(off + 2u);
             let q = byte_at(off + 3u);
@@ -714,8 +735,8 @@ fn requant(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_inde
         workgroupBarrier();
         for (var k = 0u; k < prm(P_NPK); k++) {
             let pk = prm(P_PKS) + k * 4u;
-            let pg0 = tab[pk + 2u];
-            let png = tab[pk + 3u];
+            let pg0 = tab[fT + pk + 2u];
+            let png = tab[fT + pk + 3u];
             if (lid == 0u) {
                 let pos = ctl[C_POS];
                 let hi = bits(pos * 8u, 24u);
@@ -728,7 +749,7 @@ fn requant(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_inde
                 let gcli_len = ((hi & 7u) << 17u) | (lo >> 15u);
                 let sign_len = lo & 0x7fffu;
                 var sig = 0u;
-                for (var l = tab[pk]; l < tab[pk + 1u]; l++) {
+                for (var l = tab[fT + pk]; l < tab[fT + pk + 1u]; l++) {
                     line_sigoff[l] = sig;
                     if ((cam_mode[ln(l, 0u)] & 2u) != 0u) {
                         sig += ln(l, 5u);
@@ -792,7 +813,7 @@ fn requant(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_inde
             // GCLIs.
             var dl = vec4<u32>(0u);
             for (var g = a0; g < a1; g++) {
-                let l = tab[prm(P_G2L) + g];
+                let l = tab[fT + prm(P_G2L) + g];
                 let b = ln(l, 0u);
                 let t = line_t0[l];
                 let gl = g - ln(l, 2u);
@@ -862,7 +883,7 @@ fn requant(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_inde
             var nzl = vec4<u32>(0u);
             var dp = ctl[C_DSTART] * 8u + dbase.x;
             for (var g = a0; g < a1; g++) {
-                let l = tab[prm(P_G2L) + g];
+                let l = tab[fT + prm(P_G2L) + g];
                 let t = line_t0[l];
                 let v = i32(scr[s_info(sb, g)]);
                 var m = array<u32, 4>(0u, 0u, 0u, 0u);
@@ -912,11 +933,11 @@ fn requant(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_inde
             workgroupBarrier();
             // Prediction state after the packet.
             for (var g = a0; g < a1; g++) {
-                let l = tab[prm(P_G2L) + g];
+                let l = tab[fT + prm(P_G2L) + g];
                 scr[s_dec(sb, ln(l, 10u) + g - ln(l, 2u))] = scr[s_info(sb, g)] & 0xffu;
             }
             if (lid == 0u) {
-                for (var l = tab[pk]; l < tab[pk + 1u]; l++) {
+                for (var l = tab[fT + pk]; l < tab[fT + pk + 1u]; l++) {
                     dec_gtli[ln(l, 0u)] = line_t0[l];
                     dec_valid[ln(l, 0u)] = 1u;
                 }
@@ -927,7 +948,7 @@ fn requant(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_inde
 
         // ---- Everything a candidate needs that does not depend on its rank.
         for (var g = g0; g < g1; g++) {
-            let l = tab[prm(P_G2L) + g];
+            let l = tab[fT + prm(P_G2L) + g];
             let t0 = line_t0[l];
             let width = ln(l, 4u);
             let gl = g - ln(l, 2u);
@@ -973,7 +994,7 @@ fn requant(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_inde
             rank0 = q * nb + (nb - min(r, nb));
             lo = rank0;
             hi = max(prm(P_HI), rank0);
-            let w = fm[P + p];
+            let w = fm[fM + P + p];
             if (wleft == 0u) {
                 share = left;
             } else {
@@ -981,7 +1002,7 @@ fn requant(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_inde
             }
             var guess = hint;
             if (prm(P_SEEDED) != 0u) {
-                guess = fm[2u * P + p];
+                guess = fm[fM + 2u * P + p];
                 slack = share / 32u;
             }
             guess = max(guess, rank0);
@@ -1075,7 +1096,7 @@ fn requant(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_inde
         measure(lid, sb, chosen, r0, true, ob);
         // Encoder state after the precinct: each band's last line.
         for (var g = g0; g < g1; g++) {
-            let l = tab[prm(P_G2L) + g];
+            let l = tab[fT + prm(P_G2L) + g];
             if (ln(l, 9u) != 0u) {
                 scr[s_enc(sb, ln(l, 10u) + g - ln(l, 2u))] = scr[s_cand(sb, g)];
             }
@@ -1085,14 +1106,14 @@ fn requant(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_inde
                 enc_gtli[ln(l, 0u)] = line_t1[l];
                 enc_valid[ln(l, 0u)] = 1u;
             }
-            res[4u * prm(P_SLICES) + p] = chosen;
+            res[fR + 4u * prm(P_SLICES) + p] = chosen;
             if (chosen > rank0) {
                 requantized += 1u;
             }
             rank_sum += rank0;
             hint = chosen;
             left = left - min(left, wsize);
-            wleft = wleft - min(wleft, fm[P + p]);
+            wleft = wleft - min(wleft, fm[fM + P + p]);
             ctl[C_OPOS] = ctl[C_OPOS] + wsize;
             if (ctl[C_OPOS] > prm(P_CAP) * 4u) {
                 fail(23u);
@@ -1102,17 +1123,17 @@ fn requant(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_inde
         workgroupBarrier();
     }
     if (lid == 0u) {
-        res[4u * s] = ctl[C_OPOS];
-        res[4u * s + 1u] = atomicLoad(&werr);
-        res[4u * s + 2u] = requantized;
-        res[4u * s + 3u] = rank_sum;
+        res[fR + 4u * s] = ctl[C_OPOS];
+        res[fR + 4u * s + 1u] = atomicLoad(&werr);
+        res[fR + 4u * s + 2u] = requantized;
+        res[fR + 4u * s + 3u] = rank_sum;
     }
 }
 
 // 1 when group `g` of the packet being decoded has a GCLI code (it is not in a
 // significance group flagged insignificant).
 fn has_code(g: u32) -> u32 {
-    let l = tab[prm(P_G2L) + g];
+    let l = tab[fT + prm(P_G2L) + g];
     let b = ln(l, 0u);
     if ((cam_mode[b] & 2u) == 0u) {
         return 1u;

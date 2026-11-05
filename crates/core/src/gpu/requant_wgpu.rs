@@ -2,18 +2,18 @@
 //! Windows and Linux): the rate controlled pass of [`crate::requant`] for frames whose
 //! lossless repack does not fit, one workgroup per slice (see requant.wgsl). It gives the
 //! same bytes as the CPU. Without a usable GPU, or when a frame trips anything the shader
-//! does not handle, the caller codes the frame on the CPU.
+//! does not handle, the caller codes the frame on the CPU. Frames from the workers coding
+//! a clip at once are batched into one dispatch on kept buffers, and when enough frames
+//! already wait for the GPU the next is coded on the CPU meanwhile.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Condvar, Mutex, OnceLock};
 
-use wgpu::util::DeviceExt;
-
 use crate::tico::{Layout, SIG_GROUP};
 
 const SOURCE: &str = include_str!("requant.wgsl");
-/// Frames on the GPU at once (bounds its memory; the CPU prepares the next meanwhile).
-const MAX_IN_FLIGHT: usize = 4;
+/// Batches on the GPU at once (bounds its memory; the next batch gathers meanwhile).
+const MAX_IN_FLIGHT: usize = 2;
 
 struct Engine {
     device: wgpu::Device,
@@ -71,7 +71,7 @@ fn engine() -> Option<&'static Engine> {
             required_limits: wgpu::Limits {
                 max_storage_buffer_binding_size: limits.max_storage_buffer_binding_size,
                 max_buffer_size: limits.max_buffer_size,
-                max_storage_buffers_per_shader_stage: limits.max_storage_buffers_per_shader_stage.max(6),
+                max_storage_buffers_per_shader_stage: limits.max_storage_buffers_per_shader_stage.max(7),
                 ..wgpu::Limits::default()
             },
             ..Default::default()
@@ -219,11 +219,24 @@ fn as_bytes(v: &[u32]) -> &[u8] {
     unsafe { std::slice::from_raw_parts(v.as_ptr() as *const u8, v.len() * 4) }
 }
 
-/// Codes `job` on the GPU; None when there is none or the frame is left to the CPU.
-pub(crate) fn run(job: &Job) -> Option<Coded> {
-    let e = engine()?;
+/// A frame packed for the GPU: its table, codestream words and rate control inputs, and
+/// the sizes of its output, result and scratch regions (in words).
+struct Packed {
+    tab: Vec<u32>,
+    cs: Vec<u32>,
+    meta: Vec<u32>,
+    slices: usize,
+    precincts: usize,
+    out: usize,
+    res: usize,
+    scr: usize,
+    cap: usize,
+}
+
+/// Packs `job`; None when the shader does not take its layout.
+fn pack(e: &Engine, job: &Job) -> Option<Packed> {
     let l = job.layout;
-    let (mut tab, groups, state, nsg) = tables(l)?;
+    let (mut tab, groups, state, _) = tables(l)?;
     let n = l.precincts;
     let fits32 = |v: usize| v < (1usize << 31);
     if !fits32(job.cs.len()) || job.precincts.len() != n || job.start < 0 || job.hi < 0 {
@@ -241,7 +254,6 @@ pub(crate) fn run(job: &Job) -> Option<Coded> {
     }
     let cap = cap_bytes.div_ceil(4);
     let stride = 11 * groups + 2 * state + 64;
-    let _ = nsg;
     tab[0] = l.bands.len() as u32;
     tab[4] = n as u32;
     tab[5] = l.slice_height as u32;
@@ -261,110 +273,315 @@ pub(crate) fn run(job: &Job) -> Option<Coded> {
         None => meta.extend(std::iter::repeat_n(0, n)),
     }
     meta.extend(job.budgets.iter().map(|&b| b as u32));
-    let mut cs_words = vec![0u32; job.cs.len().div_ceil(4)];
-    for (i, c) in job.cs.chunks(4).enumerate() {
-        let mut w = [0u8; 4];
-        w[..c.len()].copy_from_slice(c);
-        cs_words[i] = u32::from_le_bytes(w);
+    let mut cs = vec![0u32; job.cs.len().div_ceil(4)];
+    let (whole, rest) = job.cs.as_chunks::<4>();
+    for (w, c) in cs.iter_mut().zip(whole) {
+        *w = u32::from_le_bytes(*c);
     }
-    let out_bytes = (l.slices * cap * 4) as u64;
-    let res_bytes = ((4 * l.slices + n) * 4) as u64;
-    let scr_bytes = (l.slices * stride * 4) as u64;
-    let max = e.device.limits().max_storage_buffer_binding_size;
-    if out_bytes > max || scr_bytes > max || (cs_words.len() * 4) as u64 > max {
+    if !rest.is_empty() {
+        let mut w = [0u8; 4];
+        w[..rest.len()].copy_from_slice(rest);
+        cs[whole.len()] = u32::from_le_bytes(w);
+    }
+    let p = Packed {
+        tab,
+        cs,
+        meta,
+        slices: l.slices,
+        precincts: n,
+        out: l.slices * cap,
+        res: 4 * l.slices + n,
+        scr: l.slices * stride,
+        cap,
+    };
+    let max = e.device.limits().max_storage_buffer_binding_size / 4;
+    if p.out as u64 > max || p.scr as u64 > max || p.cs.len() as u64 > max {
         return None;
     }
+    Some(p)
+}
 
-    {
-        let (m, cv) = &e.slots;
-        let mut busy = m.lock().unwrap();
-        while *busy >= MAX_IN_FLIGHT {
-            busy = cv.wait(busy).unwrap();
-        }
-        *busy += 1;
+/// Frames waiting for or on the GPU.
+static QUEUED: AtomicUsize = AtomicUsize::new(0);
+
+/// How many frames may wait for the GPU before the next is coded on the CPU (only reached
+/// with 15 or more workers; 14 measured best with 16 on an M4 Max).
+fn queue_cap() -> usize {
+    static V: OnceLock<usize> = OnceLock::new();
+    *V.get_or_init(|| std::env::var("BLUECOMPRESS_GPU_QUEUE").ok().and_then(|v| v.parse().ok()).unwrap_or(14))
+}
+
+/// False with `BLUECOMPRESS_GPU_ONLY=1`: frames always wait for the GPU.
+fn share_with_cpu() -> bool {
+    static V: OnceLock<bool> = OnceLock::new();
+    *V.get_or_init(|| std::env::var_os("BLUECOMPRESS_GPU_ONLY").is_none_or(|v| v.is_empty() || v == "0"))
+}
+
+/// Frames a batch takes at most, and how long the first frame waits for others.
+const MAX_BATCH: usize = 8;
+const GATHER: std::time::Duration = std::time::Duration::from_micros(1500);
+
+struct Pending {
+    packed: Packed,
+    done: std::sync::mpsc::Sender<Option<Coded>>,
+}
+
+#[derive(Default)]
+struct Gather {
+    pending: Vec<Pending>,
+    leader: bool,
+}
+
+fn gather() -> &'static (Mutex<Gather>, Condvar) {
+    static G: OnceLock<(Mutex<Gather>, Condvar)> = OnceLock::new();
+    G.get_or_init(Default::default)
+}
+
+/// Buffers kept between batches (grown when a batch needs more).
+struct Buffers {
+    words: [usize; 7],
+    tab: wgpu::Buffer,
+    cs: wgpu::Buffer,
+    meta: wgpu::Buffer,
+    out: wgpu::Buffer,
+    res: wgpu::Buffer,
+    scr: wgpu::Buffer,
+    frames: wgpu::Buffer,
+    read_out: wgpu::Buffer,
+    read_res: wgpu::Buffer,
+}
+
+fn pool() -> &'static Mutex<Vec<Buffers>> {
+    static P: OnceLock<Mutex<Vec<Buffers>>> = OnceLock::new();
+    P.get_or_init(Default::default)
+}
+
+fn buffers(e: &Engine, need: [usize; 7]) -> Buffers {
+    let mut p = pool().lock().unwrap();
+    if let Some(i) = p.iter().position(|b| b.words.iter().zip(need).all(|(&h, n)| h >= n)) {
+        return p.swap_remove(i);
     }
-    let scope = e.device.push_error_scope(wgpu::ErrorFilter::Validation);
-    let result = (|| {
-        let st = wgpu::BufferUsages::STORAGE;
-        let init = |data: &[u8]| {
-            e.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: None, contents: data, usage: st })
-        };
-        let buffer = |size: u64, usage: wgpu::BufferUsages| {
-            e.device.create_buffer(&wgpu::BufferDescriptor {
-                label: None,
-                size: size.max(16),
-                usage,
-                mapped_at_creation: false,
-            })
-        };
-        let tab_b = init(as_bytes(&tab));
-        let cs_b = init(as_bytes(&cs_words));
-        let meta_b = init(as_bytes(&meta));
-        let out_b = buffer(out_bytes, st | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST);
-        let res_b = buffer(res_bytes, st | wgpu::BufferUsages::COPY_SRC);
-        let scr_b = buffer(scr_bytes, st);
-        let read_out = buffer(out_bytes, wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST);
-        let read_res = buffer(res_bytes, wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST);
-        let bind = e.device.create_bind_group(&wgpu::BindGroupDescriptor {
+    // Grow the largest kept set rather than keep sets of every size.
+    let old = p.pop();
+    drop(p);
+    let words: [usize; 7] = std::array::from_fn(|i| {
+        let had = old.as_ref().map_or(0, |b| b.words[i]);
+        if need[i] <= had {
+            had
+        } else {
+            (need[i] + need[i] / 4).max(4)
+        }
+    });
+    let st = wgpu::BufferUsages::STORAGE;
+    let cd = wgpu::BufferUsages::COPY_DST;
+    let cs = wgpu::BufferUsages::COPY_SRC;
+    let rd = wgpu::BufferUsages::MAP_READ | cd;
+    let mk = |w: usize, usage| {
+        e.device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
-            layout: &e.pipeline.get_bind_group_layout(0),
-            entries: &[&tab_b, &cs_b, &meta_b, &out_b, &res_b, &scr_b]
-                .iter()
-                .enumerate()
-                .map(|(i, b)| wgpu::BindGroupEntry { binding: i as u32, resource: b.as_entire_binding() })
-                .collect::<Vec<_>>(),
-        });
-        let mut enc = e.device.create_command_encoder(&Default::default());
-        enc.clear_buffer(&out_b, 0, None);
+            size: (w as u64 * 4).max(16),
+            usage,
+            mapped_at_creation: false,
+        })
+    };
+    Buffers {
+        tab: mk(words[0], st | cd),
+        cs: mk(words[1], st | cd),
+        meta: mk(words[2], st | cd),
+        out: mk(words[3], st | cd | cs),
+        res: mk(words[4], st | cd | cs),
+        scr: mk(words[5], st),
+        frames: mk(words[6], st | cd),
+        read_out: mk(words[3], rd),
+        read_res: mk(words[4], rd),
+        words,
+    }
+}
+
+/// Codes `job` on the GPU; None when there is none or the frame is left to the CPU.
+/// Frames from the workers coding a clip at once are batched into one dispatch, which
+/// keeps the GPU busy (a frame alone has only a workgroup per slice).
+pub(crate) fn run(job: &Job) -> Option<Coded> {
+    let e = engine()?;
+    let packed = pack(e, job)?;
+    let (tx, rx) = std::sync::mpsc::channel();
+    let (m, cv) = gather();
+    let mut g = m.lock().unwrap();
+    // With the GPU busy and the next batch already full, this frame is coded sooner on
+    // the CPU (the same bytes), so both work at once.
+    if QUEUED.load(Ordering::Relaxed) >= queue_cap() && share_with_cpu() {
+        return None;
+    }
+    QUEUED.fetch_add(1, Ordering::Relaxed);
+    g.pending.push(Pending { packed, done: tx });
+    if !g.leader {
+        g.leader = true;
+        let until = std::time::Instant::now() + GATHER;
+        while g.pending.len() < MAX_BATCH {
+            let now = std::time::Instant::now();
+            if now >= until {
+                break;
+            }
+            g = cv.wait_timeout(g, until - now).unwrap().0;
+        }
+        let batch = std::mem::take(&mut g.pending);
+        g.leader = false;
+        drop(g);
         {
-            let mut p = enc.begin_compute_pass(&Default::default());
-            p.set_pipeline(&e.pipeline);
-            p.set_bind_group(0, &bind, &[]);
-            p.dispatch_workgroups(l.slices as u32, 1, 1);
+            let (m, cv) = &e.slots;
+            let mut busy = m.lock().unwrap();
+            while *busy >= MAX_IN_FLIGHT {
+                busy = cv.wait(busy).unwrap();
+            }
+            *busy += 1;
         }
-        enc.copy_buffer_to_buffer(&out_b, 0, &read_out, 0, out_bytes);
-        enc.copy_buffer_to_buffer(&res_b, 0, &read_res, 0, res_bytes);
-        let idx = e.queue.submit([enc.finish()]);
-        let (tx, rx) = std::sync::mpsc::channel();
-        for b in [&read_out, &read_res] {
-            let tx = tx.clone();
-            b.slice(..).map_async(wgpu::MapMode::Read, move |r| {
-                let _ = tx.send(r.is_ok());
-            });
+        dispatch(e, batch);
+        let (m, cv) = &e.slots;
+        *m.lock().unwrap() -= 1;
+        cv.notify_one();
+    } else {
+        cv.notify_all();
+        drop(g);
+    }
+    let r = rx.recv().ok().flatten();
+    QUEUED.fetch_sub(1, Ordering::Relaxed);
+    r
+}
+
+/// Runs a batch and sends each frame its result.
+fn dispatch(e: &Engine, batch: Vec<Pending>) {
+    // Offsets of each frame's parts (words), as the shader reads them from `frames`.
+    let mut at = [0usize; 6];
+    let mut table = Vec::with_capacity(batch.len() * 8);
+    for p in &batch {
+        table.extend(at.iter().map(|&v| v as u32));
+        table.push(p.packed.slices as u32);
+        table.push(0);
+        for (a, n) in at.iter_mut().zip([
+            p.packed.tab.len(),
+            p.packed.cs.len(),
+            p.packed.meta.len(),
+            p.packed.out,
+            p.packed.res,
+            p.packed.scr,
+        ]) {
+            *a += n;
         }
-        drop(tx);
-        let polled = e.device.poll(wgpu::PollType::Wait { submission_index: Some(idx), timeout: None });
-        if polled.is_err() || !rx.iter().take(2).all(|ok| ok) {
+    }
+    let max = (e.device.limits().max_storage_buffer_binding_size / 4) as usize;
+    if at.iter().any(|&v| v > max || v >= 1 << 30) {
+        // Too much for one dispatch: halve it.
+        if batch.len() > 1 {
+            let mut a = batch;
+            let b = a.split_off(a.len() / 2);
+            dispatch(e, a);
+            dispatch(e, b);
+        } else {
+            for p in batch {
+                let _ = p.done.send(None);
+            }
+        }
+        return;
+    }
+    let b = buffers(e, [at[0], at[1], at[2], at[3], at[4], at[5], table.len()]);
+    let scope = e.device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let put = |buf: &wgpu::Buffer, parts: &mut dyn Iterator<Item = &Vec<u32>>| {
+        let mut off = 0u64;
+        for v in parts {
+            if !v.is_empty() {
+                e.queue.write_buffer(buf, off, as_bytes(v));
+            }
+            off += v.len() as u64 * 4;
+        }
+    };
+    put(&b.tab, &mut batch.iter().map(|p| &p.packed.tab));
+    put(&b.cs, &mut batch.iter().map(|p| &p.packed.cs));
+    put(&b.meta, &mut batch.iter().map(|p| &p.packed.meta));
+    e.queue.write_buffer(&b.frames, 0, as_bytes(&table));
+    let bind = e.device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: None,
+        layout: &e.pipeline.get_bind_group_layout(0),
+        entries: &[&b.tab, &b.cs, &b.meta, &b.out, &b.res, &b.scr, &b.frames]
+            .iter()
+            .enumerate()
+            .map(|(i, b)| wgpu::BindGroupEntry { binding: i as u32, resource: b.as_entire_binding() })
+            .collect::<Vec<_>>(),
+    });
+    let (out_bytes, res_bytes) = (at[3] as u64 * 4, at[4] as u64 * 4);
+    let mut enc = e.device.create_command_encoder(&Default::default());
+    // Kept buffers hold the last batch: clear what the shader adds to or may leave.
+    enc.clear_buffer(&b.out, 0, Some(out_bytes.max(4)));
+    enc.clear_buffer(&b.res, 0, Some(res_bytes.max(4)));
+    {
+        let mut p = enc.begin_compute_pass(&Default::default());
+        p.set_pipeline(&e.pipeline);
+        p.set_bind_group(0, &bind, &[]);
+        let wide = batch.iter().map(|p| p.packed.slices).max().unwrap_or(1);
+        p.dispatch_workgroups(wide as u32, batch.len() as u32, 1);
+    }
+    enc.copy_buffer_to_buffer(&b.out, 0, &b.read_out, 0, out_bytes.max(4));
+    enc.copy_buffer_to_buffer(&b.res, 0, &b.read_res, 0, res_bytes.max(4));
+    let t0 = std::time::Instant::now();
+    let idx = e.queue.submit([enc.finish()]);
+    let (tx, rx) = std::sync::mpsc::channel();
+    for (buf, len) in [(&b.read_out, out_bytes.max(4)), (&b.read_res, res_bytes.max(4))] {
+        let tx = tx.clone();
+        buf.slice(..len).map_async(wgpu::MapMode::Read, move |r| {
+            let _ = tx.send(r.is_ok());
+        });
+    }
+    drop(tx);
+    let polled = e.device.poll(wgpu::PollType::Wait { submission_index: Some(idx), timeout: None });
+    let mapped = polled.is_ok() && rx.iter().take(2).all(|ok| ok);
+    let failed = pollster::block_on(scope.pop()).is_some();
+    if std::env::var_os("BLUECOMPRESS_GPU_DEBUG").is_some() {
+        eprintln!("bluecompress: GPU batch of {} frames in {:.1} ms", batch.len(), t0.elapsed().as_secs_f64() * 1e3);
+    }
+    let mut results: Vec<Option<Coded>> = Vec::with_capacity(batch.len());
+    if mapped && !failed {
+        let res = b.read_res.slice(..res_bytes.max(4)).get_mapped_range();
+        let out = b.read_out.slice(..out_bytes.max(4)).get_mapped_range();
+        if let (Ok(res), Ok(out)) = (res, out) {
+            let word = |i: usize| u32::from_le_bytes(res[4 * i..4 * i + 4].try_into().unwrap());
+            for (k, p) in batch.iter().enumerate() {
+                let (ro, oo) = (table[8 * k + 4] as usize, table[8 * k + 3] as usize * 4);
+                results.push(collect(&p.packed, |i| word(ro + i), &out[oo..oo + p.packed.out * 4]));
+            }
+        }
+    }
+    b.read_out.unmap();
+    b.read_res.unmap();
+    let mut pl = pool().lock().unwrap();
+    if pl.len() < MAX_IN_FLIGHT {
+        pl.push(b);
+    }
+    drop(pl);
+    results.resize_with(batch.len(), || None);
+    for (p, r) in batch.into_iter().zip(results) {
+        let _ = p.done.send(r);
+    }
+}
+
+/// One frame's slices out of the batch's output.
+fn collect(p: &Packed, res: impl Fn(usize) -> u32, out: &[u8]) -> Option<Coded> {
+    let (cap, n) = (p.cap, p.precincts);
+    let mut coded =
+        Coded { slices: Vec::with_capacity(p.slices), ranks: Vec::with_capacity(n), requantized: 0, rank_sum: 0 };
+    for s in 0..p.slices {
+        let (len, err) = (res(4 * s) as usize, res(4 * s + 1));
+        let at = s * cap * 4;
+        let header = [0xff, 0x20, 0x00, 0x04, (s >> 8) as u8, s as u8];
+        if err != 0 || len > cap * 4 || len < 6 || out[at..at + 6] != header {
+            if std::env::var_os("BLUECOMPRESS_GPU_DEBUG").is_some() {
+                eprintln!("bluecompress: GPU slice {s} left to the CPU (code {err})");
+            }
             return None;
         }
-        let res: Vec<u32> = {
-            let m = read_res.slice(..).get_mapped_range().ok()?;
-            m.as_chunks::<4>().0.iter().map(|c| u32::from_le_bytes(*c)).collect()
-        };
-        let out = read_out.slice(..).get_mapped_range().ok()?;
-        let mut coded =
-            Coded { slices: Vec::with_capacity(l.slices), ranks: Vec::with_capacity(n), requantized: 0, rank_sum: 0 };
-        for s in 0..l.slices {
-            let (len, err) = (res[4 * s] as usize, res[4 * s + 1]);
-            let at = s * cap * 4;
-            let header = [0xff, 0x20, 0x00, 0x04, (s >> 8) as u8, s as u8];
-            if err != 0 || len > cap * 4 || len < 6 || out[at..at + 6] != header {
-                if std::env::var_os("BLUECOMPRESS_GPU_DEBUG").is_some() {
-                    eprintln!("bluecompress: GPU slice {s} left to the CPU (code {err})");
-                }
-                return None;
-            }
-            coded.slices.push(out[at..at + len].to_vec());
-            coded.requantized += res[4 * s + 2] as u64;
-            coded.rank_sum += res[4 * s + 3] as i64;
-        }
-        coded.ranks.extend(res[4 * l.slices..4 * l.slices + n].iter().map(|&r| r as i32));
-        FRAMES.fetch_add(1, Ordering::Relaxed);
-        Some(coded)
-    })();
-    let failed = pollster::block_on(scope.pop()).is_some();
-    let (m, cv) = &e.slots;
-    *m.lock().unwrap() -= 1;
-    cv.notify_one();
-    result.filter(|_| !failed)
+        coded.slices.push(out[at..at + len].to_vec());
+        coded.requantized += res(4 * s + 2) as u64;
+        coded.rank_sum += res(4 * s + 3) as i64;
+    }
+    coded.ranks.extend((0..n).map(|i| res(4 * p.slices + i) as i32));
+    FRAMES.fetch_add(1, Ordering::Relaxed);
+    Some(coded)
 }

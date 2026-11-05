@@ -128,8 +128,11 @@ square-root companding transfer curve. Blue Compressor:
   transformed, so there is no generation loss beyond the chosen quantization. With a bpp
   target, the rate controlled pass (decode, rank search and encode of every precinct) runs
   on the GPU through wgpu: Metal on macOS, Vulkan or DX12 on Windows and Linux, one
-  workgroup per slice. It writes exactly the bytes the CPU would; a frame the GPU path does
-  not handle, or a machine without a usable GPU, uses the CPU. `--backend cpu` or
+  workgroup per slice, with the frames of all workers batched into one dispatch on kept
+  buffers. When enough frames already wait for the GPU, the next is coded on the CPU at
+  the same time (`BLUECOMPRESS_GPU_ONLY=1` turns that off). Every frame has exactly the
+  bytes the CPU would write; a frame the GPU path does not handle, or a machine without a
+  usable GPU, uses the CPU. `--backend cpu` or
   `BLUECOMPRESS_NO_GPU=1` keeps it on the CPU, and `BLUECOMPRESS_GPU_VERIFY=1` codes every
   GPU frame on the CPU too, reports any difference and keeps the CPU's.
 * **6K / 4K**: decodes fully to the Bayer mosaic, then converts to linear raw. It
