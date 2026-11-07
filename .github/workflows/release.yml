@@ -21,7 +21,7 @@ jobs:
   create-release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Create draft release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -33,6 +33,10 @@ jobs:
     needs: create-release
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+      id-token: write # build provenance attestations
+      attestations: write
     strategy:
       fail-fast: false
       matrix:
@@ -44,13 +48,14 @@ jobs:
           - { name: Windows x64, os: windows-latest, target: x86_64-pc-windows-msvc, arch: x64, ffmpeg: "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-win64-gpl-8.1.zip" }
           - { name: Linux x64, os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, arch: x64, ffmpeg: "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-linux64-gpl-8.1.tar.xz" }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ env.TAG }}
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
+          toolchain: stable
           targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: ${{ matrix.target }}
       - name: Linux dependencies
@@ -59,7 +64,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
       - name: Install Tauri CLI
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2
         with:
           tool: tauri-cli@2
 
@@ -168,6 +173,14 @@ jobs:
           fi
           ls -l "$out"
 
+      # Signed build provenance for every file this job uploads, so anyone can check that a
+      # download was built by this workflow from this repository:
+      #   gh attestation verify <file> --repo redn3/blue-compressor
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/*
+
       - name: Upload to release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -181,7 +194,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ env.TAG }}
       - name: Write and upload latest.json
