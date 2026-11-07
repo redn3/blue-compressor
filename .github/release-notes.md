@@ -1,3 +1,9 @@
+**What's new in 1.0.0**
+- **Blue Compressor 1.0**: the first official release. The beta label and the first-launch beta notice are gone.
+- A new README with a quick overview, download buttons and the main features.
+- Release builds are now published as full releases.
+- Updates from 0.3.x arrive through the in-app updater as usual.
+
 **What's new in 0.3.6**
 - **Faster GPU compression**: at the original resolution with a bits per pixel target, the frames of all workers are now coded together in one GPU batch on reused buffers, and when the GPU is fully busy the next frame is coded on the CPU at the same time. About 1.3x faster on an M4 Max in our synthetic 6K tests. The output is still exactly the same file the CPU writes. This also speeds up conversions with a bpp target.
 - Thanks to DizzyKolb for the GPU ideas in issue #3.
@@ -114,7 +120,7 @@
 **What's new in 0.1.1**
 - Fixed: queue rows no longer get squashed when a large batch of clips is added (for example a few hundred). Rows keep their full height and the list scrolls, so you can remove or change settings for any clip.
 
-Early, experimental build. Tested on one Nikon Z8 (N-RAW) clip and one Nikon ZR (R3D NE) clip on macOS (Apple silicon). Windows and Linux builds and the CUDA backend are untested. Keep your originals until you have checked the outputs.
+Keep your camera originals until you have checked the compressed copies in your own workflow.
 
 **Downloads**
 - macOS: `.dmg` (Apple silicon `arm64` or Intel `x64`)

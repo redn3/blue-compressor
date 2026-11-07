@@ -107,19 +107,6 @@ svg .fill { fill: currentColor; stroke: none; }
 .brand-text { display: flex; flex-direction: column; line-height: 1.2; }
 .brand-name { font-weight: 650; font-size: 13.5px; letter-spacing: -0.01em; }
 .brand-sub { color: var(--text-3); font-size: 11.5px; }
-.beta-tag {
-  display: inline-block;
-  margin-left: 6px;
-  padding: 0 5px;
-  border-radius: 4px;
-  border: 1px solid rgba(251, 191, 36, 0.4);
-  color: var(--warn);
-  font-size: 9.5px;
-  font-weight: 650;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  vertical-align: 1px;
-}
 .titlebar-right { display: flex; gap: 8px; }
 
 .chip {
@@ -929,23 +916,7 @@ body.per-clip .job-settings { display: flex; }
 .link-btn:disabled { opacity: 0.4; }
 .job.flash { border-color: var(--accent-ring); background: var(--surface-2); }
 
-/* Beta note at the foot of the settings panel */
-.beta-note {
-  display: flex;
-  gap: 9px;
-  margin-top: auto;
-  padding: 10px 12px;
-  border-radius: 10px;
-  border: 1px solid rgba(251, 191, 36, 0.22);
-  background: rgba(251, 191, 36, 0.06);
-  color: var(--text-2);
-  font-size: 11.5px;
-  line-height: 1.45;
-}
-.beta-note svg { color: var(--warn); margin-top: 2px; }
-.beta-note b { color: var(--text); font-weight: 600; }
 .modal-card .btn.primary { height: 34px; padding: 0 18px; }
-#beta-modal .modal-card { width: 420px; }
 .job.done .job-settings, .job.failed .job-settings, .job.cancelled .job-settings { display: none; }
 .seg.inactive button.active { background: transparent; box-shadow: 0 0 0 1px var(--border) inset; color: var(--text-2); }
 .seg.inactive { opacity: 0.6; }

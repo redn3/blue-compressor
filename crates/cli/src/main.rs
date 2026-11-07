@@ -212,7 +212,7 @@ usage:
   bluecompress serve [--listen 0.0.0.0:9847] [options]
   bluecompress probe [--json] <clip|folder>...
   bluecompress backends [--json]
-  bluecompress version
+  bluecompress version (or --version)
   bluecompress [options] <clip> <output file>
 
 options:
@@ -1407,6 +1407,10 @@ fn main() -> ExitCode {
         match a.as_str() {
             "-h" | "--help" => {
                 print!("{}", usage());
+                return ExitCode::SUCCESS;
+            }
+            "-V" | "--version" => {
+                println!("bluecompress {}", bluecompress::VERSION);
                 return ExitCode::SUCCESS;
             }
             "-q" | "--quality" => match it.next().and_then(|v| parse_quality(&v)) {

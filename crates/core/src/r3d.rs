@@ -39,7 +39,7 @@ pub const NEV_FOLDER: &str = "N-RAW";
 /// ISO 800) the N-RAW original renders about half a stop brighter than the R3D NE rewrap.
 pub const ZR_EXPOSURE_EV: f64 = 0.5;
 /// RMD exposure offset for other cameras (no measurements yet; the ZR value is the
-/// starting point). TODO: check against real Z8, Z9 and Z6III clips.
+/// starting point). Not yet checked against real Z8, Z9 and Z6III clips.
 pub const OTHER_EXPOSURE_EV: f64 = 0.5;
 
 /// Exposure offset for a camera model. The model string may carry any case, padding or

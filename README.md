@@ -1,4 +1,42 @@
-# Blue Compressor
+<p align="center"><img src="app/icons/AppIcon-1024.png" width="112" alt="Blue Compressor icon"></p>
+
+<h1 align="center">Blue Compressor</h1>
+
+<p align="center"><b>Smaller RAW video files, with no visible quality loss.</b></p>
+
+<p align="center">
+  <a href="https://github.com/redn3/blue-compressor/releases/latest"><img src="https://img.shields.io/github/v/release/redn3/blue-compressor?label=release&color=2f6fed" alt="Latest release"></a>
+  <a href="https://github.com/redn3/blue-compressor/releases"><img src="https://img.shields.io/github/downloads/redn3/blue-compressor/total?color=2f6fed" alt="Downloads"></a>
+  <img src="https://img.shields.io/badge/platforms-macOS%20%7C%20Windows%20%7C%20Linux%20%7C%20Docker-555" alt="macOS, Windows, Linux and Docker">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-555" alt="Apache 2.0 license"></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/redn3/blue-compressor/releases/download/v1.0.0/Blue-Compressor_1.0.0_macOS_arm64.dmg"><img src="https://img.shields.io/badge/Download-Mac%20(Apple%20silicon)-2f6fed?style=for-the-badge&logo=apple" alt="Download for Mac with Apple silicon"></a>
+  <a href="https://github.com/redn3/blue-compressor/releases/download/v1.0.0/Blue-Compressor_1.0.0_Windows_x64-setup.exe"><img src="https://img.shields.io/badge/Download-Windows-2f6fed?style=for-the-badge&logo=windows" alt="Download for Windows"></a>
+  <a href="https://github.com/redn3/blue-compressor/releases/download/v1.0.0/Blue-Compressor_1.0.0_Linux_x64.AppImage"><img src="https://img.shields.io/badge/Download-Linux-2f6fed?style=for-the-badge&logo=linux&logoColor=white" alt="Download for Linux"></a>
+</p>
+
+Blue Compressor shrinks Nikon N-RAW and R3D NE clips while they stay raw: the Bayer data,
+metadata, timecode and audio are kept, and the output opens in the same software as the
+camera originals. It runs on the GPU (Metal, Vulkan or DX12) with an exact CPU fallback, on
+macOS, Windows, Linux and Docker / Synology NAS, and it is free and open source.
+
+**Used by thousands of filmmakers, already saving hundreds of terabytes a day.**
+
+![Blue Compressor desktop app](docs/screenshot.png)
+
+### Highlights
+
+- **Smaller files, same picture**: pick a bits per pixel target or a quick preset (Lossless, Light, Medium, Strong); every frame is fitted to the size you choose.
+- **Lossless mode**: an identical picture, only a little smaller.
+- **GPU accelerated**: compression and Develop run on Metal, Vulkan or DX12, with byte-identical CPU output as the fallback.
+- **Convert between formats**: N-RAW and R3D NE both ways, losslessly, and ProRes RAW to either.
+- **Downscale to 6K or 4K** while staying raw.
+- **Develop tab**: white balance, exposure, tone, noise reduction, LUTs, de-squeeze and slow motion, exported to 10-bit HEVC.
+- **Built for big batches**: drag and drop folders, pause and resume, safe resumable output, a watch folder on a NAS.
+- **Everywhere you work**: desktop app, command line tool, C API, and a Docker Web UI.
+- **14 languages** and automatic, signed updates.
 
 ## How this is built
 
@@ -6,19 +44,19 @@ Blue Compressor was built, and is maintained, by AI agents. It is 100% vibecoded
 
 ## Download
 
-**[Latest release (v0.3.6 beta)](https://github.com/redn3/blue-compressor/releases/tag/v0.3.6)**. Pick the file for your computer:
+**[Latest release (v1.0.0)](https://github.com/redn3/blue-compressor/releases/tag/v1.0.0)**. Pick the file for your computer:
 
 | Your computer | Download |
 | --- | --- |
-| Mac with Apple silicon (M1, M2, M3, M4, M5) | [Blue-Compressor_0.3.6_macOS_arm64.dmg](https://github.com/redn3/blue-compressor/releases/download/v0.3.6/Blue-Compressor_0.3.6_macOS_arm64.dmg) |
-| Mac with Intel processor | [Blue-Compressor_0.3.6_macOS_x64.dmg](https://github.com/redn3/blue-compressor/releases/download/v0.3.6/Blue-Compressor_0.3.6_macOS_x64.dmg) |
-| Windows 10 or 11 | [Blue-Compressor_0.3.6_Windows_x64-setup.exe](https://github.com/redn3/blue-compressor/releases/download/v0.3.6/Blue-Compressor_0.3.6_Windows_x64-setup.exe) |
-| Linux (any distribution) | [Blue-Compressor_0.3.6_Linux_x64.AppImage](https://github.com/redn3/blue-compressor/releases/download/v0.3.6/Blue-Compressor_0.3.6_Linux_x64.AppImage) |
+| Mac with Apple silicon (M1, M2, M3, M4, M5) | [Blue-Compressor_1.0.0_macOS_arm64.dmg](https://github.com/redn3/blue-compressor/releases/download/v1.0.0/Blue-Compressor_1.0.0_macOS_arm64.dmg) |
+| Mac with Intel processor | [Blue-Compressor_1.0.0_macOS_x64.dmg](https://github.com/redn3/blue-compressor/releases/download/v1.0.0/Blue-Compressor_1.0.0_macOS_x64.dmg) |
+| Windows 10 or 11 | [Blue-Compressor_1.0.0_Windows_x64-setup.exe](https://github.com/redn3/blue-compressor/releases/download/v1.0.0/Blue-Compressor_1.0.0_Windows_x64-setup.exe) |
+| Linux (any distribution) | [Blue-Compressor_1.0.0_Linux_x64.AppImage](https://github.com/redn3/blue-compressor/releases/download/v1.0.0/Blue-Compressor_1.0.0_Linux_x64.AppImage) |
 | Docker / Synology NAS (`amd64` and `arm64`) | `docker pull ghcr.io/redn3/blue-compressor:latest` ([setup guide](#docker-and-synology-nas)) |
 
 Not sure which Mac you have? Open the Apple menu and choose About This Mac. If it says "Chip", get Apple silicon; if it says "Processor" with Intel, get Intel.
 
-Other formats (Windows `.msi`, Linux `.deb` and `.rpm`) and the command line tool are on the [release page](https://github.com/redn3/blue-compressor/releases/tag/v0.3.6).
+Other formats (Windows `.msi`, Linux `.deb` and `.rpm`) and the command line tool are on the [release page](https://github.com/redn3/blue-compressor/releases/tag/v1.0.0).
 
 Blue Compressor makes Nikon **N-RAW** (`.NEV`, e.g. Z8, Z9, Z6III) and **R3D NE**
 (`.R3D`, e.g. Nikon ZR) clips smaller. It also converts Nikon **ProRes RAW** (`.MOV`)
@@ -53,7 +91,7 @@ settings.
 ### Updates
 
 The desktop app checks for a new version a few seconds after it starts and once a day while
-it is open. When there is one it asks **Blue Compressor 0.2.1 is available. Update now?**
+it is open. When there is one it asks **Blue Compressor 1.1.0 is available. Update now?**
 with a few lines on what is new: **Update** downloads it, checks its signature, installs it
 and reopens the app; **Later** asks again next time; **Skip this version** waits for the
 one after. It never updates in the middle of a batch: while the queue is compressing it
@@ -72,11 +110,8 @@ hours and the Web UI shows a banner with the steps to update the container (see
 (`github.com/redn3/blue-compressor/releases/latest`). Nothing about you, your computer or
 your clips is sent, and when you are offline the check simply does nothing.
 
-![Blue Compressor desktop app](docs/screenshot.png)
-
-> **Status: early and experimental.** It has been tested on one Z8 clip and one ZR clip,
-> on macOS (Apple silicon). Keep your originals until you have checked the outputs in
-> your own pipeline.
+> **Tip:** keep your camera originals until you have checked the compressed copies in
+> your own workflow.
 
 ## What it does
 

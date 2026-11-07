@@ -70,7 +70,6 @@ const RESOLUTION_NOTES = {
   get "4k"() { return tr("3840 × 2160 active (UHD). The raw image is scaled down per colour, then compressed again."); },
 };
 const RES_LABEL = { get original() { return tr("Original"); }, "6k": "6K", get "4k"() { return tr("4K"); } };
-const BETA_ACK = "beta-ack-1";
 
 // Short name of a setting, as the output folders are named: "1.2bpp", "Lossless 4K".
 const variantName = (c, r) =>
@@ -2100,13 +2099,6 @@ async function init() {
   $("btn-pause").addEventListener("click", togglePause);
   $("btn-go").addEventListener("click", () => (running ? stop() : start()));
   $("quit-cancel").addEventListener("click", () => $("quit-modal").classList.remove("show"));
-  $("beta-ok").addEventListener("click", () => {
-    $("beta-modal").classList.remove("show");
-    try { localStorage.setItem(BETA_ACK, "1"); } catch { /* private mode */ }
-  });
-  let acked = false;
-  try { acked = localStorage.getItem(BETA_ACK) === "1"; } catch { /* private mode */ }
-  if (!acked) $("beta-modal").classList.add("show");
   $("quit-confirm").addEventListener("click", () => api.invoke("confirm_quit"));
   document.addEventListener("keydown", (e) => {
     const mod = e.metaKey || e.ctrlKey;
