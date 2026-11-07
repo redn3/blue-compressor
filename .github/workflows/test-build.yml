@@ -20,8 +20,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: macOS Apple silicon, target: aarch64-apple-darwin, arch: arm64, ffmpeg: "https://ffmpeg.martin-riedl.de/download/macos/arm64/1789931890_9.0.2/ffmpeg.zip" }
-          - { name: macOS Intel, target: x86_64-apple-darwin, arch: x64, ffmpeg: "https://ffmpeg.martin-riedl.de/download/macos/amd64/1789931006_9.0.2/ffmpeg.zip" }
+          - { name: macOS Apple silicon, target: aarch64-apple-darwin, arch: arm64, ffmpeg: "https://ffmpeg.martin-riedl.de/download/macos/arm64/1789931890_9.0.2/ffmpeg.zip", ffmpeg_sha256: "c8ed4c4e6978a03c485edbfe4e0a5dc2380f8a30bba5150531b31b094492d924" }
+          - { name: macOS Intel, target: x86_64-apple-darwin, arch: x64, ffmpeg: "https://ffmpeg.martin-riedl.de/download/macos/amd64/1789931006_9.0.2/ffmpeg.zip", ffmpeg_sha256: "7c6b4125b191cbf773832dc51f424cf2b6bb7da43007d1e066f95909e47cacd4" }
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -41,6 +41,7 @@ jobs:
           set -euo pipefail
           mkdir -p app/src-tauri/bin
           curl -fsSL -o /tmp/ffmpeg.zip "${{ matrix.ffmpeg }}"
+          echo "${{ matrix.ffmpeg_sha256 }}  /tmp/ffmpeg.zip" | shasum -a 256 -c -
           unzip -o -q /tmp/ffmpeg.zip -d /tmp/ffmpeg
           mv /tmp/ffmpeg/ffmpeg app/src-tauri/bin/ffmpeg
           chmod +x app/src-tauri/bin/ffmpeg
