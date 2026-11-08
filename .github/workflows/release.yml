@@ -37,12 +37,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: macOS Apple silicon, os: macos-latest, target: aarch64-apple-darwin, arch: arm64, ffmpeg: "https://ffmpeg.martin-riedl.de/download/macos/arm64/1789931890_9.0.2/ffmpeg.zip" }
-          - { name: macOS Intel, os: macos-latest, target: x86_64-apple-darwin, arch: x64, ffmpeg: "https://ffmpeg.martin-riedl.de/download/macos/amd64/1789931006_9.0.2/ffmpeg.zip" }
+          - { name: macOS Apple silicon, os: macos-latest, target: aarch64-apple-darwin, arch: arm64, ffmpeg: "https://ffmpeg.martin-riedl.de/download/macos/arm64/1789931890_9.0.2/ffmpeg.zip", ffmpeg_sha256: "c8ed4c4e6978a03c485edbfe4e0a5dc2380f8a30bba5150531b31b094492d924" }
+          - { name: macOS Intel, os: macos-latest, target: x86_64-apple-darwin, arch: x64, ffmpeg: "https://ffmpeg.martin-riedl.de/download/macos/amd64/1789931006_9.0.2/ffmpeg.zip", ffmpeg_sha256: "7c6b4125b191cbf773832dc51f424cf2b6bb7da43007d1e066f95909e47cacd4" }
           # Windows and Linux: static GPL ffmpeg 8.1 builds with NVENC, AMF, QSV (and VAAPI on
           # Linux) next to libx265, so Develop exports use the GPU encoder when there is one.
-          - { name: Windows x64, os: windows-latest, target: x86_64-pc-windows-msvc, arch: x64, ffmpeg: "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-win64-gpl-8.1.zip" }
-          - { name: Linux x64, os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, arch: x64, ffmpeg: "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-linux64-gpl-8.1.tar.xz" }
+          # Each download is pinned to a dated build and checked against its sha256, so a
+          # changed file on the download server fails the build instead of being bundled.
+          - { name: Windows x64, os: windows-latest, target: x86_64-pc-windows-msvc, arch: x64, ffmpeg: "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-11-07-12-47/ffmpeg-n8.1.3-34-ga35157abb9-win64-gpl-8.1.zip", ffmpeg_sha256: "06bfc0069beb764b75f9eed956acc90c4d651bf06aed340fbf0708d10a6f76dc" }
+          - { name: Linux x64, os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, arch: x64, ffmpeg: "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-11-07-12-47/ffmpeg-n8.1.3-34-ga35157abb9-linux64-gpl-8.1.tar.xz", ffmpeg_sha256: "d9e9ab7ecc262a4d6cdb334b17af16ce227a9ed44d052f194ad0deca1a29e037" }
     steps:
       - uses: actions/checkout@v4
         with:
@@ -71,6 +73,7 @@ jobs:
           set -euo pipefail
           mkdir -p app/src-tauri/bin
           curl -fsSL -o /tmp/ffmpeg.zip "${{ matrix.ffmpeg }}"
+          echo "${{ matrix.ffmpeg_sha256 }}  /tmp/ffmpeg.zip" | shasum -a 256 -c -
           unzip -o -q /tmp/ffmpeg.zip -d /tmp/ffmpeg
           mv /tmp/ffmpeg/ffmpeg app/src-tauri/bin/ffmpeg
           chmod +x app/src-tauri/bin/ffmpeg
@@ -84,12 +87,14 @@ jobs:
           mkdir -p app/src-tauri/bin /tmp/ffmpeg
           if [ "${{ runner.os }}" = "Windows" ]; then
             curl -fsSL -o /tmp/ffmpeg.zip "${{ matrix.ffmpeg }}"
+            echo "${{ matrix.ffmpeg_sha256 }}  /tmp/ffmpeg.zip" | sha256sum -c -
             unzip -o -q /tmp/ffmpeg.zip -d /tmp/ffmpeg
             cp /tmp/ffmpeg/*/bin/ffmpeg.exe app/src-tauri/bin/ffmpeg.exe
             ff=app/src-tauri/bin/ffmpeg.exe
             want="hevc_nvenc hevc_amf hevc_qsv libx265"
           else
             curl -fsSL -o /tmp/ffmpeg.tar.xz "${{ matrix.ffmpeg }}"
+            echo "${{ matrix.ffmpeg_sha256 }}  /tmp/ffmpeg.tar.xz" | sha256sum -c -
             tar xf /tmp/ffmpeg.tar.xz -C /tmp/ffmpeg
             cp /tmp/ffmpeg/*/bin/ffmpeg app/src-tauri/bin/ffmpeg
             chmod +x app/src-tauri/bin/ffmpeg
