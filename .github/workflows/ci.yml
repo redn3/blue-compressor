@@ -25,6 +25,9 @@ jobs:
       - run: cargo fmt --all --check
       - name: Every language has every UI string
         run: node app/check-locales.mjs
+      - name: Release workflow checks
+        if: runner.os == 'Linux'
+        run: python3 .github/scripts/test_release_hardening.py
       - run: cargo clippy --release -p bluecompress -p bluecompress-cli --all-targets
       - run: cargo test --release -p bluecompress
       - name: CUDA and OpenCL backends compile

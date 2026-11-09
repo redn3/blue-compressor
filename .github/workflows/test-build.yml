@@ -2,8 +2,9 @@ name: Test build
 
 # Test builds of the macOS app from a feature branch, uploaded as Actions artifacts only.
 # This workflow never creates a tag or a release. Builds from feature/updater read a test
-# update manifest (the updater-test-1 pre-release) instead of the real one, and include the
-# signed .app.tar.gz the updater installs.
+# update manifest (the updater-test-1 pre-release) instead of the real one. Updater archives
+# are signed with a throwaway key created in the job. The production updater key is not used.
+# macOS signing stays ad-hoc.
 on:
   push:
     branches: ["feature/advanced-bpp", "feature/updater", "feature/proxies", "feature/r3d", "feature/develop"]
@@ -33,7 +34,7 @@ jobs:
       - name: Install Tauri CLI
         uses: taiki-e/install-action@v2
         with:
-          tool: tauri-cli@2
+          tool: tauri-cli@2.12.4
       # The proxy encoder: a static ffmpeg 9.0.2 (Martin Riedl's build server, GPL, with
       # VideoToolbox and libx265) bundled in Contents/Resources for test builds.
       - name: Fetch ffmpeg for proxies
@@ -50,10 +51,16 @@ jobs:
       - name: Build desktop app
         working-directory: app/src-tauri
         env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           BC_UPDATER_TEST_ENDPOINT: ${{ github.ref_name == 'feature/updater' && 'https://github.com/redn3/blue-compressor/releases/download/updater-test-1/latest.json' || '' }}
-        run: cargo tauri build --target ${{ matrix.target }} --config '{"bundle":{"createUpdaterArtifacts":true,"resources":{"bin/ffmpeg":"ffmpeg"}}}'
+        run: |
+          set -euo pipefail
+          key="${RUNNER_TEMP}/blue-compressor-ephemeral-updater.key"
+          cleanup() { rm -f "$key" "${key}.pub"; }
+          trap cleanup EXIT
+          cargo tauri signer generate --ci --password build --force --write-keys "$key"
+          export TAURI_SIGNING_PRIVATE_KEY="$key"
+          export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=build
+          cargo tauri build --target ${{ matrix.target }} --config '{"bundle":{"createUpdaterArtifacts":true,"resources":{"bin/ffmpeg":"ffmpeg"}}}'
       - name: Collect the dmg
         run: |
           set -euo pipefail

@@ -1,65 +1,88 @@
 name: Release
 
-# Push a tag like v0.1.0 (or run manually) to build installers and command line tools for
-# macOS (Apple silicon and Intel), Windows and Linux and attach them to a GitHub release.
+# Tag push (v1.0.1) or a manual run builds installers and the command line tool for
+# macOS (Apple silicon and Intel), Windows and Linux. The build jobs do not receive the
+# updater signing key. Signatures are created only in the sign job, which uses the
+# protected "release" environment and must be approved before it starts.
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag (e.g. v0.1.0); it must already exist"
+        description: "Release tag (e.g. v1.0.1); it must already exist"
         required: true
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   TAG: ${{ github.event.inputs.tag || github.ref_name }}
 
 jobs:
-  create-release:
+  # Fail before any signing or publishing if the release environment does not
+  # require a reviewer. This job has no secrets and no environment of its own,
+  # so a missing rule stops the run instead of creating an open environment.
+  release-guard:
+    name: Release environment
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.TAG }}
+          persist-credentials: false
+      - name: Require reviewers on the release environment
+        run: python3 .github/scripts/release_environment.py
+
+  create-release:
+    needs: release-guard
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.TAG }}
+          persist-credentials: false
       - name: Create draft release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --draft \
             --title "Blue Compressor ${TAG#v}" --notes-file .github/release-notes.md
 
   build:
-    needs: create-release
+    needs: release-guard
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     permissions:
-      contents: write
-      id-token: write # build provenance attestations
+      contents: read
+      actions: write
+      id-token: write
       attestations: write
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { name: macOS Apple silicon, os: macos-latest, target: aarch64-apple-darwin, arch: arm64, ffmpeg: "https://ffmpeg.martin-riedl.de/download/macos/arm64/1789931890_9.0.2/ffmpeg.zip", ffmpeg_sha256: "c8ed4c4e6978a03c485edbfe4e0a5dc2380f8a30bba5150531b31b094492d924" }
-          - { name: macOS Intel, os: macos-latest, target: x86_64-apple-darwin, arch: x64, ffmpeg: "https://ffmpeg.martin-riedl.de/download/macos/amd64/1789931006_9.0.2/ffmpeg.zip", ffmpeg_sha256: "7c6b4125b191cbf773832dc51f424cf2b6bb7da43007d1e066f95909e47cacd4" }
+          - { name: macOS Apple silicon, slug: macos-arm64, os: macos-latest, target: aarch64-apple-darwin, arch: arm64, ffmpeg: "https://ffmpeg.martin-riedl.de/download/macos/arm64/1789931890_9.0.2/ffmpeg.zip", ffmpeg_sha256: "c8ed4c4e6978a03c485edbfe4e0a5dc2380f8a30bba5150531b31b094492d924" }
+          - { name: macOS Intel, slug: macos-x64, os: macos-latest, target: x86_64-apple-darwin, arch: x64, ffmpeg: "https://ffmpeg.martin-riedl.de/download/macos/amd64/1789931006_9.0.2/ffmpeg.zip", ffmpeg_sha256: "7c6b4125b191cbf773832dc51f424cf2b6bb7da43007d1e066f95909e47cacd4" }
           # Windows and Linux: static GPL ffmpeg 8.1 builds with NVENC, AMF, QSV (and VAAPI on
           # Linux) next to libx265, so Develop exports use the GPU encoder when there is one.
           # Each download is pinned to a dated build and checked against its sha256, so a
           # changed file on the download server fails the build instead of being bundled.
-          - { name: Windows x64, os: windows-latest, target: x86_64-pc-windows-msvc, arch: x64, ffmpeg: "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-11-07-12-47/ffmpeg-n8.1.3-34-ga35157abb9-win64-gpl-8.1.zip", ffmpeg_sha256: "06bfc0069beb764b75f9eed956acc90c4d651bf06aed340fbf0708d10a6f76dc" }
-          - { name: Linux x64, os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, arch: x64, ffmpeg: "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-11-07-12-47/ffmpeg-n8.1.3-34-ga35157abb9-linux64-gpl-8.1.tar.xz", ffmpeg_sha256: "d9e9ab7ecc262a4d6cdb334b17af16ce227a9ed44d052f194ad0deca1a29e037" }
+          - { name: Windows x64, slug: windows-x64, os: windows-latest, target: x86_64-pc-windows-msvc, arch: x64, ffmpeg: "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-11-07-12-47/ffmpeg-n8.1.3-34-ga35157abb9-win64-gpl-8.1.zip", ffmpeg_sha256: "06bfc0069beb764b75f9eed956acc90c4d651bf06aed340fbf0708d10a6f76dc" }
+          - { name: Linux x64, slug: linux-x64, os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, arch: x64, ffmpeg: "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-11-07-12-47/ffmpeg-n8.1.3-34-ga35157abb9-linux64-gpl-8.1.tar.xz", ffmpeg_sha256: "d9e9ab7ecc262a4d6cdb334b17af16ce227a9ed44d052f194ad0deca1a29e037" }
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ env.TAG }}
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: stable
           targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        with:
-          key: ${{ matrix.target }}
+      # No restored cargo registry or target directory. The job downloads crates itself.
       - name: Linux dependencies
         if: runner.os == 'Linux'
         run: |
@@ -68,7 +91,7 @@ jobs:
       - name: Install Tauri CLI
         uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2
         with:
-          tool: tauri-cli@2
+          tool: tauri-cli@2.12.4
 
       # The Develop export encoder on macOS: a static ffmpeg 9.0.2 (GPL, see NOTICE) bundled
       # in Contents/Resources, as in the test builds.
@@ -112,12 +135,17 @@ jobs:
       - name: Build desktop app
         working-directory: app/src-tauri
         shell: bash
-        # Updater artifacts: the macOS .app.tar.gz and a .sig next to every installer the app
-        # can update itself from, signed with the updater key (see tauri.conf.json).
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        # Updater archives are created here. Tauri refuses to finish that step without some
+        # signing key, so the job makes a throwaway key and deletes it, along with every
+        # signature it wrote. Those signatures are not the release signatures.
         run: |
+          set -euo pipefail
+          key="${RUNNER_TEMP}/blue-compressor-ephemeral-updater.key"
+          cleanup() { rm -f "$key" "${key}.pub"; }
+          trap cleanup EXIT
+          cargo tauri signer generate --ci --password build --force --write-keys "$key"
+          export TAURI_SIGNING_PRIVATE_KEY="$key"
+          export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=build
           if [ "${{ runner.os }}" = "macOS" ]; then
             cargo tauri build --target ${{ matrix.target }} --config '{"bundle":{"createUpdaterArtifacts":true,"resources":{"bin/ffmpeg":"ffmpeg"}}}'
           elif [ "${{ runner.os }}" = "Windows" ]; then
@@ -129,11 +157,11 @@ jobs:
       - name: Build command line tool
         shell: bash
         run: |
-          features=""
           # The untested CUDA and OpenCL (AMD) backends are included on Windows and Linux;
           # they stay off unless a matching GPU driver is present.
-          if [ "${{ runner.os }}" != "macOS" ]; then features="--features cuda,opencl"; fi
-          cargo build --release -p bluecompress-cli --target ${{ matrix.target }} $features
+          args=()
+          if [ "${{ runner.os }}" != "macOS" ]; then args+=(--features "cuda,opencl"); fi
+          cargo build --release -p bluecompress-cli --target "${{ matrix.target }}" "${args[@]}"
 
       - name: Collect artifacts
         shell: bash
@@ -146,21 +174,19 @@ jobs:
             macOS)
               cp "$b"/dmg/*.dmg "$out/Blue-Compressor_${v}_macOS_${{ matrix.arch }}.dmg"
               cp "$b"/macos/*.app.tar.gz "$out/Blue-Compressor_${v}_macOS_${{ matrix.arch }}.app.tar.gz"
-              cp "$b"/macos/*.app.tar.gz.sig "$out/Blue-Compressor_${v}_macOS_${{ matrix.arch }}.app.tar.gz.sig"
               ;;
             Windows)
               cp "$b"/nsis/*.exe "$out/Blue-Compressor_${v}_Windows_${{ matrix.arch }}-setup.exe"
-              cp "$b"/nsis/*.exe.sig "$out/Blue-Compressor_${v}_Windows_${{ matrix.arch }}-setup.exe.sig"
               cp "$b"/msi/*.msi "$out/Blue-Compressor_${v}_Windows_${{ matrix.arch }}.msi"
-              cp "$b"/msi/*.msi.sig "$out/Blue-Compressor_${v}_Windows_${{ matrix.arch }}.msi.sig"
               ;;
             Linux)
               cp "$b"/appimage/*.AppImage "$out/Blue-Compressor_${v}_Linux_${{ matrix.arch }}.AppImage"
-              cp "$b"/appimage/*.AppImage.sig "$out/Blue-Compressor_${v}_Linux_${{ matrix.arch }}.AppImage.sig"
               cp "$b"/deb/*.deb "$out/Blue-Compressor_${v}_Linux_${{ matrix.arch }}.deb"
               cp "$b"/rpm/*.rpm "$out/Blue-Compressor_${v}_Linux_${{ matrix.arch }}.rpm"
               ;;
           esac
+          # Throwaway signatures from the build must not be uploaded.
+          rm -f "$out"/*.sig
           # Command line tool, library and C header.
           os="${{ runner.os }}"
           cli="bluecompress-cli_${v}_${os}_${{ matrix.arch }}"
@@ -176,39 +202,194 @@ jobs:
             cp "$r"/libbluecompress.{dylib,so,a} "$cli/" 2>/dev/null || true
             tar czf "$out/$cli.tar.gz" "$cli"
           fi
+          find "$out" -name '*.sig' -delete
+          test -z "$(find "$out" -name '*.sig' -print)"
           ls -l "$out"
 
-      # Signed build provenance for every file this job uploads, so anyone can check that a
-      # download was built by this workflow from this repository:
-      #   gh attestation verify <file> --repo redn3/blue-compressor
+      # Provenance for the built files only. Signatures do not exist yet.
       - name: Attest build provenance
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: dist/*
 
-      - name: Upload to release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: gh release upload "$TAG" dist/* --clobber
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: bundle-${{ matrix.slug }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
 
-  # latest.json for the in-app updater, from the signatures the builds uploaded. The app
-  # reads it from the newest published release, so a draft changes nothing until it is
-  # published.
-  updater-manifest:
-    needs: build
+  # Reads the built archives and writes updater signatures. It does not check out the
+  # repository, run cargo, or execute anything from the build artifacts. The updater
+  # key is available only to the sign step.
+  sign:
+    needs: [release-guard, build]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: release
+    permissions:
+      actions: write
+    steps:
+      - name: Install pinned Tauri CLI
+        run: |
+          set -euo pipefail
+          url="https://github.com/tauri-apps/tauri/releases/download/tauri-cli-v2.12.4/cargo-tauri-x86_64-unknown-linux-gnu.tgz"
+          dest="${RUNNER_TEMP}/cargo-tauri.tgz"
+          curl -fsSL -o "$dest" "$url"
+          echo "820ae3c7580ca637cad15f65638960ee2a96e5a491e224691c86d6f25e6c9e8a  $dest" | sha256sum -c -
+          if tar -tzf "$dest" | grep -E '(^/|(^|/)\.\.(/|$))'; then
+            echo "refusing to extract the Tauri CLI archive"
+            exit 1
+          fi
+          mkdir -p "${RUNNER_TEMP}/tauri-cli"
+          tar -xzf "$dest" -C "${RUNNER_TEMP}/tauri-cli"
+          cli="${RUNNER_TEMP}/tauri-cli/cargo-tauri"
+          chmod +x "$cli"
+          test -x "$cli"
+          test "$("$cli" --version)" = "tauri-cli 2.12.4"
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: bundle-*
+          path: unsigned
+          merge-multiple: true
+
+      - name: Sign updater artifacts
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          ver="${TAG#v}"
+          cli="${RUNNER_TEMP}/tauri-cli/cargo-tauri"
+          out="${RUNNER_TEMP}/updater-signatures"
+          rm -rf "$out"
+          mkdir -p "$out"
+          files=(
+            "unsigned/Blue-Compressor_${ver}_macOS_arm64.app.tar.gz"
+            "unsigned/Blue-Compressor_${ver}_macOS_x64.app.tar.gz"
+            "unsigned/Blue-Compressor_${ver}_Windows_x64-setup.exe"
+            "unsigned/Blue-Compressor_${ver}_Windows_x64.msi"
+            "unsigned/Blue-Compressor_${ver}_Linux_x64.AppImage"
+          )
+          for f in "${files[@]}"; do
+            if [ ! -f "$f" ] || [ -L "$f" ]; then
+              echo "updater artifact is missing: $f"
+              exit 1
+            fi
+            "$cli" signer sign --app-version "$ver" "$f" >"${RUNNER_TEMP}/sign-stdout.txt"
+            sig="${f}.sig"
+            if [ ! -f "$sig" ] || [ -L "$sig" ]; then
+              echo "signature was not written for $f"
+              exit 1
+            fi
+            python3 -c 'import base64, pathlib, sys; text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8").strip(); raw = base64.b64decode(text, validate=True);  assert raw.startswith(b"untrusted comment:"), "not a Tauri updater signature"' "$sig"
+            mv "$sig" "$out/$(basename "$sig")"
+          done
+          test "$(find "$out" -type f | wc -l)" -eq 5
+
+      - name: Upload signatures
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: updater-signatures
+          path: "${{ runner.temp }}/updater-signatures/*"
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: [release-guard, create-release, sign]
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+      actions: read
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ env.TAG }}
-      - name: Write and upload latest.json
+          persist-credentials: false
+      - name: Download build artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: bundle-*
+          path: bundles
+          merge-multiple: true
+      - name: Download signatures
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: updater-signatures
+          path: sigs
+      - name: Stage release files and write latest.json
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          mkdir -p sigs
-          gh release download "$TAG" --pattern '*.sig' --dir sigs
+          v="${TAG#v}"
+          stage="${RUNNER_TEMP}/release-upload"
+          mkdir -p "$stage"
+          bundles=(
+            "Blue-Compressor_${v}_macOS_arm64.dmg"
+            "Blue-Compressor_${v}_macOS_arm64.app.tar.gz"
+            "Blue-Compressor_${v}_macOS_x64.dmg"
+            "Blue-Compressor_${v}_macOS_x64.app.tar.gz"
+            "Blue-Compressor_${v}_Windows_x64-setup.exe"
+            "Blue-Compressor_${v}_Windows_x64.msi"
+            "Blue-Compressor_${v}_Linux_x64.AppImage"
+            "Blue-Compressor_${v}_Linux_x64.deb"
+            "Blue-Compressor_${v}_Linux_x64.rpm"
+            "bluecompress-cli_${v}_macOS_arm64.tar.gz"
+            "bluecompress-cli_${v}_macOS_x64.tar.gz"
+            "bluecompress-cli_${v}_Windows_x64.zip"
+            "bluecompress-cli_${v}_Linux_x64.tar.gz"
+          )
+          sigs=(
+            "Blue-Compressor_${v}_macOS_arm64.app.tar.gz.sig"
+            "Blue-Compressor_${v}_macOS_x64.app.tar.gz.sig"
+            "Blue-Compressor_${v}_Windows_x64-setup.exe.sig"
+            "Blue-Compressor_${v}_Windows_x64.msi.sig"
+            "Blue-Compressor_${v}_Linux_x64.AppImage.sig"
+          )
+          for name in "${bundles[@]}"; do
+            src="bundles/$name"
+            if [ ! -f "$src" ] || [ -L "$src" ]; then
+              echo "missing build artifact: $name"
+              exit 1
+            fi
+            cp -f "$src" "$stage/$name"
+          done
+          for name in "${sigs[@]}"; do
+            src="sigs/$name"
+            if [ ! -f "$src" ] || [ -L "$src" ]; then
+              echo "missing signature: $name"
+              exit 1
+            fi
+            cp -f "$src" "$stage/$name"
+          done
           python3 .github/scripts/updater-manifest.py "$TAG" \
-            "https://github.com/${{ github.repository }}/releases/download/$TAG" sigs .github/release-notes.md latest.json
-          gh release upload "$TAG" latest.json --clobber
+            "https://github.com/${{ github.repository }}/releases/download/$TAG" \
+            sigs .github/release-notes.md "${RUNNER_TEMP}/latest.json"
+          python3 -c 'import json, sys; data = json.load(open(sys.argv[1], encoding="utf-8")); assert data.get("version") == sys.argv[2], "latest.json version does not match the tag"; assert data.get("platforms"), "latest.json has no platforms"' "${RUNNER_TEMP}/latest.json" "$v"
+          cp -f "${RUNNER_TEMP}/latest.json" latest.json
+          cp -f latest.json "$stage/latest.json"
+          find "$stage" -name '*.sig' -printf '%f\n' | sort > "${RUNNER_TEMP}/staged-sigs.txt"
+          printf '%s\n' "${sigs[@]}" | sort > "${RUNNER_TEMP}/expected-sigs.txt"
+          cmp "${RUNNER_TEMP}/staged-sigs.txt" "${RUNNER_TEMP}/expected-sigs.txt"
+          ls -l "$stage"
+
+      - name: Attest signatures and updater manifest
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            sigs/*
+            latest.json
+
+      - name: Upload to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release upload "$TAG" "${RUNNER_TEMP}/release-upload/"* --clobber
