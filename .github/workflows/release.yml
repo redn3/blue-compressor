@@ -29,7 +29,9 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ env.TAG }}
+          # Use the commit that contains this workflow. The release tag input on a
+          # manual run is a different commit, and its copy of the check is not used.
+          ref: ${{ github.sha }}
           persist-credentials: false
       - name: Require reviewers on the release environment
         run: python3 .github/scripts/release_environment.py
@@ -204,6 +206,23 @@ jobs:
           fi
           find "$out" -name '*.sig' -delete
           test -z "$(find "$out" -name '*.sig' -print)"
+          # Digest list for this job. It is attested with the files, then checked
+          # again before anything is signed or published.
+          tmp=$(mktemp)
+          for f in "$out"/*; do
+            if [ ! -f "$f" ] || [ -L "$f" ]; then
+              continue
+            fi
+            base=$(basename "$f")
+            case "$base" in SHA256SUMS*) continue ;; esac
+            if command -v sha256sum >/dev/null 2>&1; then
+              (cd "$out" && sha256sum -- "$base")
+            else
+              (cd "$out" && shasum -a 256 -- "$base")
+            fi
+          done | LC_ALL=C sort -k2 > "$tmp"
+          test -s "$tmp"
+          mv "$tmp" "$out/SHA256SUMS-${{ matrix.slug }}"
           ls -l "$out"
 
       # Provenance for the built files only. Signatures do not exist yet.
@@ -228,8 +247,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: release
+    outputs:
+      signature_sha256: ${{ steps.sign.outputs.signature_sha256 }}
     permissions:
       actions: write
+      attestations: read
+      contents: read
     steps:
       - name: Install pinned Tauri CLI
         run: |
@@ -256,7 +279,44 @@ jobs:
           path: unsigned
           merge-multiple: true
 
+      - name: Check attested build digests
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd unsigned
+          count=$(find . -maxdepth 1 -type f -name 'SHA256SUMS-*' | wc -l)
+          test "$count" -eq 4
+          for sums in SHA256SUMS-*; do
+            sha256sum -c "$sums"
+          done
+          listed=$(mktemp)
+          found=$(mktemp)
+          awk '{print $2}' SHA256SUMS-* | sed 's/^\*//' | LC_ALL=C sort > "$listed"
+          find . -maxdepth 1 -type f ! -name 'SHA256SUMS-*' -printf '%f\n' | LC_ALL=C sort > "$found"
+          cmp "$listed" "$found"
+          verify() {
+            local f="$1"
+            local n
+            for n in 1 2 3 4 5 6; do
+              if gh attestation verify "$f" \
+                --repo "$GITHUB_REPOSITORY" \
+                --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+                --deny-self-hosted-runners; then
+                return 0
+              fi
+              echo "attestation not ready, attempt ${n}" >&2
+              sleep 10
+            done
+            echo "attestation does not match $f"
+            return 1
+          }
+          while IFS= read -r f; do
+            verify "$f"
+          done < <(find . -maxdepth 1 -type f -printf '%P\n' | LC_ALL=C sort)
+
       - name: Sign updater artifacts
+        id: sign
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -288,7 +348,19 @@ jobs:
             python3 -c 'import base64, pathlib, sys; text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8").strip(); raw = base64.b64decode(text, validate=True);  assert raw.startswith(b"untrusted comment:"), "not a Tauri updater signature"' "$sig"
             mv "$sig" "$out/$(basename "$sig")"
           done
-          test "$(find "$out" -type f | wc -l)" -eq 5
+          test "$(find "$out" -name '*.sig' -type f | wc -l)" -eq 5
+          tmp=$(mktemp)
+          for f in "$out"/*.sig; do
+            base=$(basename "$f")
+            (cd "$out" && sha256sum -- "$base")
+          done | LC_ALL=C sort -k2 > "$tmp"
+          mv "$tmp" "$out/SHA256SUMS"
+          (cd "$out" && sha256sum -c SHA256SUMS)
+          {
+            echo "signature_sha256<<BC_SIGNATURE_SHA256"
+            cat "$out/SHA256SUMS"
+            echo "BC_SIGNATURE_SHA256"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Upload signatures
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -310,7 +382,9 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ env.TAG }}
+          # Run the manifest script from this workflow commit. Notes are read
+          # from the tag as a file, not as a script.
+          ref: ${{ github.sha }}
           persist-credentials: false
       - name: Download build artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -326,9 +400,50 @@ jobs:
       - name: Stage release files and write latest.json
         env:
           GH_TOKEN: ${{ github.token }}
+          SIGNATURE_SHA256: ${{ needs.sign.outputs.signature_sha256 }}
         run: |
           set -euo pipefail
           v="${TAG#v}"
+          case "$TAG" in
+            v[0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "release tag must look like v1.0.1"; exit 1 ;;
+          esac
+          git fetch --depth=1 origin "refs/tags/${TAG}:refs/tags/${TAG}"
+          git show "${TAG}:.github/release-notes.md" > "${RUNNER_TEMP}/release-notes.md"
+          python3 -c 'import os, pathlib, sys; expected = os.environ["SIGNATURE_SHA256"].strip(); got = pathlib.Path("sigs/SHA256SUMS").read_text(encoding="utf-8").strip(); sys.exit(0 if expected and expected == got else "signature digests do not match the sign job")'
+          (
+            cd bundles
+            count=$(find . -maxdepth 1 -type f -name 'SHA256SUMS-*' | wc -l)
+            test "$count" -eq 4
+            for sums in SHA256SUMS-*; do
+              sha256sum -c "$sums"
+            done
+            listed=$(mktemp)
+            found=$(mktemp)
+            awk '{print $2}' SHA256SUMS-* | sed 's/^\*//' | LC_ALL=C sort > "$listed"
+            find . -maxdepth 1 -type f ! -name 'SHA256SUMS-*' -printf '%f\n' | LC_ALL=C sort > "$found"
+            cmp "$listed" "$found"
+          )
+          (cd sigs && sha256sum -c SHA256SUMS)
+          verify() {
+            local f="$1"
+            local n
+            for n in 1 2 3 4 5 6; do
+              if gh attestation verify "$f" \
+                --repo "$GITHUB_REPOSITORY" \
+                --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+                --deny-self-hosted-runners; then
+                return 0
+              fi
+              echo "attestation not ready, attempt ${n}" >&2
+              sleep 10
+            done
+            echo "attestation does not match $f"
+            return 1
+          }
+          while IFS= read -r f; do
+            verify "$f"
+          done < <(find bundles -maxdepth 1 -type f -printf '%p\n' | LC_ALL=C sort)
           stage="${RUNNER_TEMP}/release-upload"
           mkdir -p "$stage"
           bundles=(
@@ -371,7 +486,7 @@ jobs:
           done
           python3 .github/scripts/updater-manifest.py "$TAG" \
             "https://github.com/${{ github.repository }}/releases/download/$TAG" \
-            sigs .github/release-notes.md "${RUNNER_TEMP}/latest.json"
+            sigs "${RUNNER_TEMP}/release-notes.md" "${RUNNER_TEMP}/latest.json"
           python3 -c 'import json, sys; data = json.load(open(sys.argv[1], encoding="utf-8")); assert data.get("version") == sys.argv[2], "latest.json version does not match the tag"; assert data.get("platforms"), "latest.json has no platforms"' "${RUNNER_TEMP}/latest.json" "$v"
           cp -f "${RUNNER_TEMP}/latest.json" latest.json
           cp -f latest.json "$stage/latest.json"
