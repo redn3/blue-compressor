@@ -1,3 +1,9 @@
+**What's new in 1.0.1**
+- Release builds are clean, and updater signatures are created in a separate reviewed step.
+- Bundled ffmpeg downloads are checked against their checksums before packaging.
+- Release actions are pinned, and the built files include build provenance.
+- Yanked dependencies were updated.
+
 **What's new in 1.0.0**
 - **Blue Compressor 1.0**: the first official release. The beta label and the first-launch beta notice are gone.
 - A new README with a quick overview, download buttons and the main features.
